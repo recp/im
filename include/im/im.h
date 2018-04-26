@@ -8,6 +8,8 @@
 
 #include "common.h"
 
+typedef unsigned char ImByte;
+
 typedef enum ImFormat {
   IM_FORMAT_RGB  = 1,
   IM_FORMAT_RGBA = 2
