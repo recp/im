@@ -17,6 +17,7 @@ typedef uint16_t JPGMarker;
 #define JPG_SOF0 0xC0FF /* Baseline DCT                                     */
 #define JPG_SOF1 0xC1FF /* Extended sequential DCT                          */
 #define JPG_SOF2 0xC2FF /* Progressive DCT                                  */
+#define JPG_SOF3 0xC3FF /* Lossless (sequential)                            */
 
 /* Start Of Frame markers, differential, Huffman coding                     */
 #define JPG_SOF5  0xC5FF /* Differential sequential DCT                     */
@@ -35,5 +36,6 @@ typedef uint16_t JPGMarker;
 #define JPG_SOF15 0xCFFF /* Differential lossless (sequential)              */
 
 #define JPG_APPn(n) 0xE ## n ## FF
+#define JPG_SOFn(n) 0xC ## n ## FF
 
 #endif /* src_jpg_markers_h */
