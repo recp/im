@@ -66,16 +66,16 @@ void
 jpg_dqt(ImByte * __restrict pRaw,
         ImJpeg * __restrict jpg) {
   ImQuantTbl *dqt;
+  ImByte     *pRawEnd;
   uint16_t    len;
   uint8_t     precision, dest, tmp;
 
-  len   = jpg_read_uint16(pRaw);
-  pRaw += 2;
+  len     = jpg_read_uint16(pRaw);
+  pRawEnd = pRaw + len;
+  pRaw   += 2;
 
-  if (len <= 2)
+  if (pRawEnd == pRaw)
     return;
-
-  len -= 2;
 
   do {
     tmp       = pRaw[0];
@@ -87,20 +87,17 @@ jpg_dqt(ImByte * __restrict pRaw,
       continue;
 
     pRaw += 1;
-    len  -= 1;
     dqt   = &jpg->dqt[dest];
 
     /* 0: 8 bit, 1: 16 bit */
     if (!precision) {
       jpg_quant8(pRaw, dqt->qt);
       pRaw += 64;
-      len  -= 64;
     } else {
       jpg_quant16(pRaw, dqt->qt);
       pRaw += 128;
-      len  -= 128;
     }
 
     dqt->valid = true;
-  } while (len > 0);
+  } while (pRawEnd > pRaw);
 }
