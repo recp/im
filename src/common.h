@@ -14,6 +14,7 @@
 
 typedef struct ImQuantTbl {
   IM_ALIGN(16) uint16_t qt[64]; /* zig-zag order */
+  bool                  valid;
 } ImQuantTbl;
 
 typedef struct ImJpeg {
