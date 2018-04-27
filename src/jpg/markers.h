@@ -38,4 +38,6 @@ typedef uint16_t JPGMarker;
 #define JPG_APPn(n) 0xE ## n ## FF
 #define JPG_SOFn(n) 0xC ## n ## FF
 
+#define JPG_DQT 0xDBFF   /* Define quantization table(s)                    */
+
 #endif /* src_jpg_markers_h */

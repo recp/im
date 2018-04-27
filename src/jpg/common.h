@@ -33,13 +33,19 @@ jpg_read_uint16(ImByte *buff) {
 IM_INLINE
 bool
 jpg_is_app_marker(JPGMarker mrk) {
-  return JPG_APPn(0) == (JPG_APPn(0) & mrk);
+  return JPG_APPn(F) == (JPG_APPn(F) & mrk);
 }
 
 IM_INLINE
 bool
 jpg_is_sof_marker(JPGMarker mrk) {
-  return JPG_SOFn(0) == (JPG_SOFn(0) & mrk);
+  return JPG_SOFn(F) == (JPG_SOFn(F) & mrk);
+}
+
+IM_INLINE
+ImByte*
+jfif_dec_skip_ext(ImByte *raw) {
+  return raw + jpg_read_uint16(raw);
 }
 
 #endif /* jpg_common_h */

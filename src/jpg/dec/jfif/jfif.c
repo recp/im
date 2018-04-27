@@ -4,20 +4,16 @@
  */
 
 #include "jfif.h"
+#include "../quant.h"
 
 #include <assert.h>
 #include <stdlib.h>
 #include <stdio.h>
 
-IM_INLINE
-ImByte*
-jfif_dec_skip_ext(ImByte *raw) {
-  return raw + jpg_read_uint16(raw);
-}
-
 IM_HIDE
 void
 jfif_dec(ImByte *raw, ImByte *data) {
+  ImJpeg   *jpg;
   ImByte   *pRaw;
   JPGMarker mrk;
   uint16_t  APP0len, Xdensity, Ydensity;
@@ -65,9 +61,18 @@ jfif_dec(ImByte *raw, ImByte *data) {
     pRaw += 2;
   }
 
-  /* Frame */
+  jpg = calloc(1, sizeof(*jpg));
+  while (mrk != JPG_EOI && pRaw) {
+    switch (mrk) {
+      case JPG_DQT:
+        jpg_dqt(pRaw, jpg);
+        break;
 
-  /* No Frame, TODO: Add Errors? */
-  if (!jpg_is_sof_marker(mrk))
-    return;
+      default:
+        break;
+    }
+
+    /* TODO: */
+    break;
+  }
 }
