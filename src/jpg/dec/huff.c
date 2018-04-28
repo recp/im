@@ -16,7 +16,7 @@ jpg_huff(ImByte * __restrict pRaw,
   uint16_t len;
   uint8_t  Li, tc, th, tmp;
 
-  len     = jpg_read_uint16(pRaw);
+  len     = jpg_get_ui16(pRaw);
   pRawEnd = pRaw + len;
   pRaw   += 2;
 

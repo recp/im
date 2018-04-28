@@ -13,11 +13,11 @@ jpg_sof(ImByte * __restrict pRaw,
   uint8_t *comp, *pc, tmp;
   int      len, i, compcount, idx, ci;
 
-  len            = jpg_read_uint16(pRaw);
+  len            = jpg_get_ui16(pRaw);
   frm            = &jpg->frm;
   frm->precision = pRaw[2];
-  frm->height    = jpg_read_uint16(&pRaw[3]);
-  frm->width     = jpg_read_uint16(&pRaw[5]);
+  frm->height    = jpg_get_ui16(&pRaw[3]);
+  frm->width     = jpg_get_ui16(&pRaw[5]);
   frm->compcount = compcount = pRaw[7];
 
   /* Ci, Hi, Vi, Tqi */

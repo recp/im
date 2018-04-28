@@ -56,7 +56,7 @@ void
 jpg_quant16(ImByte * __restrict pRaw, uint16_t qt[64]) {
   int i;
   for (i = 0; i < 64; i++)
-    qt[i] = jpg_read_uint16(&pRaw[i]);
+    qt[i] = jpg_get_ui16(&pRaw[i]);
 }
 
 IM_HIDE
@@ -68,7 +68,7 @@ jpg_dqt(ImByte * __restrict pRaw,
   uint16_t    len;
   uint8_t     pq, tq, tmp;
 
-  len     = jpg_read_uint16(pRaw);
+  len     = jpg_get_ui16(pRaw);
   pRawEnd = pRaw + len;
   pRaw   += 2;
 
