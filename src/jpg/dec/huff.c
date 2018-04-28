@@ -26,6 +26,10 @@ jpg_huff(ImByte * __restrict pRaw,
     tc    = tmp >> 4;
     pRaw += 1;
 
+    /* invalid table location ? ignore it. */
+    if (th > 3)
+      continue;
+
     count = 0;
     for (i = 0; i < 16; i++) {
       if ((Li = pRaw[i])) {

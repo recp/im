@@ -66,26 +66,26 @@ jpg_dqt(ImByte * __restrict pRaw,
   ImQuantTbl *dqt;
   ImByte     *pRawEnd;
   uint16_t    len;
-  uint8_t     precision, dest, tmp;
+  uint8_t     pq, tq, tmp;
 
   len     = jpg_read_uint16(pRaw);
   pRawEnd = pRaw + len;
   pRaw   += 2;
 
   while (pRawEnd > pRaw) {
-    tmp       = pRaw[0];
-    dest      = tmp & 0x0F;
-    precision = tmp >> 4;
+    tmp   = pRaw[0];
+    tq    = tmp & 0x0F;
+    pq    = tmp >> 4;
+    pRaw += 1;
 
-    /* invalid Quant Table Location ? ignore it. */
-    if (dest > 3)
+    /* invalid table location ? ignore it. */
+    if (tq > 3)
       continue;
 
-    pRaw += 1;
-    dqt   = &jpg->dqt[dest];
+    dqt = &jpg->dqt[tq];
 
     /* 0: 8 bit, 1: 16 bit */
-    if (!precision) {
+    if (!pq) {
       jpg_quant8(pRaw, dqt->qt);
       pRaw += 64;
     } else {
