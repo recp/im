@@ -10,19 +10,32 @@ ImByte*
 jpg_sof(ImByte * __restrict pRaw,
         ImJpeg * __restrict jpg) {
   ImFrm   *frm;
-  uint16_t len;
+  uint8_t *comp, *pc, tmp;
+  int      len, i, compcount, idx, ci;
 
   len            = jpg_read_uint16(pRaw);
   frm            = &jpg->frm;
   frm->precision = pRaw[2];
   frm->height    = jpg_read_uint16(&pRaw[3]);
   frm->width     = jpg_read_uint16(&pRaw[5]);
-  frm->compcount = pRaw[7];
+  frm->compcount = compcount = pRaw[7];
 
   /* Ci, Hi, Vi, Tqi */
-  if (!frm->comp)
-    frm->comp = malloc(sizeof(uint8_t) * frm->compcount);
-  memcpy(frm->comp, &pRaw[8], sizeof(uint8_t) * frm->compcount * 3);
+  if (!(comp = frm->comp))
+    frm->comp = comp = malloc(frm->compcount);
+
+  /* TODO: id validation or fix ? */
+  for (i = 0; i < compcount; i++) {
+    idx   = 8 + i * 3;
+    ci    = pRaw[idx];
+    pc    = comp + 4 * ci;
+    tmp   = pRaw[idx + 1];
+
+    pc[0] = pRaw[idx];       /* Ci  */
+    pc[2] = tmp & 0x0F;      /* Vi  */
+    pc[1] = tmp >> 4;        /* Hi  */
+    pc[3] = pRaw[idx + 2];   /* Tqi */
+  }
 
   return pRaw + len;
 }
