@@ -72,10 +72,7 @@ jpg_dqt(ImByte * __restrict pRaw,
   pRawEnd = pRaw + len;
   pRaw   += 2;
 
-  if (pRawEnd == pRaw)
-    return pRaw;
-
-  do {
+  while (pRawEnd > pRaw) {
     tmp       = pRaw[0];
     dest      = tmp & 0x0F;
     precision = tmp >> 4;
@@ -97,7 +94,7 @@ jpg_dqt(ImByte * __restrict pRaw,
     }
 
     dqt->valid = true;
-  } while (pRawEnd > pRaw);
+  }
 
   return pRaw;
 }

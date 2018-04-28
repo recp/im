@@ -11,19 +11,16 @@ IM_HIDE
 ImByte*
 jpg_huff(ImByte * __restrict pRaw,
          ImJpeg * __restrict jpg) {
-  ImByte     *pRawEnd;
-  int32_t     i, count;
-  uint16_t    len;
-  uint8_t     Li, tc, th, tmp;
+  ImByte  *pRawEnd;
+  int32_t  i, count;
+  uint16_t len;
+  uint8_t  Li, tc, th, tmp;
 
   len     = jpg_read_uint16(pRaw);
   pRawEnd = pRaw + len;
   pRaw   += 2;
 
-  if (pRawEnd == pRaw)
-    return pRaw;
-
-  do {
+  while (pRawEnd > pRaw) {
     tmp   = pRaw[0];
     th    = tmp & 0x0F;
     tc    = tmp >> 4;
@@ -38,7 +35,9 @@ jpg_huff(ImByte * __restrict pRaw,
     }
 
     pRaw += 16 + count;
-  } while (pRawEnd > pRaw);
+
+    jpg->dht[tc][th].valid = true;
+  }
 
   return pRaw;
 }
