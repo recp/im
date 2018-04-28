@@ -17,8 +17,14 @@ typedef struct ImQuantTbl {
   bool                  valid;
 } ImQuantTbl;
 
+typedef struct ImHuffTbl {
+  IM_ALIGN(16) uint8_t huff[16][256];
+  bool                 valid;
+} ImHuffTbl;
+
 typedef struct ImJpeg {
   ImQuantTbl dqt[4];
+  ImHuffTbl  dht[2][4]; /* class | table */
 } ImJpeg;
 
 #endif /* src_common_h */

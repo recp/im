@@ -39,5 +39,6 @@ typedef uint16_t JPGMarker;
 #define JPG_SOFn(n) 0xC ## n ## FF
 
 #define JPG_DQT 0xDBFF   /* Define quantization table(s)                    */
+#define JPG_DHT 0xC4FF   /* Define Huffman table(s)                         */
 
 #endif /* src_jpg_markers_h */

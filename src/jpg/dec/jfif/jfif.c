@@ -5,6 +5,7 @@
 
 #include "jfif.h"
 #include "../quant.h"
+#include "../huff.h"
 
 #include <assert.h>
 #include <stdlib.h>
@@ -65,14 +66,19 @@ jfif_dec(ImByte *raw, ImByte *data) {
   while (mrk != JPG_EOI && pRaw) {
     switch (mrk) {
       case JPG_DQT:
-        jpg_dqt(pRaw, jpg);
+        pRaw = jpg_dqt(pRaw, jpg);
         break;
-
+      case JPG_DHT:
+        pRaw = jpg_huff(pRaw, jpg);
+        break;
+      case JPG_SOF0:
+        pRaw = jpg_bsdct(pRaw, jpg);
+        break;
       default:
-        break;
+        return;
     }
 
-    /* TODO: */
-    break;
+    mrk   = jpg_marker(pRaw);
+    pRaw += 2;
   }
 }

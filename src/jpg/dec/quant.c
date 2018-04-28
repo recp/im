@@ -4,8 +4,6 @@
  */
 
 #include "quant.h"
-#include <stdlib.h>
-#include <stdio.h>
 
 #if defined(__SSE__) || defined(__SSE2__)
 # include <emmintrin.h>
@@ -62,7 +60,7 @@ jpg_quant16(ImByte * __restrict pRaw, uint16_t qt[64]) {
 }
 
 IM_HIDE
-void
+ImByte*
 jpg_dqt(ImByte * __restrict pRaw,
         ImJpeg * __restrict jpg) {
   ImQuantTbl *dqt;
@@ -75,7 +73,7 @@ jpg_dqt(ImByte * __restrict pRaw,
   pRaw   += 2;
 
   if (pRawEnd == pRaw)
-    return;
+    return pRaw;
 
   do {
     tmp       = pRaw[0];
@@ -100,4 +98,6 @@ jpg_dqt(ImByte * __restrict pRaw,
 
     dqt->valid = true;
   } while (pRawEnd > pRaw);
+
+  return pRaw;
 }

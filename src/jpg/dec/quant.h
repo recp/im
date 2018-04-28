@@ -9,7 +9,7 @@
 #include "../common.h"
 
 IM_HIDE
-void
+ImByte*
 jpg_dqt(ImByte * __restrict pRaw,
         ImJpeg * __restrict jpg);
 
