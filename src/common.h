@@ -22,9 +22,18 @@ typedef struct ImHuffTbl {
   bool                 valid;
 } ImHuffTbl;
 
+typedef struct ImFrm {
+  uint16_t width;
+  uint16_t height;
+  uint8_t  precision;
+  uint8_t  compcount;
+  uint8_t *comp;
+} ImFrm;
+
 typedef struct ImJpeg {
   ImQuantTbl dqt[4];
   ImHuffTbl  dht[2][4]; /* class | table */
+  ImFrm      frm;
 } ImJpeg;
 
 #endif /* src_common_h */

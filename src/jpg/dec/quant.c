@@ -84,7 +84,7 @@ jpg_dqt(ImByte * __restrict pRaw,
 
     dqt = &jpg->dqt[tq];
 
-    /* 0: 8 bit, 1: 16 bit */
+    /* 0: 8 bit, 1: 16 bit | 8bit: LUMINANCE, 16bit: CHROMINANCE */
     if (!pq) {
       jpg_quant8(pRaw, dqt->qt);
       pRaw += 64;

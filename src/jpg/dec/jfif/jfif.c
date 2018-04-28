@@ -6,6 +6,7 @@
 #include "jfif.h"
 #include "../quant.h"
 #include "../huff.h"
+#include "../frame.h"
 
 #include <assert.h>
 #include <stdlib.h>
@@ -72,7 +73,23 @@ jfif_dec(ImByte *raw, ImByte *data) {
         pRaw = jpg_huff(pRaw, jpg);
         break;
       case JPG_SOF0:
-        pRaw = jpg_bsdct(pRaw, jpg);
+      case JPG_SOF1:
+      case JPG_SOF2:
+      case JPG_SOF3:
+
+      case JPG_SOF5:
+      case JPG_SOF6:
+      case JPG_SOF7:
+
+      case JPG_SOF8:
+      case JPG_SOF9:
+      case JPG_SOF10:
+      case JPG_SOF11:
+
+      case JPG_SOF13:
+      case JPG_SOF14:
+      case JPG_SOF15:
+        pRaw = jpg_sof(pRaw, jpg);
         break;
       default:
         return;
