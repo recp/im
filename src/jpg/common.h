@@ -19,14 +19,18 @@ jpg_marker_eq(ImByte *buff, JPGMarker marker) {
 IM_INLINE
 JPGMarker
 jpg_marker(ImByte *buff) {
-  return *(JPGMarker *)buff;
+  uint16_t val;
+  memcpy(&val, buff, 2);
+  return val;
 }
 
 IM_INLINE
 uint16_t
 jpg_get_ui16(ImByte *buff) {
   uint16_t val;
-  val = *(uint16_t *)buff;
+  /* use memcpy instead of dereference of ushort,
+     because of aligment warnings, errors */
+  memcpy(&val, buff, 2);
   return ntohs(val);
 }
 

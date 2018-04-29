@@ -27,7 +27,7 @@ typedef struct ImFrm {
   uint16_t height;
   uint8_t  precision;
   uint8_t  compcount;
-  uint8_t *comp;
+  uint8_t  comp[256][4];
 } ImFrm;
 
 typedef struct ImJpeg {

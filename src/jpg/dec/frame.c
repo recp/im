@@ -10,7 +10,7 @@ ImByte*
 jpg_sof(ImByte * __restrict pRaw,
         ImJpeg * __restrict jpg) {
   ImFrm   *frm;
-  uint8_t *comp, *pc, tmp, ci;
+  uint8_t (*comp)[4], *pc, tmp, ci;
   int      len, i, compcount, idx;
 
   len            = jpg_get_ui16(pRaw);
@@ -19,15 +19,13 @@ jpg_sof(ImByte * __restrict pRaw,
   frm->height    = jpg_get_ui16(&pRaw[3]);
   frm->width     = jpg_get_ui16(&pRaw[5]);
   frm->compcount = compcount = pRaw[7];
-
-  if (!(comp = frm->comp))
-    frm->comp = comp = realloc(frm->comp, compcount);
+  comp           = frm->comp;
 
   /* TODO: id validation or fix ? */
   for (i = 0; i < compcount; i++) {
     idx   = 8 + i * 3;
     ci    = pRaw[idx];
-    pc    = comp + 4 * ci;
+    pc    = comp[ci];
     tmp   = pRaw[idx + 1];
 
     pc[0] = ci;              /* Ci  */
