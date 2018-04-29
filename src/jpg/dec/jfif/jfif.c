@@ -23,7 +23,7 @@ jfif_dec(ImByte *raw, ImByte *data) {
   uint8_t   vmajor, vminor, units, Xthumb, Ythumb;
 
   pRaw    = raw;
-  APP0len = jpg_read_uint16(pRaw);
+  APP0len = jpg_get_ui16(pRaw);
   pRaw += 2;
 
   /* TODO: add options to get JPEG infos */
@@ -35,10 +35,10 @@ jfif_dec(ImByte *raw, ImByte *data) {
   units  = pRaw[3];
   pRaw += 3;
 
-  Xdensity = jpg_read_uint16(pRaw);
+  Xdensity = jpg_get_ui16(pRaw);
   pRaw += 2;
 
-  Ydensity = jpg_read_uint16(pRaw);
+  Ydensity = jpg_get_ui16(pRaw);
   pRaw += 2;
 
   Xthumb = pRaw[0];
@@ -91,11 +91,17 @@ jfif_dec(ImByte *raw, ImByte *data) {
       case JPG_SOF15:
         pRaw = jpg_sof(pRaw, jpg);
         break;
+      case JPG_SOS:
+        pRaw = jpg_sos(pRaw, jpg);
+        break;
       default:
-        return;
+        goto fr;
     }
 
     mrk   = jpg_marker(pRaw);
     pRaw += 2;
   }
+
+fr:
+  free(jpg);
 }

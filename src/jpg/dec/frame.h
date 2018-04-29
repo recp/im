@@ -13,4 +13,9 @@ ImByte*
 jpg_sof(ImByte * __restrict pRaw,
         ImJpeg * __restrict jpg);
 
+IM_HIDE
+ImByte*
+jpg_sos(ImByte * __restrict pRaw,
+        ImJpeg * __restrict jpg);
+
 #endif /* src_jpg_bsdct_h */

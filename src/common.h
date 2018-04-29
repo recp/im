@@ -30,10 +30,22 @@ typedef struct ImFrm {
   uint8_t  comp[256][4];
 } ImFrm;
 
+typedef struct ImScan {
+  uint16_t width;
+  uint16_t height;
+  uint8_t  startOfSpectral;
+  uint8_t  endOfSpectral;
+  uint8_t  apprxHi;
+  uint8_t  apprxLo;
+  uint8_t  compcount;
+  uint8_t *comp;
+} ImScan;
+
 typedef struct ImJpeg {
   ImQuantTbl dqt[4];
   ImHuffTbl  dht[2][4]; /* class | table */
   ImFrm      frm;
+  ImScan    *scan;
 } ImJpeg;
 
 #endif /* src_common_h */
