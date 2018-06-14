@@ -10,6 +10,6 @@
 
 IM_HIDE
 void
-jfif_dec(ImByte *raw, ImByte *data);
+jfif_dec(ImByte *raw, ImImage *im);
 
 #endif /* src_jpg_jfif_h */

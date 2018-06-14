@@ -14,7 +14,7 @@
 
 IM_HIDE
 void
-jfif_dec(ImByte *raw, ImByte *data) {
+jfif_dec(ImByte *raw, ImImage *im) {
   ImJpeg   *jpg;
   ImByte   *pRaw;
   JPGMarker mrk;
@@ -64,6 +64,8 @@ jfif_dec(ImByte *raw, ImByte *data) {
   }
 
   jpg = calloc(1, sizeof(*jpg));
+  jpg->im = im;
+
   while (mrk != JPG_EOI && pRaw) {
     switch (mrk) {
       case JPG_DQT:

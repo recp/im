@@ -9,7 +9,7 @@
 #include "../common.h"
 
 IM_HIDE
-void
-jpg_dec(ImByte *raw, ImByte *data);
+ImImage*
+jpg_dec(ImByte *raw);
 
 #endif /* src_jpg_dec_h */

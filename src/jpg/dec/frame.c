@@ -11,18 +11,22 @@ jpg_sof(ImByte * __restrict pRaw,
         ImJpeg * __restrict jpg) {
   ImFrm   *frm;
   uint8_t (*comp)[4], *pc, tmp, ci;
-  int      len, i, compcount, idx;
+  int      len, i, Nf, idx;
 
   len            = jpg_get_ui16(pRaw);
   frm            = &jpg->frm;
   frm->precision = pRaw[2];
   frm->height    = jpg_get_ui16(&pRaw[3]);
   frm->width     = jpg_get_ui16(&pRaw[5]);
-  frm->compcount = compcount = pRaw[7];
+  frm->Nf        = Nf = pRaw[7];
   comp           = frm->comp;
+  frm->hmax      = 0;
+  frm->vmax      = 0;
+
+  jpg->im->data  = malloc(Nf * frm->height * frm->width);
 
   /* if two IDs are same, last one will override first one */
-  for (i = 0; i < compcount; i++) {
+  for (i = 0; i < Nf; i++) {
     idx   = 8 + i * 3;
     ci    = pRaw[idx];
     pc    = comp[ci];
@@ -32,6 +36,9 @@ jpg_sof(ImByte * __restrict pRaw,
     pc[2] = tmp & 0x0F;      /* Vi  */
     pc[1] = tmp >> 4;        /* Hi  */
     pc[3] = pRaw[idx + 2];   /* Tqi */
+
+    frm->hmax = im_maxiu8(frm->hmax, pc[1]);
+    frm->vmax = im_maxiu8(frm->vmax, pc[2]);
   }
 
   return pRaw + len;
@@ -44,15 +51,15 @@ jpg_sos(ImByte * __restrict pRaw,
   ImScan  *scan;
   ImByte  *pRawEnd;
   uint8_t *comp, *pc, tmp;
-  int      len, i, compcount, idx;
+  int      len, i, Ns, idx;
 
-  len             = jpg_get_ui16(pRaw);
-  pRawEnd         = pRaw + len;
-  scan            = malloc(sizeof(*scan));
-  scan->compcount = compcount = pRaw[2];
-  scan->comp = comp = malloc(compcount * 3);
+  len        = jpg_get_ui16(pRaw);
+  pRawEnd    = pRaw + len;
+  scan       = calloc(1, sizeof(*scan));
+  scan->Ns   = Ns = pRaw[2];
+  scan->comp = comp = malloc(Ns * 3);
 
-  for (i = 0; i < compcount; i++) {
+  for (i = 0; i < Ns; i++) {
     idx   = 3 + i * 2;
     pc    = comp + 3 * i;
     tmp   = pRaw[idx + 1];
@@ -62,7 +69,7 @@ jpg_sos(ImByte * __restrict pRaw,
     pc[1] = tmp >> 4;   /* Tdj  */
   }
 
-  pRaw += 3 + compcount * 2;
+  pRaw += 3 + Ns * 2;
 
   scan->startOfSpectral = pRaw[0];
   scan->endOfSpectral   = pRaw[1];

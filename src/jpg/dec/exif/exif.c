@@ -7,6 +7,6 @@
 
 IM_HIDE
 void
-exif_dec(ImByte *raw, ImByte *data) {
+exif_dec(ImByte *raw, ImImage *im) {
 
 }

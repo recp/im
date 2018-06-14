@@ -22,6 +22,7 @@
 #  define IM_ALIGN(X) __attribute((aligned(X)))
 #endif
 
+#include <stdlib.h>
 #include <stdint.h>
 #include <stdbool.h>
 

@@ -18,16 +18,21 @@ typedef struct ImQuantTbl {
 } ImQuantTbl;
 
 typedef struct ImHuffTbl {
-  IM_ALIGN(16) uint8_t huff[16][256];
-  bool                 valid;
+  IM_ALIGN(16) uint8_t  huffval[256];
+  IM_ALIGN(16) int32_t  valptr[16];
+  IM_ALIGN(16) int32_t  maxcode[16];
+  IM_ALIGN(16) int32_t  delta[16]; /* VALPTR(I) - MINCODE(I) */
+  bool                  valid;
 } ImHuffTbl;
 
 typedef struct ImFrm {
   uint16_t width;
   uint16_t height;
   uint8_t  precision;
-  uint8_t  compcount;
+  uint8_t  Nf;
   uint8_t  comp[256][4];
+  uint8_t  hmax;
+  uint8_t  vmax;
 } ImFrm;
 
 typedef struct ImScan {
@@ -37,8 +42,12 @@ typedef struct ImScan {
   uint8_t  endOfSpectral;
   uint8_t  apprxHi;
   uint8_t  apprxLo;
-  uint8_t  compcount;
+  uint8_t  Ns;
   uint8_t *comp;
+  uint8_t  offword;
+  int32_t  cnt;
+  uint8_t  b;
+  ImByte *pRaw;
 } ImScan;
 
 typedef struct ImJpeg {
@@ -46,6 +55,14 @@ typedef struct ImJpeg {
   ImHuffTbl  dht[2][4]; /* class | table */
   ImFrm      frm;
   ImScan    *scan;
+  ImImage   *im;
 } ImJpeg;
 
+IM_INLINE
+uint8_t
+im_maxiu8(uint8_t a, uint8_t b) {
+  if (a > b)
+    return a;
+  return b;
+}
 #endif /* src_common_h */

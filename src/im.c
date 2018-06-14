@@ -17,8 +17,7 @@
 IM_EXPORT
 ImImage*
 im_load(const char * __restrict path) {
-  ImImage    *image;
-  ImByte     *raw, *data;
+  ImByte     *raw;
   FILE       *infile;
   size_t      blksize;
   size_t      fsize;
@@ -47,15 +46,12 @@ im_load(const char * __restrict path) {
   fcontents_size = sizeof(char) * fsize;
 
   raw  = malloc(fcontents_size + 1);
-  data = malloc(fcontents_size + 1);
+
   assert(raw && "malloc failed");
 
   memset(raw + fcontents_size, '\0', 1);
 
   total_read = 0;
-
-  image = calloc(1, sizeof(*image));
-  image->data = data;
 
   do {
     if ((fcontents_size - total_read) < blksize)
@@ -72,9 +68,7 @@ im_load(const char * __restrict path) {
   fclose(infile);
 
   /* decode, this process will be optimized after decoding is done */
-  jpg_dec(raw, data);
-
-  return image;
+  return jpg_dec(raw);
 err:
   return NULL;
 }
