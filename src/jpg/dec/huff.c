@@ -6,6 +6,7 @@
 #include "huff.h"
 #include <stdlib.h>
 #include <stdio.h>
+#include <math.h>
 
 /* Annex C */
 IM_HIDE
@@ -79,11 +80,11 @@ jpg_nextbit(ImScan * __restrict scan) {
     if (b == 0xFF) {
       b2 = *++scan->pRaw;
 
-      if (b2 == 0) {
+      if (b2 != 0) {
         if (b2 == JPG_DNL)
-          printf("TODO: process DNL and terminate scan");
+          printf("TODO, nextbit: process DNL and terminate scan\n");
         else
-          printf("TODO: process error");
+          printf("TODO, nextbit: process error\n");
       }
     }
   }
@@ -153,7 +154,8 @@ uint8_t
 jpg_extend(uint8_t v, uint8_t t) {
   uint8_t vt;
 
-  vt = ipow(2, t - 1);
+  /* use ipow ? */
+  vt = powf(2, t - 1);
   if (v < vt) {
     vt = ((-1u) << t) + 1;
     v  = v + vt;
