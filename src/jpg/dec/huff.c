@@ -170,34 +170,40 @@ jpg_huff(ImByte * __restrict pRaw,
          ImJpeg * __restrict jpg) {
   ImByte    *pRawEnd;
   ImHuffTbl *huff;
-  uint16_t   len;
+  uint16_t   len, count;
   uint8_t    i, Li, tc, th, tmp;
 
   len     = jpg_get_ui16(pRaw);
   pRawEnd = pRaw + len;
   pRaw   += 2;
 
-  tmp     = pRaw[0];
-  th      = tmp & 0x0F;
-  tc      = tmp >> 4;
-  pRaw   += 1;
+  while (pRawEnd > pRaw) {
+    tmp     = pRaw[0];
+    th      = tmp & 0x0F;
+    tc      = tmp >> 4;
+    pRaw   += 1;
 
-  /* invalid table location ? ignore it. */
-  if (th > 3)
-    return pRawEnd;
+    /* invalid table location ? ignore it. */
+    if (th > 3)
+      return pRawEnd;
 
-  huff = &jpg->dht[tc][th];
+    huff = &jpg->dht[tc][th];
 
-  memset(huff->huffval,  0, sizeof(*huff->huffval) * 256);
-  memset(huff->maxcode, -1, sizeof(*huff->maxcode) * 16);
-  memset(huff->delta,    0, sizeof(*huff->delta)   * 16);
+    memset(huff->huffval,  0, sizeof(*huff->huffval) * 256);
+    memset(huff->maxcode, -1, sizeof(*huff->maxcode) * 16);
+    memset(huff->delta,    0, sizeof(*huff->delta)   * 16);
 
-  jpg_huffcodes(pRaw, huff);
+    jpg_huffcodes(pRaw, huff);
 
-  for (i = 0; i < 16; i++) {
-    if ((Li = pRaw[i])) {
-      memcpy(huff->huffval + i, pRaw + 16 + i, Li);
+    count = 0;
+    for (i = 0; i < 16; i++) {
+      if ((Li = pRaw[i])) {
+        memcpy(huff->huffval + i, pRaw + 16 + i, Li);
+        count += Li;
+      }
     }
+
+    pRaw += 16 + count;
   }
 
   return pRawEnd;
