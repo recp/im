@@ -65,4 +65,25 @@ im_maxiu8(uint8_t a, uint8_t b) {
     return a;
   return b;
 }
+
+IM_INLINE
+uint8_t
+im_1bit(ImByte * __restrict pbyte,
+        int32_t             offword) {
+  return (pbyte[0] & offword) == offword;
+}
+
+//uint32_t
+//im_bits(ImByte * __restrict pbyte,
+//        int32_t             off,
+//        int32_t             count) {
+//  int32_t i;
+//
+//  for (i = 0; i < count; i++) {
+//    
+//  }
+//
+//  return (pbyte[0] & offword) == offword;
+//}
+
 #endif /* src_common_h */

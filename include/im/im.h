@@ -19,6 +19,9 @@ typedef enum ImFormat {
 
 typedef struct ImImage {
   void    *data;
+  size_t   len;
+  size_t   width;
+  size_t   height;
   ImFormat format;
 } ImImage;
 

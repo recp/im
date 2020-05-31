@@ -4,6 +4,8 @@
  */
 
 #include "frame.h"
+#include "scan.h"
+#include <stdio.h>
 
 IM_HIDE
 ImByte*
@@ -13,17 +15,20 @@ jpg_sof(ImByte * __restrict pRaw,
   uint8_t (*comp)[4], *pc, tmp, ci;
   int      len, i, Nf, idx;
 
-  len            = jpg_get_ui16(pRaw);
-  frm            = &jpg->frm;
-  frm->precision = pRaw[2];
-  frm->height    = jpg_get_ui16(&pRaw[3]);
-  frm->width     = jpg_get_ui16(&pRaw[5]);
-  frm->Nf        = Nf = pRaw[7];
-  comp           = frm->comp;
-  frm->hmax      = 0;
-  frm->vmax      = 0;
+  len             = jpg_get_ui16(pRaw);
+  frm             = &jpg->frm;
+  frm->precision  = pRaw[2];
+  frm->height     = jpg_get_ui16(&pRaw[3]);
+  frm->width      = jpg_get_ui16(&pRaw[5]);
+  frm->Nf         = Nf = pRaw[7];
+  comp            = frm->comp;
+  frm->hmax       = 0;
+  frm->vmax       = 0;
 
-  jpg->im->data  = malloc(Nf * frm->height * frm->width);
+  jpg->im->data   = malloc(Nf * frm->height * frm->width);
+  jpg->im->width  = frm->width;
+  jpg->im->height = frm->height;
+  jpg->im->len    = Nf * frm->height * frm->width;
 
   /* if two IDs are same, last one will override first one */
   for (i = 0; i < Nf; i++) {
@@ -79,5 +84,13 @@ jpg_sos(ImByte * __restrict pRaw,
 
   jpg->scan = scan;
 
+  /* interleaved */
+  if (Ns > 1) {
+    pRawEnd = jpg_scan_intr(pRawEnd, jpg, scan);
+  } else {
+
+  }
+
+  /* next sos or EOI */
   return pRawEnd;
 }

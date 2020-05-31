@@ -18,4 +18,16 @@ ImByte*
 jpg_sos(ImByte * __restrict pRaw,
         ImJpeg * __restrict jpg);
 
+IM_HIDE
+ImByte*
+jpg_scan(ImByte * __restrict pRaw,
+         ImJpeg * __restrict jpg,
+         ImScan * __restrict scan);
+
+IM_HIDE
+ImByte*
+jpg_scan_intr(ImByte * __restrict pRaw,
+              ImJpeg * __restrict jpg,
+              ImScan * __restrict scan);
+
 #endif /* src_jpg_bsdct_h */
