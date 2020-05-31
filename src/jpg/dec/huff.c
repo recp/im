@@ -178,10 +178,10 @@ jpg_huff(ImByte * __restrict pRaw,
   pRaw   += 2;
 
   while (pRawEnd > pRaw) {
-    tmp     = pRaw[0];
-    th      = tmp & 0x0F;
-    tc      = tmp >> 4;
-    pRaw   += 1;
+    tmp   = pRaw[0];
+    th    = tmp & 0x0F;
+    tc    = tmp >> 4;
+    pRaw += 1;
 
     /* invalid table location ? ignore it. */
     if (th > 3)

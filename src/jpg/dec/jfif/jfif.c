@@ -24,7 +24,7 @@ jfif_dec(ImByte *raw, ImImage *im) {
 
   pRaw    = raw;
   APP0len = jpg_get_ui16(pRaw);
-  pRaw += 2;
+  pRaw   += 2;
 
   /* TODO: add options to get JPEG infos */
   memcpy(identifier, pRaw, 5);
@@ -33,17 +33,17 @@ jfif_dec(ImByte *raw, ImImage *im) {
   vmajor = pRaw[0];
   vminor = pRaw[1];
   units  = pRaw[3];
-  pRaw += 3;
+  pRaw  += 3;
 
   Xdensity = jpg_get_ui16(pRaw);
-  pRaw += 2;
+  pRaw    += 2;
 
   Ydensity = jpg_get_ui16(pRaw);
-  pRaw += 2;
+  pRaw    += 2;
 
   Xthumb = pRaw[0];
   Ythumb = pRaw[1];
-  pRaw += 2 + Xthumb * Ythumb;
+  pRaw  += 2 + Xthumb * Ythumb;
 
   /* Next Marker */
   mrk   = jpg_marker(pRaw);
@@ -63,7 +63,7 @@ jfif_dec(ImByte *raw, ImImage *im) {
     pRaw += 2;
   }
 
-  jpg = calloc(1, sizeof(*jpg));
+  jpg     = calloc(1, sizeof(*jpg));
   jpg->im = im;
 
   while (mrk != JPG_EOI && pRaw) {
@@ -104,6 +104,8 @@ jfif_dec(ImByte *raw, ImImage *im) {
     pRaw += 2;
   }
 
+
 fr:
+    assert(mrk == JPG_EOI);
   free(jpg);
 }

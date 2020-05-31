@@ -26,8 +26,7 @@ jpg_dec(ImByte *raw) {
   if (!jpg_marker_eq(pRaw, JPG_SOI))
     return NULL;
 
-  im = calloc(1, sizeof(*im));
-
+  im    = calloc(1, sizeof(*im));
   pRaw += JPP_MARKER_SIZE;
 
   /* Frame */

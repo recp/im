@@ -43,5 +43,6 @@ typedef uint16_t JPGMarker;
 #define JPG_SOS 0xDAFF   /* Start of scan                                   */
 
 #define JPG_DNL 0xDC     /* DNL */
+#define JPG_ZRL 0x0F
 
 #endif /* src_jpg_markers_h */

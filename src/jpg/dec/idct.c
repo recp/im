@@ -45,7 +45,7 @@ IM_HIDE
 void
 jpg_idct(int16_t * __restrict blk) {
   int x, y, x0, x1, x2, x3, x4, x5, x6, x7, x8,
-  y0, y1, y2, y3, y4, y5, y6, y7, y8;
+            y0, y1, y2, y3, y4, y5, y6, y7, y8;
 
   /* Horizontal 1-D IDCT. */
   for (y = 0; y < 8; y++) {
@@ -66,41 +66,41 @@ jpg_idct(int16_t * __restrict blk) {
       return;
     }
 
-    x0 = (blk[y8 + 0] << 11) + 128;
-    x1 = blk[y8 + 4] << 11;
-    x2 = blk[y8 + 6];
-    x3 = blk[y8 + 2];
-    x4 = blk[y8 + 1];
-    x5 = blk[y8 + 7];
-    x6 = blk[y8 + 5];
-    x7 = blk[y8 + 3];
+    x0  = (blk[y8 + 0] << 11) + 128;
+    x1  = blk[y8 + 4] << 11;
+    x2  = blk[y8 + 6];
+    x3  = blk[y8 + 2];
+    x4  = blk[y8 + 1];
+    x5  = blk[y8 + 7];
+    x6  = blk[y8 + 5];
+    x7  = blk[y8 + 3];
 
     /* stage 1 */
-    x8 = w7 * (x4 + x5);
-    x4 = x8 + w1mw7 * x4;
-    x5 = x8 - w1pw7 * x5;
-    x8 = w3 * (x6 + x7);
-    x6 = x8 - w3mw5 * x6;
-    x7 = x8 - w3pw5 * x7;
+    x8  = w7 * (x4 + x5);
+    x4  = x8 + w1mw7 * x4;
+    x5  = x8 - w1pw7 * x5;
+    x8  = w3 * (x6 + x7);
+    x6  = x8 - w3mw5 * x6;
+    x7  = x8 - w3pw5 * x7;
 
     /* stage 2 */
-    x8 = x0 + x1;
+    x8  = x0 + x1;
     x0 -= x1;
-    x1 = w6 * (x3 + x2);
-    x2 = x1 - w2pw6 * x2;
-    x3 = x1 + w2mw6 * x3;
-    x1 = x4 + x6;
+    x1  = w6 * (x3 + x2);
+    x2  = x1 - w2pw6 * x2;
+    x3  = x1 + w2mw6 * x3;
+    x1  = x4 + x6;
     x4 -= x6;
-    x6 = x5 + x7;
+    x6  = x5 + x7;
     x5 -= x7;
 
     /* stage 3 */
-    x7 = x8 + x3;
+    x7  = x8 + x3;
     x8 -= x3;
-    x3 = x0 + x2;
+    x3  = x0 + x2;
     x0 -= x2;
-    x2 = (r2 * (x4 + x5) + 128) >> 8;
-    x4 = (r2 * (x4 - x5) + 128) >> 8;
+    x2  = (r2 * (x4 + x5) + 128) >> 8;
+    x4  = (r2 * (x4 - x5) + 128) >> 8;
 
     /* stage 4 */
     blk[y8 + 0] = (x7 + x1) >> 8;
