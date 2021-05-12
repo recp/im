@@ -4,6 +4,10 @@ Image loader library to fast load images, it will be optimized for render engine
 
 It will provide lot of options, wait until first release. 
 
+Companion Libaries:
+
+- [filt: Image Filter](https://github.com/recp/filt)
+
 TODO
 -----
 
