@@ -8,4 +8,4 @@ TODO
 -----
 
 - [ ] JPEG Decoder (In Progress)
-- [ ] PNG Decoder
+- [ ] PNG Decoder (In Progress)
