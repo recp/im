@@ -111,3 +111,8 @@ test/.libs/*
 test/tests
 * copy.*
 *.o
+imtest/*
+imtest*
+im-test/*
+ImageViewer/*
+ImageViewer*
