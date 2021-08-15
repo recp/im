@@ -18,6 +18,7 @@
 #include "../quant.h"
 #include "../huff.h"
 #include "../frame.h"
+#include "../com.h"
 
 #include <assert.h>
 #include <stdlib.h>
@@ -54,7 +55,7 @@ jfif_dec(ImByte *raw, ImImage *im) {
 
   Xthumb = pRaw[0];
   Ythumb = pRaw[1];
-  pRaw  += 2 + Xthumb * Ythumb;
+  pRaw  += 2 + Xthumb * Ythumb * 3;
 
   /* Next Marker */
   mrk   = jpg_marker(pRaw);
@@ -67,7 +68,7 @@ jfif_dec(ImByte *raw, ImImage *im) {
     pRaw += 2;
   }
 
-  /* skip other APPn for now */
+  /* skip other APPn   for now */
   while (jpg_is_app_marker(mrk)) {
     pRaw  = jfif_dec_skip_ext(pRaw);
     mrk   = jpg_marker(pRaw);
@@ -120,6 +121,6 @@ jfif_dec(ImByte *raw, ImImage *im) {
 
 
 fr:
-    assert(mrk == JPG_EOI);
+  assert(mrk == JPG_EOI);
   free(jpg);
 }
