@@ -107,6 +107,9 @@ jfif_dec(ImByte *raw, ImImage *im) {
       case JPG_SOS:
         pRaw = jpg_sos(pRaw, jpg);
         break;
+      case JPG_COM:
+        pRaw = jpg_com(pRaw, jpg);
+        break;
       default:
         goto fr;
     }

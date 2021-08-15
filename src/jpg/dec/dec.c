@@ -40,7 +40,7 @@ jpg_dec(ImByte *raw) {
   im    = calloc(1, sizeof(*im));
   pRaw += JPP_MARKER_SIZE;
 
-  /* Frame */
+  /* Find APPn(0) */
   mrk   = jpg_marker(pRaw);
   pRaw += JPP_MARKER_SIZE;
 

@@ -56,4 +56,6 @@ typedef uint16_t JPGMarker;
 #define JPG_DNL 0xDC     /* DNL */
 #define JPG_ZRL 0x0F
 
+#define JPG_COM 0xFEFF   /* COM: Comment segment */
+
 #endif /* src_jpg_markers_h */

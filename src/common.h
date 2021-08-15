@@ -61,12 +61,19 @@ typedef struct ImScan {
   ImByte *pRaw;
 } ImScan;
 
+typedef struct ImComment {
+  struct ImComment *next;
+  uint16_t          len;
+  ImByte            buff[];
+} ImComment;
+
 typedef struct ImJpeg {
   ImQuantTbl dqt[4];
   ImHuffTbl  dht[2][4]; /* class | table */
   ImFrm      frm;
   ImScan    *scan;
   ImImage   *im;
+  ImComment *comments;
 } ImJpeg;
 
 IM_INLINE
