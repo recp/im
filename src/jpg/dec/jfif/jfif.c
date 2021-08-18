@@ -112,6 +112,7 @@ jfif_dec(ImByte *raw, ImImage *im) {
         pRaw = jpg_com(pRaw, jpg);
         break;
       default:
+        /* unknown marker */
         goto fr;
     }
 
