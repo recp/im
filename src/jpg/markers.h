@@ -21,9 +21,6 @@ typedef uint16_t JPGMarker;
 
 #define JPP_MARKER_SIZE 2
 
-#define JPG_SOI  0xD8FF
-#define JPG_EOI  0xD9FF
-
 /* Start Of Frame markers, non-differential, Huffman coding                 */
 #define JPG_SOF0 0xC0FF /* Baseline DCT                                     */
 #define JPG_SOF1 0xC1FF /* Extended sequential DCT                          */
@@ -46,16 +43,36 @@ typedef uint16_t JPGMarker;
 #define JPG_SOF14 0xCEFF /* Differential progressive DCT                    */
 #define JPG_SOF15 0xCFFF /* Differential lossless (sequential)              */
 
-#define JPG_APPn(n) 0xE ## n ## FF
-#define JPG_SOFn(n) 0xC ## n ## FF
-
-#define JPG_DQT 0xDBFF   /* Define quantization table(s)                    */
+/* Huffman table specification */
 #define JPG_DHT 0xC4FF   /* Define Huffman table(s)                         */
-#define JPG_SOS 0xDAFF   /* Start of scan                                   */
 
-#define JPG_DNL 0xDC     /* DNL */
-#define JPG_ZRL 0x0F
+/* Arithmetic coding conditioning specification */
+#define JPG_DAC 0xCCFF   /* Define arithmetic coding conditioning(s)        */
 
-#define JPG_COM 0xFEFF   /* COM: Comment segment */
+/* Restart interval termination */
+#define JPG_RST(m) 0xD ## m ## FF       /* Restart with modulo 8 count “m”  */
+
+/* Other markers */
+#define JPG_SOI  0xD8FF  /* Start of image                                  */
+#define JPG_EOI  0xD9FF  /* End of image                                    */
+#define JPG_SOS  0xDAFF  /* Start of scan                                   */
+#define JPG_DQT  0xDBFF  /* Define quantization table(s)                    */
+#define JPG_DNL  0xDCFF  /* Define number of lines                          */
+#define JPG_DRI  0xDDFF  /* Define restart interval                         */
+#define JPG_DHP  0xDDFF  /* Define hierarchical progression                 */
+#define JPG_EXP  0xDDFF  /* Expand reference component(s)                   */
+#define JPG_COM  0xFEFF  /* COM: Comment segment                            */
+
+#define JPG_APPn(n) 0xE ## n ## FF  /* Reserved for application segments    */
+#define JPG_JPGn(n) 0xF ## n ## FF  /* Reserved for JPEG extensions         */
+#define JPG_SOFn(n) 0xC ## n ## FF  /* Start Of Frame                       */
+
+/* Reserved markers */
+#define JPG_TEM  0x01FF
+#define JPG_RES  0x02FF
+
+/*  */
+
+#define JPG_ZRL  0x0FFF
 
 #endif /* src_jpg_markers_h */
