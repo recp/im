@@ -84,7 +84,7 @@ jfif_dec(ImByte *raw, ImImage *im) {
         pRaw = jpg_dqt(pRaw, jpg);
         break;
       case JPG_DHT:
-        pRaw = jpg_huff(pRaw, jpg);
+        pRaw = jpg_dht(pRaw, jpg);
         break;
       case JPG_SOF0:
       case JPG_SOF1:

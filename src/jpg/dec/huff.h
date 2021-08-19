@@ -21,7 +21,7 @@
 
 IM_HIDE
 ImByte*
-jpg_huff(ImByte * __restrict pRaw,
+jpg_dht(ImByte * __restrict pRaw,
          ImJpeg * __restrict jpg);
 
 uint8_t

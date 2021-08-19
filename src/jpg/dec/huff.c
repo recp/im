@@ -177,8 +177,8 @@ jpg_extend(uint8_t v, uint8_t t) {
 
 IM_HIDE
 ImByte*
-jpg_huff(ImByte * __restrict pRaw,
-         ImJpeg * __restrict jpg) {
+jpg_dht(ImByte * __restrict pRaw,
+        ImJpeg * __restrict jpg) {
   ImByte    *pRawEnd;
   ImHuffTbl *huff;
   uint16_t   len, count;
