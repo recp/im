@@ -78,6 +78,10 @@ jfif_dec(ImByte *raw, ImImage *im) {
   jpg     = calloc(1, sizeof(*jpg));
   jpg->im = im;
 
+#if DEBUG
+  printf("Found Marker: 0x%X\n", mrk);
+#endif
+
   while (mrk != JPG_EOI && pRaw) {
     switch (mrk) {
       case JPG_DQT:
@@ -111,9 +115,10 @@ jfif_dec(ImByte *raw, ImImage *im) {
       case JPG_COM:
         pRaw = jpg_com(pRaw, jpg);
         break;
-      default:
-        /* unknown marker */
-        goto fr;
+      default: {
+        /* unknown marker, skip it */
+        pRaw += jpg_get_ui16(pRaw);
+      }
     }
 
     mrk   = jpg_marker(pRaw);
