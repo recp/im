@@ -51,17 +51,21 @@ jpg_huffcodes(ImByte    * __restrict pRaw,
   k  = code = 0;
   si = huffsizes[0];
 
-  while (huffsizes[k] != 0) {
+  /* TODO: Infinite loop? */
+  for (;;) {
     do {
-      do {
-        huffcodes[k] = code;
-        code++;
-        k++;
-      } while (huffsizes[k] == si);
+      huffcodes[k] = code;
+      code++;
+      k++;
+    } while (huffsizes[k] == si);
+    
+    if (huffsizes[k] == 0)
+      break;
 
+    do {
       code <<= 1;
       si++;
-    } while (huffsizes[k] == si);
+    } while (huffsizes[k] != si);
   }
 
   /* Decoder Tables */
@@ -69,7 +73,7 @@ jpg_huffcodes(ImByte    * __restrict pRaw,
     Li = pRaw[i];
 
     if (Li != 0) {
-      huff->delta[i]    = j - huffcodes[j];
+      huff->delta[i]   = j - huffcodes[j];
       j               += Li - 1;
       huff->maxcode[i] = huffcodes[j];
       j++;
