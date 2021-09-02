@@ -74,6 +74,7 @@ jpg_sos(ImByte * __restrict pRaw,
   scan       = calloc(1, sizeof(*scan));
   scan->Ns   = Ns = pRaw[2];
   scan->comp = comp = malloc(Ns * 3);
+  scan->jpg  = jpg;
 
   for (i = 0; i < Ns; i++) {
     idx   = 3 + i * 2;

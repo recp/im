@@ -20,7 +20,7 @@
 #include "../common.h"
 
 IM_HIDE
-ImImage*
-jpg_dec(ImByte *raw);
+void
+jpg_dec(ImJpeg *jpg, ImByte *raw);
 
 #endif /* src_jpg_dec_h */

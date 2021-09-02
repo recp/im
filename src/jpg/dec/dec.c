@@ -25,9 +25,8 @@
 #include "exif/exif.h"
 
 IM_HIDE
-ImImage*
-jpg_dec(ImByte *raw) {
-  ImImage  *im;
+void
+jpg_dec(ImJpeg *jpg, ImByte *raw) {
   ImByte   *pRaw;
   JPGMarker mrk;
 
@@ -35,9 +34,8 @@ jpg_dec(ImByte *raw) {
 
   /* No jpeg */
   if (!jpg_marker_eq(pRaw, JPG_SOI))
-    return NULL;
+    return;
 
-  im    = calloc(1, sizeof(*im));
   pRaw += JPP_MARKER_SIZE;
 
   /* Find APPn(0) */
@@ -47,16 +45,14 @@ jpg_dec(ImByte *raw) {
   switch (mrk) {
     /* we have found JFIF file */
     case JPG_APPn(0):
-      jfif_dec(pRaw, im);
+      jfif_dec(pRaw, jpg);
       break;
     /* we have found EXIF file */
     case JPG_APPn(1):
-      exif_dec(pRaw, im);
+      exif_dec(pRaw, jpg);
       break;
     default:
       assert("unsupported file!");
       break;
   }
-
-  return im;
 }

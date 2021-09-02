@@ -26,8 +26,7 @@
 
 IM_HIDE
 void
-jfif_dec(ImByte *raw, ImImage *im) {
-  ImJpeg   *jpg;
+jfif_dec(ImByte *raw, ImJpeg *jpg) {
   ImByte   *pRaw;
   JPGMarker mrk;
   uint16_t  APP0len, Xdensity, Ydensity;
@@ -74,9 +73,6 @@ jfif_dec(ImByte *raw, ImImage *im) {
     mrk   = jpg_marker(pRaw);
     pRaw += 2;
   }
-
-  jpg     = calloc(1, sizeof(*jpg));
-  jpg->im = im;
 
 #if DEBUG
   printf("Found Marker: 0x%X\n", mrk);

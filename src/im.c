@@ -40,6 +40,7 @@ im_on_worker(void *argv) {
   ImByte       *raw;
   FILE         *infile;
   ImImage      *im;
+  ImJpeg       *jpg;
   size_t        blksize;
   size_t        fsize;
   size_t        fcontents_size;
@@ -91,10 +92,13 @@ im_on_worker(void *argv) {
   fclose(infile);
 
   /* decode, this process will be optimized after decoding is done */
-  im          = calloc(1, sizeof(*im));
+  im      = calloc(1, sizeof(*im));
+  jpg     = calloc(1, sizeof(*jpg));
+  jpg->im = im;
+
   arg->image  = im;
 
-  jpg_dec(im, raw);
+  jpg_dec(jpg, raw);
 
 err:
   arg->failed = true;
