@@ -130,8 +130,6 @@ jpg_scan_intr(ImByte * __restrict pRaw,
 
   for (i = 0; i < mcuy; i++) {
     for (j = 0; j < mcux; j++) {
-      scan->cnt = 0;
-
       for (k = 0; k < scan->Ns; k++) {
         ImQuantTbl     *qt;
         ImComponentSel *icomp;
