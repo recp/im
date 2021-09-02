@@ -220,7 +220,7 @@ int32_t
 jpg_extend(int32_t v, int32_t t) {
   /* vt = ipow(2, t - 1); */
 
-  if (v < (1 << (t - 1)))
+  if (v < (1u << (t - 1)))
     return v + (-1u << t) + 1;
 
   return v;
