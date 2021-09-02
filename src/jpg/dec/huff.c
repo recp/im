@@ -166,7 +166,7 @@ jpg_decode(ImScan    * __restrict scan,
   j = code + huff->delta[i]; /* delta = j - mincode[i] */
   
 #if DEBUG
-  printf("Huff: %#1X\n", huff->huffval[j]);
+  printf("Decoded Huff: %#1X\n", huff->huffval[j]);
 #endif
 
   return huff->huffval[j];
