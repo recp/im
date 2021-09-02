@@ -53,18 +53,13 @@ typedef struct ImComponentSel {
 } ImComponentSel;
 
 typedef struct ImFrm {
-  uint16_t    width;
-  uint16_t    height;
-  uint8_t     precision;
-  uint8_t     Nf;
-  uint8_t     comp[256][4];
-  uint8_t     hmax;
-  uint8_t     vmax;
-
-  struct {
-    ImComponent comp[4];
-    uint32_t    ncomp;
-  } compo;
+  uint16_t      width;
+  uint16_t      height;
+  uint8_t       precision;
+  uint8_t       Nf;
+  uint8_t       hmax;
+  uint8_t       vmax;
+  ImComponent   compo[256];
 } ImFrm;
 
 typedef struct ImScan {
@@ -81,7 +76,6 @@ typedef struct ImScan {
   uint8_t  apprxHi;
   uint8_t  apprxLo;
   uint8_t  Ns;
-  uint8_t *comp;
   uint8_t  offword;
   int32_t  cnt;
   uint8_t  b;
@@ -95,9 +89,10 @@ typedef struct ImComment {
 } ImComment;
 
 typedef enum ImJpegResult {
-  IM_JPEG_NONE                  = 0,
-  IM_JPEG_EOI                   = 1,
-  IM_JPEG_UKNOWN_MARKER_IN_SCAN = 2
+  IM_JPEG_NONE                            = 0,
+  IM_JPEG_EOI                             = 1,
+  IM_JPEG_UKNOWN_MARKER_IN_SCAN           = 2,
+  IM_JPEG_INVALID_COMPONENT_COUNT_IN_SCAN = 3
 } ImJpegResult;
 
 typedef struct ImJpeg {
