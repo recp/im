@@ -121,8 +121,12 @@ jfif_dec(ImByte *raw, ImJpeg *jpg) {
     pRaw += 2;
   }
 
-
 fr:
+
+#if DEBUG
   assert(mrk == JPG_EOI);
-  free(jpg);
+#else
+  jpg->result = IM_JPEG_INVALID;
+  thread_exit();
+#endif
 }

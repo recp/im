@@ -90,6 +90,7 @@ typedef struct ImComment {
 
 typedef enum ImJpegResult {
   IM_JPEG_NONE                            = 0,
+  IM_JPEG_INVALID                         = -1,
   IM_JPEG_EOI                             = 1,
   IM_JPEG_UKNOWN_MARKER_IN_SCAN           = 2,
   IM_JPEG_INVALID_COMPONENT_COUNT_IN_SCAN = 3
@@ -106,7 +107,8 @@ typedef struct ImJpeg {
   th_thread_cond    cond;
   th_thread_mutex   mutex;
   th_thread_rwlock  rwlock;
-  bool              finished;
+  uint32_t          nScans;
+  bool              huffFinished;
 } ImJpeg;
 
 IM_INLINE

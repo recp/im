@@ -105,6 +105,7 @@ jpg_sos(ImByte * __restrict pRaw,
   scan->apprxHi         = tmp >> 4;
 
   jpg->scan = scan;
+  jpg->nScans++;
 
   /* interleaved */
   if (Ns > 1) {
@@ -112,6 +113,8 @@ jpg_sos(ImByte * __restrict pRaw,
   } else {
 
   }
+  
+  jpg->nScans--;
 
   /* next sos or EOI */
   return pRawEnd;

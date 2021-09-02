@@ -118,7 +118,7 @@ im_on_worker_idct(void *argv) {
   
   thread_lock(&jpg->mutex);
 
-  while (!jpg->finished) {
+  while (!jpg->huffFinished || jpg->nScans > 0) {
     thread_cond_wait(&jpg->cond, &jpg->mutex);
     
     printf("JPEG IDCT\n");
@@ -151,6 +151,8 @@ im_load(const char * __restrict path) {
   idct_worker = thread_new(im_on_worker_idct, &arg);
 
   thread_join(scan_worker);
+  jpg->huffFinished = true;
+  thread_cond_signal(&jpg->cond);
   thread_join(idct_worker);
 
   thread_release(scan_worker);

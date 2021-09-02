@@ -98,22 +98,23 @@ jpg_handle_scanmarker(ImScan * __restrict scan, uint16_t marker) {
       printf("Found JPG_EOI\n");
 #endif
       scan->jpg->result = IM_JPEG_EOI;
-      thread_exit();
-      break;
+      goto ex;
     case JPG_DNL:
 #if DEBUG
       printf("TODO, Found JPG_DNL\n");
 #endif
-      thread_exit(); /* TODO: remove this */
-      break;
+      goto ex; /* TODO: remove this */
     default:
 #if DEBUG
       printf("TODO, nextbit: process error\n");
 #endif
       scan->jpg->result = IM_JPEG_UKNOWN_MARKER_IN_SCAN;
-      thread_exit();
-      break;
+      goto ex;
   }
+  
+ex:
+  thread_cond_signal(&scan->jpg->cond);
+  thread_exit();
 }
 
 uint8_t
