@@ -146,7 +146,7 @@ jpg_scan_intr(ImByte * __restrict pRaw,
 
         memset(data, 0, sizeof(*data) * 64);
 
-        jpg_scan_block(jpg, scan, comp, data);
+        jpg_scan_block(jpg, scan, icomp, data);
         jpg_dequant(qt, data);
         jpg_idct(data);
       }
