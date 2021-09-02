@@ -186,7 +186,7 @@ jpg_dht(ImByte * __restrict pRaw,
   ImByte    *pRawEnd;
   ImHuffTbl *huff;
   uint16_t   len, count;
-  uint8_t    i, Li, tc, th, tmp;
+  uint8_t    tc, th, tmp;
 
   len     = jpg_get_ui16(pRaw);
   pRawEnd = pRaw + len;
@@ -208,15 +208,8 @@ jpg_dht(ImByte * __restrict pRaw,
     memset(huff->maxcode, -1, sizeof(*huff->maxcode) * 16);
     memset(huff->delta,    0, sizeof(*huff->delta)   * 16);
 
-    jpg_huffcodes(pRaw, huff);
-
-    count = 0;
-    for (i = 0; i < 16; i++) {
-      if ((Li = pRaw[i])) {
-        memcpy(huff->huffval + i, pRaw + 16 + i, Li);
-        count += Li;
-      }
-    }
+    count = jpg_huffcodes(pRaw, huff);
+    memcpy(huff->huffval, pRaw + 16, count);
 
     pRaw += 16 + count;
   }
