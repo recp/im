@@ -32,9 +32,8 @@ typedef struct ImQuantTbl {
 
 typedef struct ImHuffTbl {
   IM_ALIGN(16) uint8_t  huffval[256];
-  IM_ALIGN(16) int32_t  valptr[16];
-  IM_ALIGN(16) int32_t  maxcode[16];
-  IM_ALIGN(16) int32_t  delta[16]; /* VALPTR(I) - MINCODE(I) */
+  IM_ALIGN(16) int16_t  maxcode[16];
+  IM_ALIGN(16) int16_t  delta[16]; /* VALPTR(I) - MINCODE(I) */
   bool                  valid;
 } ImHuffTbl;
 

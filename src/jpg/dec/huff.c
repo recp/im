@@ -21,27 +21,26 @@
 
 /* Annex C */
 IM_HIDE
-void
+uint32_t
 jpg_huffcodes(ImByte    * __restrict pRaw,
               ImHuffTbl * __restrict huff) {
-  int32_t i, j, k, Li, code, si;
+  int32_t i, j, k, Li, code, si, count;
   uint8_t huffsizes[256];
   uint8_t huffcodes[256];
   uint8_t lastk;
 
   /* HUFFSIZE: Figure C.1 */
-  k = 0;
-  i = j = 1;
+  count = k = i = 0;
 
   for (; i < 16; i++) {
-    Li = pRaw[i];
+    j      = 1;
+    Li     = pRaw[i];
+    count += Li;
     while (j <= Li) {
-      huffsizes[k] = i;
+      huffsizes[k] = i + 1;
       k++;
       j++;
     }
-
-    j = 1;
   }
 
   huffsizes[k] = 0;
