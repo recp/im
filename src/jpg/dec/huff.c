@@ -78,6 +78,35 @@ jpg_huffcodes(ImByte    * __restrict pRaw,
       j++;
     }
   }
+  
+  return count;
+}
+
+void
+jpg_handle_scanmarker(ImScan * __restrict scan, uint16_t marker) {
+#if DEBUG
+  printf("Found Marker in Scan: 0x%X\n", marker);
+#endif
+  
+  switch (marker) {
+    case JPG_EOI:
+      scan->jpg->result = IM_JPEG_EOI;
+      thread_exit();
+      break;
+    case JPG_DNL:
+#if DEBUG
+      printf("TODO, Found DNL\n");
+#endif
+      thread_exit(); /* TODO: remove this */
+      break;
+    default:
+#if DEBUG
+      printf("TODO, nextbit: process error\n");
+#endif
+      scan->jpg->result = IM_JPEG_UKNOWN_MARKER_IN_SCAN;
+      thread_exit();
+      break;
+  }
 }
 
 uint8_t
@@ -88,17 +117,17 @@ jpg_nextbit(ImScan * __restrict scan) {
   b = scan->b;
 
   if (scan->cnt == 0) {
-    scan->b   = b = *++scan->pRaw;
+  again:
+
+    scan->b   = b = *scan->pRaw++;
     scan->cnt = 8;
 
     if (b == 0xFF) {
-      b2 = *++scan->pRaw;
+      b2 = *scan->pRaw++;
 
       if (b2 != 0) {
-        if (b2 == JPG_DNL)
-          printf("TODO, nextbit: process DNL and terminate scan\n");
-        else
-          printf("TODO, nextbit: process error\n");
+        jpg_handle_scanmarker(scan, ((int16_t)b2 << 8) | b);
+        goto again;
       }
     }
   }
@@ -106,26 +135,25 @@ jpg_nextbit(ImScan * __restrict scan) {
   scan->cnt--;
   bit     = b >> 7;
   scan->b = b << 1;
-
+  
   return bit;
 }
 
 uint8_t
 jpg_decode(ImScan    * __restrict scan,
            ImHuffTbl * __restrict huff) {
-  int32_t  i, j, code;
+  int32_t i, j, code;
 
-  i    = 1;
+  i    = 0;
   code = jpg_nextbit(scan);
 
   while (code > huff->maxcode[i]) {
-    i++;
     code = (code << 1) | jpg_nextbit(scan);
+    i++;
   }
 
-  j = huff->valptr[i];
   j = code + huff->delta[i]; /* delta = j - mincode[i] */
-
+  
   return huff->huffval[j];
 }
 

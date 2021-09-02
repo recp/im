@@ -37,17 +37,43 @@ typedef struct ImHuffTbl {
   bool                  valid;
 } ImHuffTbl;
 
+typedef struct ImComponent {
+  int32_t id;
+  int32_t Tq;
+  int32_t H;
+  int32_t V;
+} ImComponent;
+
+typedef struct ImComponentSel {
+  ImComponent *comp;
+  int32_t      id;
+  int32_t      pred;
+  int32_t      Td;
+  int32_t      Ta;
+} ImComponentSel;
+
 typedef struct ImFrm {
-  uint16_t width;
-  uint16_t height;
-  uint8_t  precision;
-  uint8_t  Nf;
-  uint8_t  comp[256][4];
-  uint8_t  hmax;
-  uint8_t  vmax;
+  uint16_t    width;
+  uint16_t    height;
+  uint8_t     precision;
+  uint8_t     Nf;
+  uint8_t     comp[256][4];
+  uint8_t     hmax;
+  uint8_t     vmax;
+
+  struct {
+    ImComponent comp[4];
+    uint32_t    ncomp;
+  } compo;
 } ImFrm;
 
 typedef struct ImScan {
+  struct ImJpeg *jpg;
+  struct {
+    ImComponentSel comp[4];
+    uint32_t       ncomp;
+  } compo;
+
   uint16_t width;
   uint16_t height;
   uint8_t  startOfSpectral;
@@ -59,7 +85,7 @@ typedef struct ImScan {
   uint8_t  offword;
   int32_t  cnt;
   uint8_t  b;
-  ImByte *pRaw;
+  ImByte  *pRaw;
 } ImScan;
 
 typedef struct ImComment {
@@ -68,13 +94,20 @@ typedef struct ImComment {
   ImByte            buff[];
 } ImComment;
 
+typedef enum ImJpegResult {
+  IM_JPEG_NONE                  = 0,
+  IM_JPEG_EOI                   = 1,
+  IM_JPEG_UKNOWN_MARKER_IN_SCAN = 2
+} ImJpegResult;
+
 typedef struct ImJpeg {
-  ImQuantTbl dqt[4];
-  ImHuffTbl  dht[2][4]; /* class | table */
-  ImFrm      frm;
-  ImScan    *scan;
-  ImImage   *im;
-  ImComment *comments;
+  ImQuantTbl   dqt[4];
+  ImHuffTbl    dht[2][4]; /* class | table */
+  ImFrm        frm;
+  ImScan      *scan;
+  ImImage     *im;
+  ImComment   *comments;
+  ImJpegResult result;
 } ImJpeg;
 
 IM_INLINE
