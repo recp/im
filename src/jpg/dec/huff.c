@@ -150,31 +150,24 @@ ipow(int base, int exp) {
   return result;
 }
 
-uint8_t
+int32_t
 jpg_receive(ImScan    * __restrict scan,
             ImHuffTbl * __restrict huff,
             int32_t                ssss) {
   int32_t i, v;
 
-  i = v = 0;
-  while (i == ssss) {
-    i++;
-    v = (v << 1) + jpg_nextbit(scan);
-  }
+  for (v = i = 0; i < ssss; i++)
+    v = (v << 1) | jpg_nextbit(scan);
 
   return v;
 }
 
-uint8_t
-jpg_extend(uint8_t v, uint8_t t) {
-  uint8_t vt;
+int32_t
+jpg_extend(int32_t v, int32_t t) {
+  /* vt = ipow(2, t - 1); */
 
-  /* use ipow ? */
-  vt = powf(2, t - 1);
-  if (v < vt) {
-    vt = ((-1u) << t) + 1;
-    v  = v + vt;
-  }
+  if (v < (1 << (t - 1)))
+    return v + (-1u << t) + 1;
 
   return v;
 }

@@ -28,12 +28,12 @@ uint8_t
 jpg_decode(ImScan    * __restrict scan,
            ImHuffTbl * __restrict huff);
 
-uint8_t
+int32_t
 jpg_receive(ImScan    * __restrict scan,
             ImHuffTbl * __restrict huff,
             int32_t                ssss);
 
-uint8_t
-jpg_extend(uint8_t v, uint8_t t);
+int32_t
+jpg_extend(int32_t v, int32_t t);
 
 #endif /* src_jpg_huff_h */
