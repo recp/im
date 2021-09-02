@@ -21,6 +21,12 @@
 #include "markers.h"
 #include <netinet/in.h>
 
+#if DEBUG
+IM_HIDE
+void
+print_byte(uint8_t byte);
+#endif
+
 IM_INLINE
 bool
 jpg_marker_eq(ImByte *buff, JPGMarker marker) {

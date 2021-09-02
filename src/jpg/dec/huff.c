@@ -19,6 +19,10 @@
 #include <stdio.h>
 #include <math.h>
 
+#if DEBUG
+#  include <assert.h>
+#endif
+
 /* Annex C */
 IM_HIDE
 uint32_t
@@ -90,12 +94,15 @@ jpg_handle_scanmarker(ImScan * __restrict scan, uint16_t marker) {
   
   switch (marker) {
     case JPG_EOI:
+#if DEBUG
+      printf("Found JPG_EOI\n");
+#endif
       scan->jpg->result = IM_JPEG_EOI;
       thread_exit();
       break;
     case JPG_DNL:
 #if DEBUG
-      printf("TODO, Found DNL\n");
+      printf("TODO, Found JPG_DNL\n");
 #endif
       thread_exit(); /* TODO: remove this */
       break;
@@ -122,13 +129,9 @@ jpg_nextbit(ImScan * __restrict scan) {
     scan->b   = b = *scan->pRaw++;
     scan->cnt = 8;
 
-    if (b == 0xFF) {
-      b2 = *scan->pRaw++;
-
-      if (b2 != 0) {
-        jpg_handle_scanmarker(scan, ((int16_t)b2 << 8) | b);
-        goto again;
-      }
+    if (b == 0xFF && (b2 = *scan->pRaw++) != 0) {
+      jpg_handle_scanmarker(scan, ((int16_t)b2 << 8) | b);
+      goto again;
     }
   }
 
@@ -136,6 +139,10 @@ jpg_nextbit(ImScan * __restrict scan) {
   bit     = b >> 7;
   scan->b = b << 1;
   
+#if DEBUG
+  printf("bit: %d\n", bit);
+#endif
+
   return bit;
 }
 
@@ -150,10 +157,18 @@ jpg_decode(ImScan    * __restrict scan,
   while (code > huff->maxcode[i]) {
     code = (code << 1) | jpg_nextbit(scan);
     i++;
+
+#if DEBUG
+    assert(i < 16);
+#endif
   }
 
   j = code + huff->delta[i]; /* delta = j - mincode[i] */
   
+#if DEBUG
+  printf("Huff: %#1X\n", huff->huffval[j]);
+#endif
+
   return huff->huffval[j];
 }
 
