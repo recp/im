@@ -44,7 +44,7 @@ jpg_decode_dc(ImJpeg    * __restrict jpg,
               ImScan    * __restrict scan,
               ImHuffTbl * __restrict huff,
               int16_t   * __restrict zz) {
-  uint8_t t, diff;
+  int32_t t, diff;
 
   t     = jpg_decode(scan, huff);
   diff  = jpg_receive(scan, huff, t);
@@ -64,11 +64,11 @@ jpg_decode_ac(ImJpeg    * __restrict jpg,
 
   do {
     rs   = jpg_decode(scan, huff);
-    ssss = rs & 15; /* equals to rs % 16 */
-    r    = ssss >> 4;
+    ssss = rs & 15; /* eq uals to rs % 16 */
+    r    = rs  >> 4;
 
     if (ssss == 0) {
-      if (rs != JPG_ZRL)
+      if (rs != 15)
         break;
 
       k += 16;
@@ -77,22 +77,24 @@ jpg_decode_ac(ImJpeg    * __restrict jpg,
 
     k    += r;
     zz[k] = jpg_extend(jpg_receive(scan, huff, ssss), ssss);
-  } while (k < 64);
+
+    k++;
+  } while (k < 65);
 }
 
 IM_HIDE
 void
-jpg_scan_block(ImJpeg  * __restrict jpg,
-               ImScan  * __restrict scan,
-               uint8_t * __restrict scanComp,
-               int16_t * __restrict data) {
+jpg_scan_block(ImJpeg         * __restrict jpg,
+               ImScan         * __restrict scan,
+               ImComponentSel * __restrict scanComp,
+               int16_t        * __restrict data) {
   ImHuffTbl *huff_dc, *huff_ac;
   int32_t    Tdi, Tai;
 
-  Tdi     = scanComp[1];
-  Tai     = scanComp[2];
-  huff_dc = jpg->dht[Tdi];
-  huff_ac = jpg->dht[Tai];
+  Tdi     = scanComp->Td;
+  Tai     = scanComp->Ta;
+  huff_dc = &jpg->dht[0][Tdi];
+  huff_ac = &jpg->dht[1][Tai];
 
   jpg_decode_dc(jpg, scan, huff_dc, data);
   jpg_decode_ac(jpg, scan, huff_ac, data);
@@ -128,14 +130,20 @@ jpg_scan_intr(ImByte * __restrict pRaw,
 
   for (i = 0; i < mcuy; i++) {
     for (j = 0; j < mcux; j++) {
-      for (k = 0; k < scan->Ns; k++) {
-        ImQuantTbl *qt;
-        uint8_t    *comp;
-        int32_t     Csj, Tqi;
+      scan->cnt = 0;
 
-        comp = &scan->comp[k * scan->Ns];
-        Csj  = comp[0];
-        Tqi  = jpg->frm.comp[Csj][3];
+      for (k = 0; k < scan->Ns; k++) {
+        ImQuantTbl     *qt;
+        ImComponentSel *icomp;
+        int32_t          Csj, Tqi;
+
+        icomp     = &scan->compo.comp[k];
+        
+        printf("compoenent: %d x %d\n", j, k);
+
+        Csj  = icomp->id;
+       
+        Tqi  = jpg->frm.compo[Csj].Tq;
         qt   = &jpg->dqt[Tqi];
 
         memset(data, 0, sizeof(*data) * 64);
