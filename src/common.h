@@ -96,13 +96,17 @@ typedef enum ImJpegResult {
 } ImJpegResult;
 
 typedef struct ImJpeg {
-  ImQuantTbl   dqt[4];
-  ImHuffTbl    dht[2][4]; /* class | table */
-  ImFrm        frm;
-  ImScan      *scan;
-  ImImage     *im;
-  ImComment   *comments;
-  ImJpegResult result;
+  ImQuantTbl        dqt[4];
+  ImHuffTbl         dht[2][4]; /* class | table */
+  ImFrm             frm;
+  ImScan           *scan;
+  ImImage          *im;
+  ImComment        *comments;
+  ImJpegResult      result;
+  th_thread_cond    cond;
+  th_thread_mutex   mutex;
+  th_thread_rwlock  rwlock;
+  bool              finished;
 } ImJpeg;
 
 IM_INLINE

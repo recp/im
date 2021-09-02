@@ -30,6 +30,7 @@
 typedef struct worker_arg_t {
   const char *path;
   ImImage    *image;
+  ImJpeg     *jpg;
   bool        failed;
 } worker_arg_t;
 
@@ -93,10 +94,10 @@ im_on_worker(void *argv) {
 
   /* decode, this process will be optimized after decoding is done */
   im      = calloc(1, sizeof(*im));
-  jpg     = calloc(1, sizeof(*jpg));
+  jpg     = arg->jpg;
   jpg->im = im;
 
-  arg->image  = im;
+  arg->image = im;
 
   jpg_dec(jpg, raw);
 
@@ -104,19 +105,56 @@ err:
   arg->failed = true;
 }
 
+IM_HIDE
+void
+im_on_worker_idct(void *argv) {
+  worker_arg_t *arg;
+  ImImage      *im;
+  ImJpeg       *jpg;
+  
+  arg = argv;
+  jpg = arg->jpg;
+  im  = arg->image;
+  
+  thread_lock(&jpg->mutex);
+
+  while (!jpg->finished) {
+    thread_cond_wait(&jpg->cond, &jpg->mutex);
+    
+    printf("JPEG IDCT\n");
+
+    thread_rdlock(&jpg->rwlock);
+   
+    thread_rwunlock(&jpg->rwlock);
+  }
+
+  thread_unlock(&jpg->mutex);
+}
+
 IM_EXPORT
 ImImage*
 im_load(const char * __restrict path) {
-  tm_thread   *worker_th;
+  ImJpeg      *jpg;
+  th_thread   *scan_worker, *idct_worker;
   worker_arg_t arg;
 
+  jpg       = calloc(1, sizeof(*jpg));
   arg.path  = path;
+  arg.jpg   = jpg;
   arg.image = NULL;
 
-  worker_th = thread_new(im_on_worker, &arg);
+  thread_cond_init(&jpg->cond);
+  thread_mutex_init(&jpg->mutex);
+  thread_rwlock_init(&jpg->rwlock);
+  
+  scan_worker = thread_new(im_on_worker, &arg);
+  idct_worker = thread_new(im_on_worker_idct, &arg);
 
-  thread_join(worker_th);
-  thread_release(worker_th);
+  thread_join(scan_worker);
+  thread_join(idct_worker);
+
+  thread_release(scan_worker);
+  thread_release(idct_worker);
 
   return arg.image;
 }

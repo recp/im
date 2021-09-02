@@ -16,15 +16,15 @@
 
 #include "thread.h"
 
-typedef struct tm_thread_entry {
+typedef struct th_thread_entry {
   void *arg;
   void (*func)(void *);
-} tm_thread_entry;
+} th_thread_entry;
 
 static
 void*
 thread_entry(void *arg) {
-  tm_thread_entry entry;
+  th_thread_entry entry;
 
   /* to call free before calling thread func */
   memcpy(&entry, arg, sizeof(entry));
@@ -35,11 +35,11 @@ thread_entry(void *arg) {
   return NULL;
 }
 
-IM_HIDE
-tm_thread*
+TH_HIDE
+th_thread*
 thread_new(void (func)(void *), void *obj) {
-  tm_thread       *th;
-  tm_thread_entry *entry;
+  th_thread       *th;
+  th_thread_entry *entry;
   pthread_attr_t   attr;
 
   th          = calloc(1, sizeof(*th));
@@ -56,98 +56,98 @@ thread_new(void (func)(void *), void *obj) {
   return th;
 }
 
-IM_HIDE
+TH_HIDE
 void
-thread_release(tm_thread *th) {
+thread_release(th_thread *th) {
   free(th);
 }
 
-IM_HIDE
+TH_HIDE
 void
-thread_join(tm_thread *th) {
+thread_join(th_thread *th) {
   pthread_join(th->id, NULL);
 }
 
-IM_HIDE
+TH_HIDE
 void
 thread_exit(void) {
   pthread_exit(NULL);
 }
 
-IM_HIDE
+TH_HIDE
 void
-thread_cond_init(tm_thread_cond *cond) {
+thread_cond_init(th_thread_cond *cond) {
   pthread_cond_init(&cond->cond, NULL);
 }
 
-IM_HIDE
+TH_HIDE
 void
-thread_cond_signal(tm_thread_cond *cond) {
+thread_cond_signal(th_thread_cond *cond) {
   pthread_cond_signal(&cond->cond);
 }
 
-IM_HIDE
+TH_HIDE
 void
-thread_cond_destroy(tm_thread_cond *cond) {
+thread_cond_destroy(th_thread_cond *cond) {
   pthread_cond_destroy(&cond->cond);
 }
 
-IM_HIDE
+TH_HIDE
 void
-thread_cond_wait(tm_thread_cond *cond, tm_thread_mutex *mutex) {
+thread_cond_wait(th_thread_cond *cond, th_thread_mutex *mutex) {
   pthread_cond_wait(&cond->cond, &mutex->mutex);
 }
 
-IM_HIDE
+TH_HIDE
 void
-thread_mutex_init(tm_thread_mutex *mutex) {
+thread_mutex_init(th_thread_mutex *mutex) {
   pthread_mutex_init(&mutex->mutex, NULL);
 }
 
-IM_HIDE
+TH_HIDE
 void
-thread_mutex_destroy(tm_thread_mutex *mutex) {
+thread_mutex_destroy(th_thread_mutex *mutex) {
   pthread_mutex_destroy(&mutex->mutex);
 }
 
-IM_HIDE
+TH_HIDE
 void
-thread_lock(tm_thread_mutex *mutex) {
+thread_lock(th_thread_mutex *mutex) {
   pthread_mutex_lock(&mutex->mutex);
 }
 
-IM_HIDE
+TH_HIDE
 void
-thread_unlock(tm_thread_mutex *mutex) {
+thread_unlock(th_thread_mutex *mutex) {
   pthread_mutex_unlock(&mutex->mutex);
 }
 
-IM_HIDE
+TH_HIDE
 void
-thread_rwlock_init(tm_thread_rwlock *rwlock) {
+thread_rwlock_init(th_thread_rwlock *rwlock) {
   pthread_rwlock_init(&rwlock->rwlock, NULL);
 }
 
-IM_HIDE
+TH_HIDE
 void
-thread_rwlock_destroy(tm_thread_rwlock *rwlock) {
+thread_rwlock_destroy(th_thread_rwlock *rwlock) {
   pthread_rwlock_destroy(&rwlock->rwlock);
 }
 
-IM_HIDE
+TH_HIDE
 void
-thread_rdlock(tm_thread_rwlock *rwlock) {
+thread_rdlock(th_thread_rwlock *rwlock) {
   pthread_rwlock_rdlock(&rwlock->rwlock);
 }
 
-IM_HIDE
+TH_HIDE
 void
-thread_rwunlock(tm_thread_rwlock *rwlock) {
+thread_rwunlock(th_thread_rwlock *rwlock) {
   pthread_rwlock_unlock(&rwlock->rwlock);
 }
 
-IM_HIDE
+TH_HIDE
 void
-thread_wrlock(tm_thread_rwlock *rwlock) {
+thread_wrlock(th_thread_rwlock *rwlock) {
   pthread_rwlock_wrlock(&rwlock->rwlock);
 }

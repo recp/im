@@ -17,90 +17,90 @@
 #ifndef src_win_thread_h
 #define src_win_thread_h
 
-#include "../common.h"
+#include "../thread/common.h"
 
-typedef struct tm_thread {
+typedef struct th_thread {
   HANDLE id;
-} tm_thread;
+} th_thread;
 
-typedef struct tm_thread_cond {
+typedef struct th_thread_cond {
   CONDITION_VARIABLE cond;
-} tm_thread_cond;
+} th_thread_cond;
 
-typedef struct tm_thread_mutex {
+typedef struct th_thread_mutex {
 	CRITICAL_SECTION mutex;
-} tm_thread_mutex;
+} th_thread_mutex;
 
-typedef struct tm_thread_rwlock {
+typedef struct th_thread_rwlock {
 	SRWLOCK rwlock;
-} tm_thread_rwlock;
+} th_thread_rwlock;
 
-IM_HIDE
-tm_thread*
+TH_HIDE
+th_thread*
 thread_new(void (*func)(void *), void *obj);
 
-IM_HIDE
+TH_HIDE
 void
-thread_release(tm_thread *th);
+thread_release(th_thread *th);
 
-IM_HIDE
+TH_HIDE
 void
-thread_join(tm_thread *th);
+thread_join(th_thread *th);
 
-IM_HIDE
+TH_HIDE
 void
 thread_exit(void);
 
-IM_HIDE
+TH_HIDE
 void
-thread_cond_init(tm_thread_cond *cond);
+thread_cond_init(th_thread_cond *cond);
 
-IM_HIDE
+TH_HIDE
 void
-thread_cond_signal(tm_thread_cond *cond);
+thread_cond_signal(th_thread_cond *cond);
 
-IM_HIDE
+TH_HIDE
 void
-thread_cond_destroy(tm_thread_cond *cond);
+thread_cond_destroy(th_thread_cond *cond);
 
-IM_HIDE
+TH_HIDE
 void
-thread_cond_wait(tm_thread_cond *cond, tm_thread_mutex *mutex);
+thread_cond_wait(th_thread_cond *cond, th_thread_mutex *mutex);
 
-IM_HIDE
+TH_HIDE
 void
-thread_mutex_init(tm_thread_mutex *mutex);
+thread_mutex_init(th_thread_mutex *mutex);
 
-IM_HIDE
+TH_HIDE
 void
-thread_mutex_destroy(tm_thread_mutex *mutex);
+thread_mutex_destroy(th_thread_mutex *mutex);
 
-IM_HIDE
+TH_HIDE
 void
-thread_lock(tm_thread_mutex *mutex);
+thread_lock(th_thread_mutex *mutex);
 
-IM_HIDE
+TH_HIDE
 void
-thread_unlock(tm_thread_mutex *mutex);
+thread_unlock(th_thread_mutex *mutex);
 
-IM_HIDE
+TH_HIDE
 void
-thread_rwlock_init(tm_thread_rwlock *rwlock);
+thread_rwlock_init(th_thread_rwlock *rwlock);
 
-IM_HIDE
+TH_HIDE
 void
-thread_rwlock_destroy(tm_thread_rwlock *rwlock);
+thread_rwlock_destroy(th_thread_rwlock *rwlock);
 
-IM_HIDE
+TH_HIDE
 void
-thread_rwunlock(tm_thread_rwlock *rwlock);
+thread_rwunlock(th_thread_rwlock *rwlock);
 
-IM_HIDE
+TH_HIDE
 void
-thread_rdlock(tm_thread_rwlock *rwlock);
+thread_rdlock(th_thread_rwlock *rwlock);
 
-IM_HIDE
+TH_HIDE
 void
-thread_wrlock(tm_thread_rwlock *rwlock);
+thread_wrlock(th_thread_rwlock *rwlock);
 
 #endif /* src_win_thread_h */

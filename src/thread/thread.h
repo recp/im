@@ -17,7 +17,7 @@
 #ifndef src_thread_h
 #define src_thread_h
 
-#include "../common.h"
+#include "common.h"
 
 #if defined(_WIN32) || defined(_MSC_VER)
 #include "../win/thread.h"
