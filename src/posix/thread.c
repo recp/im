@@ -58,8 +58,20 @@ thread_new(void (func)(void *), void *obj) {
 
 IM_HIDE
 void
+thread_release(tm_thread *th) {
+  free(th);
+}
+
+IM_HIDE
+void
 thread_join(tm_thread *th) {
   pthread_join(th->id, NULL);
+}
+
+IM_HIDE
+void
+thread_exit(void) {
+  pthread_exit(NULL);
 }
 
 IM_HIDE

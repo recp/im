@@ -43,7 +43,15 @@ thread_new(void (*func)(void *), void *obj);
 
 IM_HIDE
 void
+thread_release(tm_thread *th);
+
+IM_HIDE
+void
 thread_join(tm_thread *th);
+
+IM_HIDE
+void
+thread_exit(void);
 
 IM_HIDE
 void
