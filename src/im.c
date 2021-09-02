@@ -25,20 +25,32 @@
 
 #include "jpg/dec/dec.h"
 
-IM_EXPORT
-ImImage*
-im_load(const char * __restrict path) {
-  ImByte     *raw;
-  FILE       *infile;
-  size_t      blksize;
-  size_t      fsize;
-  size_t      fcontents_size;
-  size_t      total_read;
-  size_t      nread;
-  struct stat infile_st;
-  int         infile_no;
+#include "thread/thread.h"
 
-  infile = fopen(path, "rb");
+typedef struct worker_arg_t {
+  const char *path;
+  ImImage    *image;
+  bool        failed;
+} worker_arg_t;
+
+IM_HIDE
+void
+im_on_worker(void *argv) {
+  worker_arg_t *arg;
+  ImByte       *raw;
+  FILE         *infile;
+  ImImage      *im;
+  size_t        blksize;
+  size_t        fsize;
+  size_t        fcontents_size;
+  size_t        total_read;
+  size_t        nread;
+  struct stat   infile_st;
+  int           infile_no;
+  
+  arg = argv;
+
+  infile = fopen(arg->path, "rb");
   if (!infile)
     goto err;
 
@@ -79,7 +91,28 @@ im_load(const char * __restrict path) {
   fclose(infile);
 
   /* decode, this process will be optimized after decoding is done */
-  return jpg_dec(raw);
+  im          = calloc(1, sizeof(*im));
+  arg->image  = im;
+
+  jpg_dec(im, raw);
+
 err:
-  return NULL;
+  arg->failed = true;
+}
+
+IM_EXPORT
+ImImage*
+im_load(const char * __restrict path) {
+  tm_thread   *worker_th;
+  worker_arg_t arg;
+
+  arg.path  = path;
+  arg.image = NULL;
+
+  worker_th = thread_new(im_on_worker, &arg);
+
+  thread_join(worker_th);
+  thread_release(worker_th);
+
+  return arg.image;
 }

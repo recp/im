@@ -20,6 +20,8 @@
 #include "../include/im/common.h"
 #include "../include/im/im.h"
 
+#include "thread/thread.h"
+
 #include <string.h>
 #include <stdlib.h>
 
