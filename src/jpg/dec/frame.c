@@ -80,6 +80,7 @@ jpg_sos(ImByte * __restrict pRaw,
   scan->jpg         = jpg;
 
   if (Ns > 4) {
+    free(scan);
     jpg->result = IM_JPEG_INVALID_COMPONENT_COUNT_IN_SCAN;
     thread_exit();
     return NULL;
