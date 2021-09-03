@@ -21,20 +21,74 @@
 #include "common.h"
 #include <AppKit/NSImage.h>
 
-NSImage*
-im_nsimage(ImImage * __restrict im, bool copydata) {
-  NSData  *imageData;
-  NSImage *nsImage;
-
-  if (copydata) {
-    imageData = [NSData dataWithBytes: im->data length: im->len];
+/*
+ https://docs.opencv.org/master/d3/def/tutorial_image_manipulation.html
+ */
+CGImageRef
+im_cgimage(ImImage *im, bool copydata) {
+  NSData           *data;
+  CGColorSpaceRef   colorSpace;
+  CGDataProviderRef provider;
+  CGImageRef        imageRef;
+  size_t            width, height, bytesPerRow;
+  int               elemSize, bitsPerPixel;
+  
+  /* TODO: read from ImImage */
+  elemSize     = 3;
+  bitsPerPixel = 8;
+  
+  width       = im->width;
+  height      = im->height;
+  bytesPerRow = elemSize * width;
+  
+  if (!copydata) {
+    data = [NSData dataWithBytesNoCopy: im->data length: bytesPerRow * height];
   } else {
-    imageData = [NSData dataWithBytesNoCopy: im->data length: im->len];
+    data = [NSData dataWithBytes:       im->data length: bytesPerRow * height];
   }
 
-  nsImage = [[NSImage alloc] initWithData: imageData];
+  if (elemSize == 1) {
+    colorSpace = CGColorSpaceCreateDeviceGray();
+  } else {
+    colorSpace = CGColorSpaceCreateDeviceRGB();
+  }
 
-  return nsImage;
+#if __has_feature(objc_arc)
+  provider = CGDataProviderCreateWithCFData((__bridge CFDataRef)data);
+#else
+  provider = CGDataProviderCreateWithCFData(data);
+#endif
+
+  imageRef = CGImageCreate(width,                                       /* width              */
+                           height,                                      /* height             */
+                           bitsPerPixel,                                /* bits per component */
+                           bitsPerPixel * elemSize,                     /* bits per pixel     */
+                           bytesPerRow,                                 /* bytesPerRow        */
+                           colorSpace,                                  /* colorspace         */
+                           kCGImageAlphaNone|kCGBitmapByteOrderDefault, /* bitmap info        */
+                           provider,                                    /* CGDataProviderRef  */
+                           NULL,                                        /* decode             */
+                           false,                                       /* should interpolate */
+                           kCGRenderingIntentDefault                    /* intent             */
+                           );
+
+  CGDataProviderRelease(provider);
+  CGColorSpaceRelease(colorSpace);
+
+  return imageRef;
+}
+
+NSImage*
+im_nsimage(ImImage * __restrict im, bool copydata) {
+  CGImageRef cgImage;
+  
+  cgImage = im_cgimage(im, copydata);
+  
+  if (!cgImage)
+    return nil;
+
+  return [[NSImage alloc] initWithCGImage: cgImage
+                                     size: CGSizeMake(im->width, im->height)];
 }
 
 #endif
