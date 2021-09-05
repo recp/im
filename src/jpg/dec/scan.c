@@ -77,7 +77,7 @@ jpg_decode_ac(ImJpeg    * __restrict jpg,
     }
 
     k    += r;
-    zz[unzig[k]] = jpg_extend(jpg_receive(scan, huff, ssss), ssss);
+    zz[unzig[k - 1]] = jpg_extend(jpg_receive(scan, huff, ssss), ssss);
 
     k++;
   } while (k < 65);
