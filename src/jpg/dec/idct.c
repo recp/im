@@ -51,6 +51,40 @@
   discrete W transform and for the discrete Fourier transform", IEEE Trans. on
   ASSP, Vol. ASSP- 32, pp. 803-816, Aug. 1984
 */
+#include <math.h>
+IM_HIDE
+void
+jpg_idct2(int16_t blk[3][64]) {
+  int16_t data[3][64];
+  
+  for (int i = 0; i < 3; ++i) {
+    for (int y = 0; y < 8; ++y) {
+      for (int x = 0; x < 8; ++x) {
+        float sum = 0.0;
+        
+        for (int u = 0; u < 8; ++u) {
+          for (int v = 0; v < 8; ++v) {
+            float Cu = u == 0 ? 1.0 / sqrtf(2.0) : 1.0;
+            float Cv = v == 0 ? 1.0 / sqrtf(2.0) : 1.0;
+            
+            sum += Cu * Cv * blk[i][u * 8 +  v] * cosf((2 * x + 1) * u * M_PI / 16.0) *
+            cosf((2 * y + 1) * v * M_PI / 16.0);
+          }
+        }
+        
+        data[i][x * 8 + y] = 0.25 * sum;
+      }
+    }
+  }
+  
+  for (int i = 0; i < 3; ++i) {
+    for (int y = 0; y < 8; ++y) {
+      for (int x = 0; x < 8; ++x) {
+        blk[i][y * 8 + x] = roundl(data[i][y * 8 + x]) + 128;
+      }
+    }
+  }
+}
 
 IM_HIDE
 void

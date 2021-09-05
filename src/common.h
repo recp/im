@@ -50,6 +50,7 @@ typedef struct ImComponentSel {
   int32_t      pred;
   int32_t      Td;
   int32_t      Ta;
+  int32_t      prev;
 } ImComponentSel;
 
 typedef struct ImFrm {
@@ -63,7 +64,11 @@ typedef struct ImFrm {
 } ImFrm;
 
 typedef struct ImScan {
-  struct ImJpeg *jpg;
+  struct ImJpeg  *jpg;
+  ImByte          blk[192];
+  th_thread_mutex blkmutex;
+  int32_t         blk_mcuy, blk_mcux;
+
   struct {
     ImComponentSel comp[4];
     uint32_t       ncomp;
@@ -80,6 +85,8 @@ typedef struct ImScan {
   int32_t  cnt;
   uint8_t  b;
   ImByte  *pRaw;
+  
+
 } ImScan;
 
 typedef struct ImComment {
@@ -108,7 +115,6 @@ typedef struct ImJpeg {
   th_thread_mutex   mutex;
   th_thread_rwlock  rwlock;
   uint32_t          nScans;
-  bool              huffFinished;
 } ImJpeg;
 
 IM_INLINE

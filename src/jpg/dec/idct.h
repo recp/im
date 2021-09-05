@@ -23,4 +23,8 @@ IM_HIDE
 void
 jpg_idct(int16_t * __restrict blk);
 
+IM_HIDE
+void
+jpg_idct2(int16_t blk[3][64]);
+
 #endif /* src_jpg_idct_h */

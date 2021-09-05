@@ -111,21 +111,48 @@ im_on_worker_idct(void *argv) {
   worker_arg_t *arg;
   ImImage      *im;
   ImJpeg       *jpg;
+  ImByte       *p, *p2;
+  bool          started;
   
-  arg = argv;
-  jpg = arg->jpg;
-  im  = arg->image;
+  started = false;
+  arg     = argv;
+  jpg     = arg->jpg;
+  im      = arg->image;
   
   thread_lock(&jpg->mutex);
 
-  while (!jpg->huffFinished || jpg->nScans > 0) {
+  while (!started || jpg->nScans > 0) {
     thread_cond_wait(&jpg->cond, &jpg->mutex);
-    
-    printf("JPEG IDCT\n");
 
-    thread_rdlock(&jpg->rwlock);
-   
-    thread_rwunlock(&jpg->rwlock);
+    if (!(im = jpg->im))
+      continue;
+
+    thread_lock(&jpg->scan->blkmutex);
+    
+    int row, col, width;
+    
+    row   = jpg->scan->blk_mcuy * 8;
+    col   = jpg->scan->blk_mcux * 8;
+    width = jpg->frm.width;
+    p     = ((ImByte *)im->data);
+    p2    = jpg->scan->blk;
+
+    for (int i = 0; i < 8; i++) {
+      for (int j = 0; j < 8; j++) {
+        p[3 * ((row + i) * width + (col + j)) + 0] = *p2++;
+        p[3 * ((row + i) * width + (col + j)) + 1] = *p2++;
+        p[3 * ((row + i) * width + (col + j)) + 2] = *p2++;
+      }
+    }
+
+    thread_unlock(&jpg->scan->blkmutex);
+
+    /*
+     thread_rdlock(&jpg->rwlock);
+     thread_rwunlock(&jpg->rwlock);
+     */
+
+    started = true;
   }
 
   thread_unlock(&jpg->mutex);
@@ -151,7 +178,6 @@ im_load(const char * __restrict path) {
   idct_worker = thread_new(im_on_worker_idct, &arg);
 
   thread_join(scan_worker);
-  jpg->huffFinished = true;
   thread_cond_signal(&jpg->cond);
   thread_join(idct_worker);
 

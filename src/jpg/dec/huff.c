@@ -139,10 +139,6 @@ jpg_nextbit(ImScan * __restrict scan) {
   scan->cnt--;
   bit     = b >> 7;
   scan->b = b << 1;
-  
-#if DEBUG
-  printf("%d ", bit);
-#endif
 
   return bit;
 }
@@ -151,10 +147,6 @@ uint8_t
 jpg_decode(ImScan    * __restrict scan,
            ImHuffTbl * __restrict huff) {
   int32_t i, j, code;
-
-#if DEBUG
-  printf("Begin Decode\n\n\t\t");
-#endif
   
   i    = 0;
   code = jpg_nextbit(scan);
@@ -169,10 +161,6 @@ jpg_decode(ImScan    * __restrict scan,
   }
 
   j = code + huff->delta[i]; /* delta = j - mincode[i] */
-  
-#if DEBUG
-  printf("\n\nDecoded Huff: %#1X\n", huff->huffval[j]);
-#endif
 
   return huff->huffval[j];
 }
@@ -203,17 +191,9 @@ jpg_receive(ImScan    * __restrict scan,
             int32_t                ssss) {
   int32_t i, v;
 
-#if DEBUG
-  printf("Begin Receive\n\n\t\t");
-#endif
-  
   for (v = i = 0; i < ssss; i++)
     v = (v << 1) | jpg_nextbit(scan);
 
-#if DEBUG
-  printf("\n\nEnd Receive\n");
-#endif
-  
   return v;
 }
 
