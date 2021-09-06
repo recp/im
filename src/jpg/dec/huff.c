@@ -141,29 +141,30 @@ jpg_nextbit(ImScan * __restrict scan) {
   bit     = b >> 7;
   scan->b = b << 1;
 
+#if DEBUG
+  assert(bit == 0 || bit == 1);
+#endif
+
   return bit;
 }
 
 uint8_t
 jpg_decode(ImScan    * __restrict scan,
            ImHuffTbl * __restrict huff) {
-  int32_t i, j, code;
-  
-  i    = 0;
+  int32_t i, code;
+
   code = jpg_nextbit(scan);
+  i    = 0;
 
-  while (code > huff->maxcode[i]) {
+  for (; code > huff->maxcode[i]; i++) {
     code = (code << 1) | jpg_nextbit(scan);
-    i++;
-
+   
 #if DEBUG
     assert(i < 16);
 #endif
   }
 
-  j = code + huff->delta[i]; /* delta = j - mincode[i] */
-
-  return huff->huffval[j];
+  return huff->huffval[code + huff->delta[i]];
 }
 
 int
