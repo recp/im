@@ -175,14 +175,12 @@ jpg_scan_intr(ImByte * __restrict pRaw,
       for (k = 0; k < scan->Ns; k++) {
         ImQuantTbl     *qt;
         ImComponentSel *icomp;
-        int32_t          Csj, Tqi;
+        int32_t         Csj, Tqi;
 
-        icomp     = &scan->compo.comp[k];
-
-        Csj  = icomp->id;
-       
-        Tqi  = jpg->frm.compo[Csj].Tq;
-        qt   = &jpg->dqt[Tqi];
+        icomp = &scan->compo.comp[k];
+        Csj   = icomp->id;
+        Tqi   = jpg->frm.compo[Csj].Tq;
+        qt    = &jpg->dqt[Tqi];
 
         memset(data[k], 0, sizeof(data[k]));
 
@@ -200,9 +198,7 @@ jpg_scan_intr(ImByte * __restrict pRaw,
       thread_lock(&scan->blkmutex);
       scan->blk_mcux = j;
       scan->blk_mcuy = i;
-
       thread_unlock(&scan->blkmutex);
-
       thread_cond_signal(&jpg->cond);
     }
   }
