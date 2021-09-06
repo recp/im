@@ -50,7 +50,6 @@ typedef struct ImComponentSel {
   int32_t      pred;
   int32_t      Td;
   int32_t      Ta;
-  int32_t      prev;
 } ImComponentSel;
 
 typedef struct ImFrm {

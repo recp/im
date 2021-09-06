@@ -188,10 +188,8 @@ jpg_scan_intr(ImByte * __restrict pRaw,
 
         jpg_scan_block(jpg, scan, icomp, data[k]);
 
-        int p = data[k][0];
-        data[k][0] += icomp->prev;
-        
-        icomp->prev = p;
+        data[k][0] += icomp->pred;
+        icomp->pred = data[k][0];
 
         jpg_dequant(qt, data[k]);
       }
