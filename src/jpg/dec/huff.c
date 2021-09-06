@@ -98,6 +98,7 @@ jpg_handle_scanmarker(ImScan * __restrict scan, uint16_t marker) {
       printf("Found JPG_EOI\n");
 #endif
       scan->jpg->result = IM_JPEG_EOI;
+      scan->jpg->nScans--;
       goto ex;
     case JPG_DNL:
 #if DEBUG
