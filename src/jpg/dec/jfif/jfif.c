@@ -79,6 +79,11 @@ jfif_dec(ImByte *raw, ImJpeg *jpg) {
 #endif
 
   while (mrk != JPG_EOI && pRaw) {
+    
+#if DEBUG
+  printf("Found Marker: 0x%X\n", mrk);
+#endif
+    
     switch (mrk) {
       case JPG_DQT:
         pRaw = jpg_dqt(pRaw, jpg);
@@ -87,6 +92,8 @@ jfif_dec(ImByte *raw, ImJpeg *jpg) {
         pRaw = jpg_dht(pRaw, jpg);
         break;
       case JPG_SOF0:
+        pRaw = jpg_sof(pRaw, jpg);
+        break;
       case JPG_SOF1:
       case JPG_SOF2:
       case JPG_SOF3:
@@ -103,7 +110,8 @@ jfif_dec(ImByte *raw, ImJpeg *jpg) {
       case JPG_SOF13:
       case JPG_SOF14:
       case JPG_SOF15:
-        pRaw = jpg_sof(pRaw, jpg);
+        printf("\nunnspoorted SOF\n");
+        thread_exit();
         break;
       case JPG_SOS:
         pRaw = jpg_sos(pRaw, jpg);
