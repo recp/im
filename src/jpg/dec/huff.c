@@ -32,7 +32,7 @@ jpg_huffcodes(ImByte    * __restrict BITS,
   uint16_t code;
   uint8_t  i, j, Li;
   
-  for (i = 0, j = 0, code = 0, count = 0; i < 15; i++) {
+  for (i = 0, j = 0, code = 0, count = 0; i < 16; i++) {
     Li     = BITS[i];
     count += Li;
  
