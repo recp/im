@@ -67,10 +67,10 @@ jpg_decode_ac(ImJpeg    * __restrict jpg,
   do {
     rs   = jpg_decode(scan, huff);
     ssss = rs & 15; /* eq uals to rs % 16 */
-    r    = rs  >> 4;
+    r    = rs >> 4;
 
     if (ssss == 0) {
-      if (rs != 15)
+      if (r != 15)
         break;
 
       k += 16;
