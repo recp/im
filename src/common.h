@@ -114,6 +114,7 @@ typedef struct ImJpeg {
   th_thread_mutex   mutex;
   th_thread_rwlock  rwlock;
   uint32_t          nScans;
+  bool              failed;
 } ImJpeg;
 
 IM_INLINE

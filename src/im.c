@@ -124,6 +124,9 @@ im_on_worker_idct(void *argv) {
   while (!started || jpg->nScans > 0) {
     thread_cond_wait(&jpg->cond, &jpg->mutex);
 
+    if (jpg->failed)
+      break;
+
     if (!(im = jpg->im))
       continue;
 

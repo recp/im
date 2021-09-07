@@ -26,63 +26,26 @@
 /* Annex C */
 IM_HIDE
 uint32_t
-jpg_huffcodes(ImByte    * __restrict pRaw,
+jpg_huffcodes(ImByte    * __restrict BITS,
               ImHuffTbl * __restrict huff) {
-  int32_t i, j, k, Li, code, si, count;
-  uint8_t huffsizes[256];
-  uint8_t huffcodes[256];
-  uint8_t lastk;
-
-  /* HUFFSIZE: Figure C.1 */
-  count = k = i = 0;
-
-  for (; i < 16; i++) {
-    j      = 1;
-    Li     = pRaw[i];
-    count += Li;
-    while (j <= Li) {
-      huffsizes[k] = i + 1;
-      k++;
-      j++;
-    }
-  }
-
-  huffsizes[k] = 0;
-  lastk        = k;
-
-  /* HUFFCODE: Figure C.2 */
-  k  = code = 0;
-  si = huffsizes[0];
-
-  /* TODO: Infinite loop? */
-  for (;;) {
-    do {
-      huffcodes[k] = code;
-      code++;
-      k++;
-    } while (huffsizes[k] == si);
-    
-    if (huffsizes[k] == 0)
-      break;
-
-    do {
-      code <<= 1;
-      si++;
-    } while (huffsizes[k] != si);
-  }
-
-  /* Decoder Tables */
-  for (i = j = 0; i < 16; i++) {
-    Li = pRaw[i];
-
-    if (Li != 0) {
-      huff->delta[i]   = j - huffcodes[j];
-      j               += Li - 1;
-      huff->maxcode[i] = huffcodes[j];
-      j++;
-    }
-  }
+  int32_t  count;
+  uint16_t code;
+  uint8_t  i, j, Li;
   
+  for (i = 0, j = 0, code = 0, count = 0; i < 15; i++) {
+    Li     = BITS[i];
+    count += Li;
+ 
+    if (Li) {
+      huff->delta[i]   = j - code;
+      huff->maxcode[i] = code + Li - 1;
+      j                += Li;
+      code             = code + Li;
+    }
+    
+    code <<= 1;
+  }
+
   return count;
 }
 
@@ -155,13 +118,11 @@ jpg_decode(ImScan    * __restrict scan,
 
   code = jpg_nextbit(scan);
   i    = 0;
-
-  for (; code > huff->maxcode[i]; i++) {
+  
+  for (; code > huff->maxcode[i]; ) {
     code = (code << 1) | jpg_nextbit(scan);
-   
-#if DEBUG
-    assert(i < 16);
-#endif
+    if (++i == 16)
+      return 0;
   }
 
   return huff->huffval[code + huff->delta[i]];
