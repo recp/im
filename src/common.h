@@ -118,6 +118,21 @@ typedef struct ImJpeg {
 } ImJpeg;
 
 IM_INLINE
+ImComponent*
+jpg_component_byid(ImFrm * __restrict frm, uint32_t id) {
+  int32_t i, Nf;
+
+  Nf = frm->Nf;
+  for (i = 0; i < Nf; i++) {
+    if (frm->compo[i].id == id) {
+      return &frm->compo[i];
+    }
+  }
+
+  return NULL;
+}
+
+IM_INLINE
 uint8_t
 im_maxiu8(uint8_t a, uint8_t b) {
   if (a > b)

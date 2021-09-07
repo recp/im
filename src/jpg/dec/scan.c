@@ -174,11 +174,17 @@ jpg_scan_intr(ImByte * __restrict pRaw,
       for (k = 0; k < scan->Ns; k++) {
         ImQuantTbl     *qt;
         ImComponentSel *icomp;
-        int32_t         Csj, Tqi;
+        ImComponent    *comp;
+        int32_t         Csj, Tqi, Vi, Hi, h, v;
 
         icomp = &scan->compo.comp[k];
         Csj   = icomp->id;
-        Tqi   = jpg->frm.compo[Csj].Tq;
+        
+        if (!(comp = jpg_component_byid(&jpg->frm, Csj))) {
+          thread_exit();
+        }
+
+        Tqi   = comp->Tq;
         qt    = &jpg->dqt[Tqi];
 
         memset(data[k], 0, sizeof(data[k]));
