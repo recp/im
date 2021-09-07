@@ -134,7 +134,10 @@ fr:
 #if DEBUG
   assert(mrk == JPG_EOI);
 #else
-  jpg->result = IM_JPEG_INVALID;
+  if (mrk != JPG_EOI) {
+    jpg->result = IM_JPEG_INVALID;
+  }
+
   thread_exit();
 #endif
 }
