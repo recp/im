@@ -25,9 +25,9 @@ jpg_sof(ImByte * __restrict pRaw,
   ImFrm        *frm;
   ImComponent *icomp;
   uint8_t      tmp;
-  uint32_t     len, i, Nf;
+  uint32_t     /* len, */ i, Nf;
 
-  len             = jpg_get_ui16(pRaw);
+  /* len             = jpg_get_ui16(pRaw); */
   frm             = &jpg->frm;
   frm->precision  = pRaw[2];
   frm->height     = jpg_get_ui16(&pRaw[3]);

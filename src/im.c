@@ -163,7 +163,9 @@ im_on_worker_idct(void *argv) {
 
   thread_unlock(&jpg->mutex);
 
-  im_YCbCrToRGB(jpg->im->data, im->width, im->height);
+  if (im) {
+    im_YCbCrToRGB(jpg->im->data, im->width, im->height);
+  }
 }
 
 IM_EXPORT
