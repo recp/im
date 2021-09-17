@@ -160,4 +160,20 @@ im_1bit(ImByte * __restrict pbyte,
 //  return (pbyte[0] & offword) == offword;
 //}
 
+IM_INLINE
+int
+min(int a, int b) {
+  if (a < b)
+    return a;
+  return b;
+}
+
+IM_INLINE
+int
+max(int a, int b) {
+  if (a > b)
+    return a;
+  return b;
+}
+
 #endif /* src_common_h */
