@@ -21,6 +21,6 @@
 
 IM_EXPORT
 void
-im_YCbCrToRGB(ImByte * __restrict src, size_t npixels);
+im_YCbCrToRGB(ImByte * __restrict src, uint32_t width, uint32_t height);
 
 #endif /* src_color_h */

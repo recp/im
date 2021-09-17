@@ -20,24 +20,24 @@
 
 IM_EXPORT
 void
-im_YCbCrToRGB(ImByte * __restrict src, size_t npixels) {
-  ImByte *p;
-  size_t  i;
-  float   Y, Cb, Cr;
-  int     R, G, B;
+im_YCbCrToRGB(ImByte * __restrict src, uint32_t width, uint32_t height) {
+  ImByte  *p;
+  size_t   i;
+  float    Y, Cb, Cr;
+  int      R, G, B;
+  uint32_t npixels;
   
-  p = src;
-  
-  npixels /= 3;
+  p       = src;
+  npixels = width * height;
 
   for (i = 0; i < npixels; i++) {
     Y    = p[0];
     Cb   = p[1];
     Cr   = p[2];
 
-    R    = floorf(Y + 1.402 * (1.0 * Cr - 128.0));
-    G    = floorf(Y - 0.344136 * (1.0 * Cb - 128.0) - 0.714136 * (1.0 * Cr - 128.0));
-    B    = floorf(Y + 1.772 * (1.0 * Cb - 128.0));
+    R    = Y + 1.402 * (Cr - 128.0);
+    G    = Y - 0.344136 * (Cb - 128.0) - 0.714136 * (Cr - 128.0);
+    B    = Y + 1.772 * (Cb - 128.0);
 
     p[0] = max(0, min(R, 255));
     p[1] = max(0, min(G, 255));
