@@ -48,13 +48,13 @@ jpg_sof(ImByte * __restrict pRaw,
     icomp = &frm->compo[i];
     tmp   = pRaw[1];
     
-    icomp->id = pRaw[0];;      /* Ci  */
-    icomp->V  = tmp & 0x0F;    /* Vi  */
-    icomp->H  = tmp >> 4;      /* Hi  */
-    icomp->Tq = pRaw[2];       /* Tqi */
+    icomp->id   = pRaw[0];;      /* Ci  */
+    icomp->sf.V = tmp & 0x0F;    /* Vi  */
+    icomp->sf.H = tmp >> 4;      /* Hi  */
+    icomp->Tq   = pRaw[2];       /* Tqi */
 
-    frm->hmax = im_maxiu8(frm->hmax, icomp->H);
-    frm->vmax = im_maxiu8(frm->vmax, icomp->V);
+    frm->hmax = im_maxiu8(frm->hmax, icomp->sf.H);
+    frm->vmax = im_maxiu8(frm->vmax, icomp->sf.V);
     
     pRaw += 3;
   }

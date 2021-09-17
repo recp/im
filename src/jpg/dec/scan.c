@@ -112,7 +112,7 @@ jpg_dequant(ImQuantTbl * __restrict qt,
 
 IM_EXPORT
 void
-im_YCbCrToRGB_8x8(int16_t blk[3][64], ImByte * __restrict dest) {
+im_YCbCrToRGB_8x8(ImByte blk[3][64], ImByte * __restrict dest) {
   float Y, Cb, Cr;
   int   R, G, B;
 
@@ -121,11 +121,11 @@ im_YCbCrToRGB_8x8(int16_t blk[3][64], ImByte * __restrict dest) {
       Y  = blk[0][y * 8 + x];
       Cb = blk[1][y * 8 + x];
       Cr = blk[2][y * 8 + x];
-      
+
       R = floorf(Y + 1.402 * (1.0 * Cr - 128.0));
       G = floorf(Y - 0.344136 * (1.0 * Cb - 128.0) - 0.714136 * (1.0 * Cr - 128.0));
       B = floorf(Y + 1.772 * (1.0 * Cb - 128.0));
-      
+
       R = max(0, min(R, 255));
       G = max(0, min(G, 255));
       B = max(0, min(B, 255));
@@ -143,8 +143,9 @@ jpg_scan_intr(ImByte * __restrict pRaw,
               ImJpeg * __restrict jpg,
               ImScan * __restrict scan) {
   ImFrm  *frm;
-  int16_t data[3][64];
-  int     mcux, mcuy, i, j, k, hmax, vmax, prev;
+  int16_t data[64];
+  ImByte  blk[64];
+  int     mcux, mcuy, i, j, k, hmax, vmax, prev, Ns;
 
   frm  = &jpg->frm;
   hmax = frm->hmax * 8;
@@ -156,14 +157,17 @@ jpg_scan_intr(ImByte * __restrict pRaw,
   prev       = 0;
   scan->cnt  = 0;
   scan->pRaw = pRaw;
+  Ns         = scan->Ns;
 
   for (i = 0; i < mcuy; i++) {
     for (j = 0; j < mcux; j++) {
-      for (k = 0; k < scan->Ns; k++) {
+      uint32_t Vi, Hi, h, v;
+
+      for (k = 0; k < Ns; k++) {
         ImQuantTbl     *qt;
         ImComponentSel *icomp;
         ImComponent    *comp;
-        int32_t         Csj, Tqi, Vi, Hi, h, v;
+        int32_t         Csj, Tqi;
 
         icomp = &scan->compo.comp[k];
         Csj   = icomp->id;
@@ -175,19 +179,28 @@ jpg_scan_intr(ImByte * __restrict pRaw,
         Tqi   = comp->Tq;
         qt    = &jpg->dqt[Tqi];
 
-        memset(data[k], 0, sizeof(data[k]));
+        memset(data, 0, sizeof(data));
+        memset(blk,  0, sizeof(blk));
 
-        jpg_scan_block(jpg, scan, icomp, data[k]);
+        Vi = comp->sf.V;
+        Hi = comp->sf.H;
 
-        data[k][0] += icomp->pred;
-        icomp->pred = data[k][0];
+        for (v = 0; v < Vi; v++) {
+          for (h = 0; h < Hi; h++) {
+            data[0] += icomp->pred;
+            icomp->pred = data[0];
 
-        jpg_dequant(qt, data[k]);
+            jpg_scan_block(jpg, scan, icomp, data);
+            jpg_dequant(qt, data);
+            jpg_idct3(data, blk);
+
+            for (int t = 0; t < 64; t++) {
+              scan->blk[t * 3 + k] = blk[t];
+            }
+          }
+        }
       }
-      
-      jpg_idct2(data);
-      im_YCbCrToRGB_8x8(data, scan->blk);
-      
+
       thread_lock(&scan->blkmutex);
       scan->blk_mcux = j;
       scan->blk_mcuy = i;
@@ -195,7 +208,7 @@ jpg_scan_intr(ImByte * __restrict pRaw,
       thread_cond_signal(&jpg->cond);
     }
   }
-
+  
   return scan->pRaw;
 }
 

@@ -27,6 +27,8 @@
 
 #include "thread/thread.h"
 
+#include "color.h"
+
 typedef struct worker_arg_t {
   const char *path;
   ImImage    *image;
@@ -159,6 +161,8 @@ im_on_worker_idct(void *argv) {
   }
 
   thread_unlock(&jpg->mutex);
+
+  im_YCbCrToRGB(jpg->im->data, im->width * im->height * 3);
 }
 
 IM_EXPORT
@@ -186,6 +190,6 @@ im_load(const char * __restrict path) {
 
   thread_release(scan_worker);
   thread_release(idct_worker);
-
+  
   return arg.image;
 }

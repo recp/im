@@ -15,7 +15,7 @@
  */
 
 #include "idct.h"
-
+#include <stdio.h>
 /*
  References:
  [0]: https://golang.org/src/image/jpeg/idct.go
@@ -82,6 +82,36 @@ jpg_idct2(int16_t blk[3][64]) {
       for (int x = 0; x < 8; ++x) {
         blk[i][y * 8 + x] = roundl(data[i][y * 8 + x]) + 128;
       }
+    }
+  }
+}
+
+IM_HIDE
+void
+jpg_idct3(int16_t blk[64], uint8_t dst[64]) {
+  int16_t data[64];
+  
+  for (int y = 0; y < 8; ++y) {
+    for (int x = 0; x < 8; ++x) {
+      float sum = 0.0;
+      
+      for (int u = 0; u < 8; ++u) {
+        for (int v = 0; v < 8; ++v) {
+          float Cu = u == 0 ? 1.0 / sqrtf(2.0) : 1.0;
+          float Cv = v == 0 ? 1.0 / sqrtf(2.0) : 1.0;
+          
+          sum += Cu * Cv * blk[u * 8 + v] * cosf((2 * x + 1) * u * M_PI / 16.0) *
+          cosf((2 * y + 1) * v * M_PI / 16.0);
+        }
+      }
+      
+      data[x * 8 + y] = 0.25 * sum;
+    }
+  }
+
+  for (int y = 0; y < 8; ++y) {
+    for (int x = 0; x < 8; ++x) {
+      dst[y * 8 + x] = min(roundl(data[y * 8 + x]) + 128, 255);
     }
   }
 }

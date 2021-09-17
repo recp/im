@@ -37,11 +37,15 @@ typedef struct ImHuffTbl {
   bool                  valid;
 } ImHuffTbl;
 
-typedef struct ImComponent {
-  int32_t id;
-  int32_t Tq;
+typedef struct ImSampleFactor {
   int32_t H;
   int32_t V;
+} ImSampleFactor;
+
+typedef struct ImComponent {
+  int32_t        id;
+  int32_t        Tq;
+  ImSampleFactor sf;
 } ImComponent;
 
 typedef struct ImComponentSel {
@@ -60,6 +64,7 @@ typedef struct ImFrm {
   uint8_t       hmax;
   uint8_t       vmax;
   ImComponent   compo[256];
+  uint8_t       samp[4];
 } ImFrm;
 
 typedef struct ImScan {

@@ -36,4 +36,7 @@ jpg_receive(ImScan    * __restrict scan,
 int32_t
 jpg_extend(int32_t v, int32_t t);
 
+uint8_t
+jpg_nextbit(ImScan * __restrict scan) ;
+
 #endif /* src_jpg_huff_h */
