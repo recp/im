@@ -109,10 +109,8 @@ jpg_idct3(int16_t blk[64], uint8_t dst[64]) {
     }
   }
 
-  for (int y = 0; y < 8; ++y) {
-    for (int x = 0; x < 8; ++x) {
-      dst[y * 8 + x] = min(roundl(data[y * 8 + x]) + 128, 255);
-    }
+  for (int y = 0; y < 64; y++) {
+    dst[y] = max(min(roundl(data[y]) + 128, 255), 0);
   }
 }
 
