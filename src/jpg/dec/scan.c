@@ -110,33 +110,6 @@ jpg_dequant(ImQuantTbl * __restrict qt,
   }
 }
 
-IM_EXPORT
-void
-im_YCbCrToRGB_8x8(ImByte blk[3][64], ImByte * __restrict dest) {
-  float Y, Cb, Cr;
-  int   R, G, B;
-
-  for (int y = 0; y < 8; ++y) {
-    for (int x = 0; x < 8; ++x) {
-      Y  = blk[0][y * 8 + x];
-      Cb = blk[1][y * 8 + x];
-      Cr = blk[2][y * 8 + x];
-
-      R = floorf(Y + 1.402 * (1.0 * Cr - 128.0));
-      G = floorf(Y - 0.344136 * (1.0 * Cb - 128.0) - 0.714136 * (1.0 * Cr - 128.0));
-      B = floorf(Y + 1.772 * (1.0 * Cb - 128.0));
-
-      R = max(0, min(R, 255));
-      G = max(0, min(G, 255));
-      B = max(0, min(B, 255));
-
-      dest[3 * (y * 8 + x) + 0] = R;
-      dest[3 * (y * 8 + x) + 1] = G;
-      dest[3 * (y * 8 + x) + 2] = B;
-    }
-  }
-}
-
 IM_HIDE
 ImByte*
 jpg_scan_intr(ImByte * __restrict pRaw,
