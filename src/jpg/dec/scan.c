@@ -186,9 +186,8 @@ jpg_scan_intr(ImByte * __restrict pRaw,
         for (v = 0; v < Vi; v++) {
           for (h = 0; h < Hi; h++) {
             jpg_scan_block(jpg, scan, icomp, data);
-            
-            data[0]    += icomp->pred;
-            icomp->pred = data[0];
+
+            icomp->pred = (data[0] += icomp->pred);
 
             jpg_dequant(qt, data);
             jpg_idct3(data);
