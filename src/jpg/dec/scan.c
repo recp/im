@@ -110,18 +110,6 @@ jpg_dequant(ImQuantTbl * __restrict qt,
   }
 }
 
-int min(int a, int b) {
-  if (a < b)
-    return a;
-  return b;
-}
-
-int max(int a, int b) {
-  if (a > b)
-    return a;
-  return b;
-}
-
 IM_EXPORT
 void
 im_YCbCrToRGB_8x8(int16_t blk[3][64], ImByte * __restrict dest) {
