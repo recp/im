@@ -144,7 +144,6 @@ jpg_scan_intr(ImByte * __restrict pRaw,
               ImScan * __restrict scan) {
   ImFrm  *frm;
   int16_t data[64];
-  ImByte  blk[64];
   int     mcux, mcuy, i, j, k, hmax, vmax, prev, Ns;
 
   frm  = &jpg->frm;
@@ -176,11 +175,10 @@ jpg_scan_intr(ImByte * __restrict pRaw,
           thread_exit();
         }
 
-        Tqi   = comp->Tq;
-        qt    = &jpg->dqt[Tqi];
+        Tqi = comp->Tq;
+        qt  = &jpg->dqt[Tqi];
 
         memset(data, 0, sizeof(data));
-        memset(blk,  0, sizeof(blk));
 
         Vi = comp->sf.V;
         Hi = comp->sf.H;
@@ -192,10 +190,10 @@ jpg_scan_intr(ImByte * __restrict pRaw,
 
             jpg_scan_block(jpg, scan, icomp, data);
             jpg_dequant(qt, data);
-            jpg_idct3(data, blk);
+            jpg_idct3(data);
 
             for (int t = 0; t < 64; t++) {
-              scan->blk[t * 3 + k] = blk[t];
+              scan->blk[t * 3 + k] = data[t];
             }
           }
         }

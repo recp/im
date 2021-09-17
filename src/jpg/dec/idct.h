@@ -26,7 +26,9 @@ jpg_idct(int16_t * __restrict blk);
 IM_HIDE
 void
 jpg_idct2(int16_t blk[3][64]);
+
 IM_HIDE
 void
-jpg_idct3(int16_t blk[64], uint8_t dst[64]);
+jpg_idct3(int16_t blk[64]);
+
 #endif /* src_jpg_idct_h */

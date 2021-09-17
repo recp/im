@@ -88,7 +88,7 @@ jpg_idct2(int16_t blk[3][64]) {
 
 IM_HIDE
 void
-jpg_idct3(int16_t blk[64], uint8_t dst[64]) {
+jpg_idct3(int16_t blk[64]) {
   int16_t data[64];
   
   for (int y = 0; y < 8; ++y) {
@@ -110,7 +110,7 @@ jpg_idct3(int16_t blk[64], uint8_t dst[64]) {
   }
 
   for (int y = 0; y < 64; y++) {
-    dst[y] = max(min(roundl(data[y]) + 128, 255), 0);
+    blk[y] = max(min(roundl(data[y]) + 128, 255), 0);
   }
 }
 

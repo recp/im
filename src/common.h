@@ -69,7 +69,7 @@ typedef struct ImFrm {
 
 typedef struct ImScan {
   struct ImJpeg  *jpg;
-  ImByte          blk[192];
+  int16_t         blk[192];
   th_thread_mutex blkmutex;
   int32_t         blk_mcuy, blk_mcux;
 

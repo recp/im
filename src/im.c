@@ -113,7 +113,8 @@ im_on_worker_idct(void *argv) {
   worker_arg_t *arg;
   ImImage      *im;
   ImJpeg       *jpg;
-  ImByte       *p, *p2;
+  ImByte       *p;
+  int16_t      *p2;
   bool          started;
   
   started = false;
