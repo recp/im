@@ -58,7 +58,7 @@ jpg_decode_ac(ImJpeg    * __restrict jpg,
               ImScan    * __restrict scan,
               ImHuffTbl * __restrict huff,
               int16_t   * __restrict zz) {
-  int16_t k, rs, ssss, r;
+  uint8_t k, rs, ssss, r;
 
   k = 1;
 
