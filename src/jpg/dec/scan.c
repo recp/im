@@ -45,13 +45,11 @@ jpg_decode_dc(ImJpeg    * __restrict jpg,
               ImScan    * __restrict scan,
               ImHuffTbl * __restrict huff,
               int16_t   * __restrict zz) {
-  int16_t t, diff;
+  int16_t t;
 
-  t     = jpg_decode(scan, huff);
-  diff  = jpg_receive(scan, huff, t);
-  diff  = jpg_extend(diff, t);
-
-  zz[0] = diff;
+  if ((t = jpg_decode(scan, huff))) {
+    zz[0] = jpg_extend(jpg_receive(scan, huff, t), t);
+  }
 }
 
 IM_HIDE
