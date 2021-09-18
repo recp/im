@@ -118,11 +118,9 @@ jpg_decode(ImScan    * __restrict scan,
 
   code = jpg_nextbit(scan);
   i    = 0;
-  
-  for (; code > huff->maxcode[i]; ) {
-    code = (code << 1) | jpg_nextbit(scan);
-    if (++i == 16)
-      return 0;
+
+  for (; code > huff->maxcode[i] && i < 16; i++) {
+    code = (code << 1) + jpg_nextbit(scan);
   }
 
   return huff->huffval[code + huff->delta[i]];
