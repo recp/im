@@ -113,9 +113,10 @@ ImByte*
 jpg_scan_intr(ImByte * __restrict pRaw,
               ImJpeg * __restrict jpg,
               ImScan * __restrict scan) {
-  ImFrm  *frm;
-  int16_t data[64];
-  int     mcux, mcuy, i, j, k, hmax, vmax, Ns;
+  ImFrm           *frm;
+  ImThreadedBlock *tb;
+  int16_t          data[64];
+  int              mcux, mcuy, i, j, k, hmax, vmax, Ns;
 
   frm  = &jpg->frm;
   hmax = frm->hmax * 8;
@@ -127,10 +128,18 @@ jpg_scan_intr(ImByte * __restrict pRaw,
   scan->cnt  = 0;
   scan->pRaw = pRaw;
   Ns         = scan->Ns;
-
+  
   for (i = 0; i < mcuy; i++) {
     for (j = 0; j < mcux; j++) {
       uint32_t Vi, Hi, h, v;
+      
+      tb = &jpg->blkpool[jpg->dec_index];
+      if (!tb->avail) {
+        /* thread_cond_wait(&jpg->dec_cond, &jpg->decmutex); */
+        while (!tb->avail) { }
+      }
+
+      thread_lock(&tb->mutex);
 
       for (k = 0; k < Ns; k++) {
         ImQuantTbl     *qt;
@@ -164,20 +173,26 @@ jpg_scan_intr(ImByte * __restrict pRaw,
             jpg_idct(data);
 
             for (int t = 0; t < 64; t++) {
-              scan->blk[t * 3 + k] = data[t];
+              tb->blk[t * 3 + k] = data[t];
             }
           }
         }
       }
 
-      thread_lock(&scan->blkmutex);
-      scan->blk_mcux = j;
-      scan->blk_mcuy = i;
-      thread_unlock(&scan->blkmutex);
+      tb->mcux = j;
+      tb->mcuy = i;
+      
+      if (++jpg->dec_index > 2)
+        jpg->dec_index = 0;
+
+      tb->avail = false;
+      thread_unlock(&tb->mutex);
       thread_cond_signal(&jpg->cond);
     }
   }
-  
+
+  thread_unlock(&jpg->decmutex);
+
   return scan->pRaw;
 }
 

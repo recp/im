@@ -122,50 +122,70 @@ im_on_worker_idct(void *argv) {
   jpg     = arg->jpg;
   im      = arg->image;
   
-  thread_lock(&jpg->mutex);
+  thread_lock(&jpg->wrkmutex);
 
   while (!started || jpg->nScans > 0) {
-    thread_cond_wait(&jpg->cond, &jpg->mutex);
+    ImThreadedBlock *blk;
+
+    thread_cond_wait(&jpg->cond, &jpg->wrkmutex);
 
     if (jpg->failed)
       break;
 
     if (!(im = jpg->im))
       continue;
-
-    thread_lock(&jpg->scan->blkmutex);
     
     int row, col, width;
     
-    row   = jpg->scan->blk_mcuy * 8;
-    col   = jpg->scan->blk_mcux * 8;
-    width = jpg->frm.width;
-    p     = ((ImByte *)im->data);
-    p2    = jpg->scan->blk;
+    /* consume avail blocks */
+    for (;;) {
+      blk = &jpg->blkpool[jpg->wrk_index];
+      if (blk->avail)
+        break;
 
-    for (int i = 0; i < 8; i++) {
-      for (int j = 0; j < 8; j++) {
-        p[3 * ((row + i) * width + (col + j)) + 0] = *p2++;
-        p[3 * ((row + i) * width + (col + j)) + 1] = *p2++;
-        p[3 * ((row + i) * width + (col + j)) + 2] = *p2++;
+      thread_lock(&blk->mutex);
+
+      row   = blk->mcuy * 8;
+      col   = blk->mcux * 8;
+      width = jpg->frm.width;
+      p     = ((ImByte *)im->data);
+      p2    = blk->blk;
+
+      for (int i = 0; i < 8; i++) {
+        for (int j = 0; j < 8; j++) {
+          p[3 * ((row + i) * width + (col + j)) + 0] = *p2++;
+          p[3 * ((row + i) * width + (col + j)) + 1] = *p2++;
+          p[3 * ((row + i) * width + (col + j)) + 2] = *p2++;
+        }
       }
+      
+      if (++jpg->wrk_index > 2)
+        jpg->wrk_index = 0;
+      
+      blk->avail = true;
+
+      thread_unlock(&blk->mutex);
+      
+      /* thread_cond_signal(&jpg->dec_cond); */
     }
-
-    thread_unlock(&jpg->scan->blkmutex);
-
-    /*
-     thread_rdlock(&jpg->rwlock);
-     thread_rwunlock(&jpg->rwlock);
-     */
 
     started = true;
   }
 
-  thread_unlock(&jpg->mutex);
+  thread_unlock(&jpg->wrkmutex);
 
   if (im) {
     im_YCbCrToRGB(jpg->im->data, im->width, im->height);
   }
+
+//  im_resample(jpg->im->data,
+//              im->width,
+//              im->height,
+//              (ImSampleFactor[]){
+//                jpg->frm.compo[0].sf,
+//                jpg->frm.compo[1].sf,
+//                jpg->frm.compo[2].sf
+//              });
 }
 
 IM_EXPORT
@@ -181,9 +201,18 @@ im_load(const char * __restrict path) {
   arg.image = NULL;
 
   thread_cond_init(&jpg->cond);
-  thread_mutex_init(&jpg->mutex);
-  thread_rwlock_init(&jpg->rwlock);
+  thread_cond_init(&jpg->dec_cond);
+  thread_mutex_init(&jpg->wrkmutex);
+  thread_mutex_init(&jpg->decmutex);
   
+  jpg->blkpool[0].avail = true;
+  jpg->blkpool[1].avail = true;
+  jpg->blkpool[2].avail = true;
+  
+  thread_mutex_init(&jpg->blkpool[0].mutex);
+  thread_mutex_init(&jpg->blkpool[1].mutex);
+  thread_mutex_init(&jpg->blkpool[2].mutex);
+
   scan_worker = thread_new(im_on_worker, &arg);
   idct_worker = thread_new(im_on_worker_idct, &arg);
 

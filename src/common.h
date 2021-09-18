@@ -67,12 +67,16 @@ typedef struct ImFrm {
   uint8_t       samp[4];
 } ImFrm;
 
+typedef struct ImThreadedBlock {
+  int16_t         blk[192];
+  th_thread_mutex mutex;
+  int32_t         mcuy;
+  int32_t         mcux;
+  bool            avail;
+} ImThreadedBlock;
+
 typedef struct ImScan {
   struct ImJpeg  *jpg;
-  int16_t         blk[192];
-  th_thread_mutex blkmutex;
-  int32_t         blk_mcuy, blk_mcux;
-
   struct {
     ImComponentSel comp[4];
     uint32_t       ncomp;
@@ -116,10 +120,16 @@ typedef struct ImJpeg {
   ImComment        *comments;
   ImJpegResult      result;
   th_thread_cond    cond;
-  th_thread_mutex   mutex;
-  th_thread_rwlock  rwlock;
+  th_thread_cond    dec_cond;
+  th_thread_mutex   wrkmutex;
+  th_thread_mutex   decmutex;
   uint32_t          nScans;
   bool              failed;
+  
+  ImThreadedBlock   blkpool[3];
+  int               dec_index;
+  int               wrk_index;
+  int               avail_index;
 } ImJpeg;
 
 IM_INLINE
@@ -181,4 +191,5 @@ max(int a, int b) {
   return b;
 }
 
+IM_INLINE
 #endif /* src_common_h */

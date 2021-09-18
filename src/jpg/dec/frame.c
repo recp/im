@@ -103,8 +103,6 @@ jpg_sos(ImByte * __restrict pRaw,
   tmp                   = pRaw[2];
   scan->apprxLo         = tmp & 0x0F;
   scan->apprxHi         = tmp >> 4;
-  
-  thread_mutex_init(&scan->blkmutex);
 
   jpg->scan = scan;
   jpg->nScans++;
