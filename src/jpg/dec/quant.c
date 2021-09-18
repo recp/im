@@ -20,46 +20,49 @@
 # include <emmintrin.h>
 #endif
 
+extern uint32_t unzig[64];
+
 IM_INLINE
 void
 jpg_quant8(ImByte * __restrict pRaw, uint16_t qt[64]) {
-#if defined(__SSE__) || defined(__SSE2__)
-  __m128i zero, src, lo, hi;
-
-  zero = _mm_setzero_si128();
-
-  src = _mm_loadu_si128(( __m128i *)pRaw);
-  lo  = _mm_unpacklo_epi8(src, zero);
-  hi  = _mm_unpackhi_epi8(src, zero);
-
-  _mm_store_si128((__m128i *)&qt[0], lo);
-  _mm_store_si128((__m128i *)&qt[8], hi);
-
-  src = _mm_loadu_si128((__m128i *)&pRaw[16]);
-  lo  = _mm_unpacklo_epi8(src, zero);
-  hi  = _mm_unpackhi_epi8(src, zero);
-
-  _mm_store_si128((__m128i *)&qt[16], lo);
-  _mm_store_si128((__m128i *)&qt[24], hi);
-
-  src = _mm_loadu_si128((__m128i *)&pRaw[32]);
-  lo  = _mm_unpacklo_epi8(src, zero);
-  hi  = _mm_unpackhi_epi8(src, zero);
-
-  _mm_store_si128((__m128i *)&qt[32], lo);
-  _mm_store_si128((__m128i *)&qt[40], hi);
-
-  src = _mm_loadu_si128((__m128i *)&pRaw[48]);
-  lo  = _mm_unpacklo_epi8(src, zero);
-  hi  = _mm_unpackhi_epi8(src, zero);
-
-  _mm_store_si128((__m128i *)&qt[48], lo);
-  _mm_store_si128((__m128i *)&qt[56], hi);
-#else
+//#if defined(__SSE__) || defined(__SSE2__)
+//  __m128i zero, src, lo, hi;
+//
+//  zero = _mm_setzero_si128();
+//
+//  src = _mm_loadu_si128(( __m128i *)pRaw);
+//  lo  = _mm_unpacklo_epi8(src, zero);
+//  hi  = _mm_unpackhi_epi8(src, zero);
+//
+//  _mm_store_si128((__m128i *)&qt[0], lo);
+//  _mm_store_si128((__m128i *)&qt[8], hi);
+//
+//  src = _mm_loadu_si128((__m128i *)&pRaw[16]);
+//  lo  = _mm_unpacklo_epi8(src, zero);
+//  hi  = _mm_unpackhi_epi8(src, zero);
+//
+//  _mm_store_si128((__m128i *)&qt[16], lo);
+//  _mm_store_si128((__m128i *)&qt[24], hi);
+//
+//  src = _mm_loadu_si128((__m128i *)&pRaw[32]);
+//  lo  = _mm_unpacklo_epi8(src, zero);
+//  hi  = _mm_unpackhi_epi8(src, zero);
+//
+//  _mm_store_si128((__m128i *)&qt[32], lo);
+//  _mm_store_si128((__m128i *)&qt[40], hi);
+//
+//  src = _mm_loadu_si128((__m128i *)&pRaw[48]);
+//  lo  = _mm_unpacklo_epi8(src, zero);
+//  hi  = _mm_unpackhi_epi8(src, zero);
+//
+//  _mm_store_si128((__m128i *)&qt[48], lo);
+//  _mm_store_si128((__m128i *)&qt[56], hi);
+//#else
   int i;
-  for (i = 0; i < 64; i++)
-    qt[i] = pRaw[i];
-#endif
+  for (i = 0; i < 64; i++) {
+    qt[unzig[i]] = pRaw[i];
+  }
+//#endif
 }
 
 IM_INLINE
