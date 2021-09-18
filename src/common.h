@@ -191,5 +191,4 @@ max(int a, int b) {
   return b;
 }
 
-IM_INLINE
 #endif /* src_common_h */
