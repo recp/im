@@ -161,7 +161,7 @@ jpg_scan_intr(ImByte * __restrict pRaw,
             icomp->pred = (data[0] += icomp->pred);
 
             jpg_dequant(qt, data);
-            jpg_idct3(data);
+            jpg_idct(data);
 
             for (int t = 0; t < 64; t++) {
               scan->blk[t * 3 + k] = data[t];

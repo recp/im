@@ -52,39 +52,6 @@
   ASSP, Vol. ASSP- 32, pp. 803-816, Aug. 1984
 */
 #include <math.h>
-IM_HIDE
-void
-jpg_idct2(int16_t blk[3][64]) {
-  int16_t data[3][64];
-  
-  for (int i = 0; i < 3; ++i) {
-    for (int y = 0; y < 8; ++y) {
-      for (int x = 0; x < 8; ++x) {
-        float sum = 0.0;
-        
-        for (int u = 0; u < 8; ++u) {
-          for (int v = 0; v < 8; ++v) {
-            float Cu = u == 0 ? 1.0 / sqrtf(2.0) : 1.0;
-            float Cv = v == 0 ? 1.0 / sqrtf(2.0) : 1.0;
-            
-            sum += Cu * Cv * blk[i][u * 8 +  v] * cosf((2 * x + 1) * u * M_PI / 16.0) *
-            cosf((2 * y + 1) * v * M_PI / 16.0);
-          }
-        }
-        
-        data[i][x * 8 + y] = 0.25 * sum;
-      }
-    }
-  }
-  
-  for (int i = 0; i < 3; ++i) {
-    for (int y = 0; y < 8; ++y) {
-      for (int x = 0; x < 8; ++x) {
-        blk[i][y * 8 + x] = roundl(data[i][y * 8 + x]) + 128;
-      }
-    }
-  }
-}
 
 IM_HIDE
 void
@@ -117,36 +84,23 @@ jpg_idct3(int16_t blk[64]) {
 IM_HIDE
 void
 jpg_idct(int16_t * __restrict blk) {
-  int x, y, x0, x1, x2, x3, x4, x5, x6, x7, x8,
-            y0, y1, y2, y3, y4, y5, y6, y7, y8;
+  int16_t *s;
+  int32_t x, y,
+          x0, x1, x2, x3, x4, x5, x6, x7, x8,
+          y0, y1, y2, y3, y4, y5, y6, y7, y8;
 
   /* Horizontal 1-D IDCT. */
   for (y = 0; y < 8; y++) {
-    y8 = y * 8;
+    s = blk + y * 8;
 
     /* if all the AC components are zero, then the IDCT is trivial */
-    if (blk[y8 + 1] == 0 && blk[y8 + 2] == 0 && blk[y8 + 3] == 0 &&
-        blk[y8 + 4] == 0 && blk[y8 + 5] == 0 && blk[y8 + 6] == 0 &&
-        blk[y8 + 7] == 0) {
-      blk[y8 + 0] =
-      blk[y8 + 1] =
-      blk[y8 + 2] =
-      blk[y8 + 3] =
-      blk[y8 + 4] =
-      blk[y8 + 5] =
-      blk[y8 + 6] =
-      blk[y8 + 7] = blk[y8 + 0] << 3;
-      return;
+    if (!((x1 = (s[4] << 11)) | (x2 = s[6]) | (x3 = s[2]) | (x4 = s[1])
+        | (x5 = s[7]) | (x6 = s[5]) | (x7 = s[3]))) {
+      s[0] = s[1] = s[2] = s[3] = s[4] = s[5] = s[6] = s[7] = s[0] << 3;
+      continue;
     }
 
-    x0  = (blk[y8 + 0] << 11) + 128;
-    x1  = blk[y8 + 4] << 11;
-    x2  = blk[y8 + 6];
-    x3  = blk[y8 + 2];
-    x4  = blk[y8 + 1];
-    x5  = blk[y8 + 7];
-    x6  = blk[y8 + 5];
-    x7  = blk[y8 + 3];
+    x0  = (s[0] << 11) + 128;
 
     /* stage 1 */
     x8  = w7 * (x4 + x5);
@@ -176,31 +130,32 @@ jpg_idct(int16_t * __restrict blk) {
     x4  = (r2 * (x4 - x5) + 128) >> 8;
 
     /* stage 4 */
-    blk[y8 + 0] = (x7 + x1) >> 8;
-    blk[y8 + 1] = (x3 + x2) >> 8;
-    blk[y8 + 2] = (x0 + x4) >> 8;
-    blk[y8 + 3] = (x8 + x6) >> 8;
-    blk[y8 + 4] = (x8 - x6) >> 8;
-    blk[y8 + 5] = (x0 - x4) >> 8;
-    blk[y8 + 6] = (x3 - x2) >> 8;
-    blk[y8 + 7] = (x7 - x1) >> 8;
+    s[0] = (x7 + x1) >> 8;
+    s[1] = (x3 + x2) >> 8;
+    s[2] = (x0 + x4) >> 8;
+    s[3] = (x8 + x6) >> 8;
+    s[4] = (x8 - x6) >> 8;
+    s[5] = (x0 - x4) >> 8;
+    s[6] = (x3 - x2) >> 8;
+    s[7] = (x7 - x1) >> 8;
   }
 
   for (x = 0; x < 8; x++) {
+    s = blk + x;
     /*
      similar to the horizontal 1-D IDCT case, if all the AC components are zero,
      then the IDCT is trivial.
      however, after performing the horizontal 1-D IDCT, there are typically
      non-zero AC components, so
      we do not bother to check for the all-zero case. */
-    y0 = (blk[8 * 0 + x] << 8) + 8192;
-    y1 = blk[8 * 4 + x] << 8;
-    y2 = blk[8 * 6 + x];
-    y3 = blk[8 * 2 + x];
-    y4 = blk[8 * 1 + x];
-    y5 = blk[8 * 7 + x];
-    y6 = blk[8 * 5 + x];
-    y7 = blk[8 * 3 + x];
+    y0 = (s[8 * 0] << 8) + 8192;
+    y1 = s[8 * 4] << 8;
+    y2 = s[8 * 6];
+    y3 = s[8 * 2];
+    y4 = s[8 * 1];
+    y5 = s[8 * 7];
+    y6 = s[8 * 5];
+    y7 = s[8 * 3];
 
     /* stage 1 */
     y8 = w7 * (y4 + y5) + 4;
@@ -230,13 +185,17 @@ jpg_idct(int16_t * __restrict blk) {
     y4 = (r2 * (y4 - y5) + 128) >> 8;
 
     /* stage 4 */
-    blk[8 * 0 + x] = (y7 + y1) >> 14;
-    blk[8 * 1 + x] = (y3 + y2) >> 14;
-    blk[8 * 2 + x] = (y0 + y4) >> 14;
-    blk[8 * 3 + x] = (y8 + y6) >> 14;
-    blk[8 * 4 + x] = (y8 - y6) >> 14;
-    blk[8 * 5 + x] = (y0 - y4) >> 14;
-    blk[8 * 6 + x] = (y3 - y2) >> 14;
-    blk[8 * 7 + x] = (y7 - y1) >> 14;
+    s[8 * 0] = (y7 + y1) >> 14;
+    s[8 * 1] = (y3 + y2) >> 14;
+    s[8 * 2] = (y0 + y4) >> 14;
+    s[8 * 3] = (y8 + y6) >> 14;
+    s[8 * 4] = (y8 - y6) >> 14;
+    s[8 * 5] = (y0 - y4) >> 14;
+    s[8 * 6] = (y3 - y2) >> 14;
+    s[8 * 7] = (y7 - y1) >> 14;
+  }
+
+  for (int y = 0; y < 64; y++) {
+    blk[y] = max(min(roundl(blk[y]) + 128, 255), 0);
   }
 }
