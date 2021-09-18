@@ -33,16 +33,16 @@ jpg_huffcodes(ImByte    * __restrict BITS,
   uint8_t  i, j, Li;
   
   for (i = 0, j = 0, code = 0, count = 0; i < 16; i++) {
-    Li     = BITS[i];
-    count += Li;
- 
+    Li = BITS[i];
+
     if (Li) {
       huff->delta[i]   = j - code;
       huff->maxcode[i] = code + Li - 1;
-      j                += Li;
-      code             = code + Li;
+      j               += Li;
+      code            += Li;
+      count           += Li;
     }
-    
+
     code <<= 1;
   }
 
