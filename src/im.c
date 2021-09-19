@@ -135,7 +135,7 @@ im_on_worker_idct(void *argv) {
     if (!(im = jpg->im))
       continue;
     
-    int row, col, width;
+    int row, col, width, xi, yi;
     
     /* consume avail blocks */
     for (;;) {
@@ -150,9 +150,11 @@ im_on_worker_idct(void *argv) {
       width = jpg->frm.width;
       p     = ((ImByte *)im->data);
       p2    = blk->blk;
+      xi    = blk->xi;
+      yi    = blk->yi;
 
-      for (int i = 0; i < 8; i++) {
-        for (int j = 0; j < 8; j++) {
+      for (int i = 0; i < yi; i++) {
+        for (int j = 0; j < xi; j++) {
           p[3 * ((row + i) * width + (col + j)) + 0] = *p2++;
           p[3 * ((row + i) * width + (col + j)) + 1] = *p2++;
           p[3 * ((row + i) * width + (col + j)) + 2] = *p2++;

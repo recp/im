@@ -116,7 +116,7 @@ jpg_scan_intr(ImByte * __restrict pRaw,
   ImFrm           *frm;
   ImThreadedBlock *tb;
   int16_t          data[64];
-  int              mcux, mcuy, i, j, k, hmax, vmax, Ns;
+  int              mcux, mcuy, i, j, k, hmax, vmax, Ns, X, Y;
 
   frm  = &jpg->frm;
   hmax = frm->hmax * 8;
@@ -124,6 +124,8 @@ jpg_scan_intr(ImByte * __restrict pRaw,
 
   mcux = (frm->width  + hmax - 1) / hmax;
   mcuy = (frm->height + vmax - 1) / vmax;
+  X    = frm->width;
+  Y    = frm->height;
 
   scan->cnt  = 0;
   scan->pRaw = pRaw;
@@ -181,6 +183,8 @@ jpg_scan_intr(ImByte * __restrict pRaw,
 
       tb->mcux = j;
       tb->mcuy = i;
+      tb->xi   = min(X - 8 * j, 8);
+      tb->yi   = min(Y - 8 * i, 8);
       
       if (++jpg->dec_index > 2)
         jpg->dec_index = 0;

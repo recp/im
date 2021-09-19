@@ -72,6 +72,8 @@ typedef struct ImThreadedBlock {
   th_thread_mutex mutex;
   int32_t         mcuy;
   int32_t         mcux;
+  int8_t          xi;
+  int8_t          yi;
   bool            avail;
 } ImThreadedBlock;
 
