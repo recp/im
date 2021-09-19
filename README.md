@@ -21,4 +21,5 @@ TODO
 - [ ] WebP
 - [ ] AVIF
 - [ ] HEIF, HEIC, HEVC
+- [ ] SVG with library extension (**im.svg** library)
 - [ ] ...
