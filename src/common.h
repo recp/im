@@ -191,4 +191,10 @@ max(int a, int b) {
   return b;
 }
 
+IM_INLINE
+int
+clampi(int num, int minVal, int maxVal) {
+  return max(min(num, maxVal), minVal);
+}
+
 #endif /* src_common_h */
