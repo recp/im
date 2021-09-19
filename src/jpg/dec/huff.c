@@ -126,26 +126,6 @@ jpg_decode(ImScan    * __restrict scan,
   return huff->huffval[code + huff->delta[i]];
 }
 
-int
-ipow(int base, int exp) {
-  int result;
-
-  result = 1;
-  for (;;) {
-    if (exp & 1)
-      result *= base;
-
-    exp >>= 1;
-
-    if (!exp)
-      break;
-
-    base *= base;
-  }
-
-  return result;
-}
-
 int32_t
 jpg_receive(ImScan    * __restrict scan,
             ImHuffTbl * __restrict huff,
