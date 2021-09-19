@@ -18,8 +18,14 @@
 #define im_cocoa_h
 #ifdef __APPLE__
 
+#import <TargetConditionals.h>
 #include "common.h"
-#include <AppKit/NSImage.h>
+
+#if !TARGET_OS_IOS
+#  include <AppKit/NSImage.h>
+#else
+#  include <UIKit/UIKit.h>
+#endif
 
 /*
  https://docs.opencv.org/master/d3/def/tutorial_image_manipulation.html
@@ -78,18 +84,36 @@ im_cgimage(ImImage *im, bool copydata) {
   return imageRef;
 }
 
+#if !TARGET_OS_IOS
+
+/* AppKit */
+
 NSImage*
 im_nsimage(ImImage * __restrict im, bool copydata) {
   CGImageRef cgImage;
-  
-  cgImage = im_cgimage(im, copydata);
-  
-  if (!cgImage)
+
+  if (!(cgImage = im_cgimage(im, copydata)))
     return nil;
 
   return [[NSImage alloc] initWithCGImage: cgImage
                                      size: CGSizeMake(im->width, im->height)];
 }
+
+#else
+
+/* UIKit */
+
+UIImage*
+im_uiimage(ImImage * __restrict im, bool copydata) {
+  CGImageRef cgImage;
+
+  if (!(cgImage = im_cgimage(im, copydata)))
+    return nil;
+  
+  return [[UIImage alloc] initWithCGImage: cgImage];
+}
+
+#endif
 
 #endif
 #endif /* im_cocoa_h */
