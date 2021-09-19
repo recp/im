@@ -119,11 +119,11 @@ jpg_scan_intr(ImByte * __restrict pRaw,
   int              mcux, mcuy, i, j, k, hmax, vmax, Ns, X, Y;
 
   frm  = &jpg->frm;
-  hmax = frm->hmax * 8;
-  vmax = frm->vmax * 8;
+  hmax = frm->hmax;
+  vmax = frm->vmax;
 
-  mcux = (frm->width  + hmax - 1) / hmax;
-  mcuy = (frm->height + vmax - 1) / vmax;
+  mcux = (frm->width  + (hmax * 8) - 1) / (hmax * 8);
+  mcuy = (frm->height + (vmax * 8) - 1) / (vmax * 8);
   X    = frm->width;
   Y    = frm->height;
 
@@ -157,16 +157,17 @@ jpg_scan_intr(ImByte * __restrict pRaw,
           return NULL;
         }
 
-        Tqi = comp->Tq;
-        qt  = &jpg->dqt[Tqi];
-
-        memset(data, 0, sizeof(data));
-
-        Vi = comp->sf.V;
-        Hi = comp->sf.H;
+        Tqi         = comp->Tq;
+        qt          = &jpg->dqt[Tqi];
+        Vi          = comp->sf.V;
+        Hi          = comp->sf.H;
+        tb->sf[k].H = Hi;
+        tb->sf[k].V = Vi;
 
         for (v = 0; v < Vi; v++) {
           for (h = 0; h < Hi; h++) {
+            memset(data, 0, sizeof(data));
+
             jpg_scan_block(jpg, scan, icomp, data);
 
             icomp->pred = (data[0] += icomp->pred);
@@ -174,9 +175,7 @@ jpg_scan_intr(ImByte * __restrict pRaw,
             jpg_dequant(qt, data);
             jpg_idct(data);
 
-            for (int t = 0; t < 64; t++) {
-              tb->blk[t * 3 + k] = data[t];
-            }
+            memcpy(tb->blk[v][h][k].blk, data, sizeof(data));
           }
         }
       }

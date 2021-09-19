@@ -28,6 +28,7 @@
 #include "thread/thread.h"
 
 #include "color.h"
+#include "sampler.h"
 
 typedef struct worker_arg_t {
   const char *path;
@@ -113,8 +114,8 @@ im_on_worker_idct(void *argv) {
   worker_arg_t *arg;
   ImImage      *im;
   ImJpeg       *jpg;
-  ImByte       *p;
-  int16_t      *p2;
+  ImByte       *p, *pi;
+  int16_t      *p2, pix;
   bool          started;
   
   started = false;
@@ -135,7 +136,7 @@ im_on_worker_idct(void *argv) {
     if (!(im = jpg->im))
       continue;
     
-    int row, col, width, xi, yi;
+    int row, col, width, xi, yi, k, Ns, stride;
     
     /* consume avail blocks */
     for (;;) {
@@ -145,27 +146,73 @@ im_on_worker_idct(void *argv) {
 
       thread_lock(&blk->mutex);
 
+      stride = 3;
       row   = blk->mcuy * 8;
       col   = blk->mcux * 8;
       width = jpg->frm.width;
       p     = ((ImByte *)im->data);
-      p2    = blk->blk;
+      Ns    = jpg->scan->Ns;
       xi    = blk->xi;
       yi    = blk->yi;
 
-      for (int i = 0; i < yi; i++) {
-        for (int j = 0; j < xi; j++) {
-          p[3 * ((row + i) * width + (col + j)) + 0] = *p2++;
-          p[3 * ((row + i) * width + (col + j)) + 1] = *p2++;
-          p[3 * ((row + i) * width + (col + j)) + 2] = *p2++;
-        }
-      }
-      
+      for (k = 0; k < Ns; k++) {
+        int Hi, Vi, samplerClass;
+
+        Hi = jpg->frm.hmax / blk->sf[k].H;
+        Vi = jpg->frm.vmax / blk->sf[k].V;
+        samplerClass = Hi << 1 | Vi;
+
+        for (int v = 0; v < blk->sf[k].V; v++) {
+          for (int h = 0; h < blk->sf[k].H; h++) {
+            p2 = blk->blk[v][h][k].blk;
+            for (int i = 0; i < yi; i++) {
+              for (int j = 0; j < xi; j++) {
+                pix = *p2++;
+                pi  = &p[3 * ((row + i * Vi + v * 8) * width + (col + j * Hi + h * 8)) + k];
+                switch (samplerClass) {
+                  case IM_SAMPLER_11:
+                    p[3 * ((row + i * Vi + v * 8) * width + (col + j * Hi + h * 8)) + k] = pix;
+                    break;
+                  default:
+                    /* horizontal */
+                    for (int sh = 0; sh < Hi; sh++) {
+                      pi[Ns * sh] = pix;
+                    }
+                    
+                    /* vertical */
+                    for (int sv = 1; sv < Vi; sv++) {
+                      pi[width*3 * sv]      = pix;
+                      pi[width*3 * sv + Ns] = pix;
+                    }
+                    break;
+                }
+
+//                switch (samplerClass) {
+//                  case IM_SAMPLER_11:
+//                    p[3 * ((row + i * Vi + v * 8) * width + (col + j * Hi + h * 8)) + k] = pix;
+//                    break;
+//                  case IM_SAMPLER_22:
+//                    im_upsample8_2x2(pix,
+//                                     &p[3 * ((row + i * Vi + v * 8) * width + (col + j * Hi + h * 8)) + k],
+//                                     3,
+//                                     width * 3);
+//                    break;
+//                  default:
+//                    printf("olamazzzz\n");
+//                    break;
+//
+//
+//                }
+              } /* for j */
+            } /* for i */
+          } /* for h */
+        } /* for v */
+      } /* for k */
+
       if (++jpg->wrk_index > 2)
         jpg->wrk_index = 0;
       
       blk->avail = true;
-
       thread_unlock(&blk->mutex);
       
       /* thread_cond_signal(&jpg->dec_cond); */

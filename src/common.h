@@ -37,6 +37,11 @@ typedef struct ImHuffTbl {
   bool                  valid;
 } ImHuffTbl;
 
+typedef enum ImSamplerClass {
+  IM_SAMPLER_22 = 2 << 1 | 2,
+  IM_SAMPLER_11 = 1 << 1 | 1
+} ImSamplerClass;
+
 typedef struct ImSampleFactor {
   int32_t H;
   int32_t V;
@@ -67,14 +72,19 @@ typedef struct ImFrm {
   uint8_t       samp[4];
 } ImFrm;
 
+typedef struct ImBlockComponent {
+  int16_t         blk[64];
+} ImBlockComponent;
+
 typedef struct ImThreadedBlock {
-  int16_t         blk[192];
-  th_thread_mutex mutex;
-  int32_t         mcuy;
-  int32_t         mcux;
-  int8_t          xi;
-  int8_t          yi;
-  bool            avail;
+  ImBlockComponent blk[4][4][4]; /* RGB, CMYK for 4 samplers */
+  ImSampleFactor   sf[4];
+  th_thread_mutex  mutex;
+  int32_t          mcuy;
+  int32_t          mcux;
+  int8_t           xi;
+  int8_t           yi;
+  bool             avail;
 } ImThreadedBlock;
 
 typedef struct ImScan {
