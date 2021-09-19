@@ -136,7 +136,7 @@ im_on_worker_idct(void *argv) {
     if (!(im = jpg->im))
       continue;
     
-    int row, col, width, xi, yi, k, Ns;
+    int row, col, width, height, xi, yi, k, Ns;
     
     /* consume avail blocks */
     for (;;) {
@@ -146,20 +146,25 @@ im_on_worker_idct(void *argv) {
 
       thread_lock(&blk->mutex);
 
-      width = jpg->frm.width;
-      p     = ((ImByte *)im->data);
-      Ns    = jpg->scan->Ns;
+      width  = jpg->frm.width;
+      height = jpg->frm.height;
+      p      = ((ImByte *)im->data);
+      Ns     = jpg->scan->Ns;
 
       for (k = 0; k < Ns; k++) {
-        int Hi, Vi, V, H, samplerClass;
+        int Hi, Vi, V, H, hmax, vmax, samplerClass;
 
+        hmax         = jpg->frm.hmax;
+        vmax         = jpg->frm.vmax;
         H            = blk->sf[k].H;
         V            = blk->sf[k].V;
         Hi           = jpg->frm.hmax / H;
         Vi           = jpg->frm.vmax / V;
         samplerClass = Hi << 1 | Vi;
-        yi           = min(blk->yi, (jpg->frm.height - (blk->mcuy) * 8) * H / jpg->frm.hmax);
-        xi           = min(blk->xi, (jpg->frm.width  - (blk->mcux) * 8) * V / jpg->frm.vmax);
+        
+      
+        yi           = min(8, (height - blk->mcuy * 8 * vmax) * V / vmax);
+        xi           = min(8, (width  - blk->mcux * 8 * hmax) * H / hmax);
         row          = blk->mcuy * 8 * V;
         col          = blk->mcux * 8 * H;
 
@@ -169,9 +174,9 @@ im_on_worker_idct(void *argv) {
             for (int i = 0; i < yi; i++) {
               for (int j = 0; j < xi; j++) {
                 pix = *p2++;
-                pi  = &p[3 * (((row + i) * Vi + v * 8) * width
-                            + ((col + j) * Hi + h * 8))
-                            + k];
+                pi  = &p[Ns * (((row + i) * Vi + v * 8) * width
+                             + ((col + j) * Hi + h * 8))
+                             + k];
 
                 switch (samplerClass) {
                   case IM_SAMPLER_11:
