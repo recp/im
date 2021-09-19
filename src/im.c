@@ -156,14 +156,16 @@ im_on_worker_idct(void *argv) {
       yi    = blk->yi;
 
       for (k = 0; k < Ns; k++) {
-        int Hi, Vi, samplerClass;
+        int Hi, Vi, V, H, samplerClass;
 
-        Hi = jpg->frm.hmax / blk->sf[k].H;
-        Vi = jpg->frm.vmax / blk->sf[k].V;
+        H            = blk->sf[k].H;
+        V            = blk->sf[k].V;
+        Hi           = jpg->frm.hmax / H;
+        Vi           = jpg->frm.vmax / V;
         samplerClass = Hi << 1 | Vi;
 
-        for (int v = 0; v < blk->sf[k].V; v++) {
-          for (int h = 0; h < blk->sf[k].H; h++) {
+        for (int v = 0; v < V; v++) {
+          for (int h = 0; h < H; h++) {
             p2 = blk->blk[v][h][k].blk;
             for (int i = 0; i < yi; i++) {
               for (int j = 0; j < xi; j++) {
