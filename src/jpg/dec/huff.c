@@ -49,6 +49,7 @@ jpg_huffcodes(ImByte    * __restrict BITS,
   return count;
 }
 
+IM_HIDE
 void
 jpg_handle_scanmarker(ImScan * __restrict scan, uint16_t marker) {
 #if DEBUG
@@ -81,6 +82,7 @@ ex:
   thread_exit();
 }
 
+IM_HIDE
 uint8_t
 jpg_nextbit(ImScan * __restrict scan) {
   ImByte b, b2;
@@ -111,6 +113,7 @@ jpg_nextbit(ImScan * __restrict scan) {
   return bit;
 }
 
+IM_HIDE
 uint8_t
 jpg_decode(ImScan    * __restrict scan,
            ImHuffTbl * __restrict huff) {
@@ -124,28 +127,6 @@ jpg_decode(ImScan    * __restrict scan,
   }
 
   return huff->huffval[code + huff->delta[i]];
-}
-
-int32_t
-jpg_receive(ImScan    * __restrict scan,
-            ImHuffTbl * __restrict huff,
-            int32_t                ssss) {
-  int32_t i, v;
-
-  for (v = i = 0; i < ssss; i++)
-    v = (v << 1) | jpg_nextbit(scan);
-
-  return v;
-}
-
-int32_t
-jpg_extend(int32_t v, int32_t t) {
-  /* vt = ipow(2, t - 1); */
-
-  if (v < (1u << (t - 1)))
-    return v + (-1u << t) + 1;
-
-  return v;
 }
 
 IM_HIDE

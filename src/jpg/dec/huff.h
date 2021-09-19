@@ -24,19 +24,34 @@ ImByte*
 jpg_dht(ImByte * __restrict pRaw,
          ImJpeg * __restrict jpg);
 
+IM_HIDE
 uint8_t
 jpg_decode(ImScan    * __restrict scan,
            ImHuffTbl * __restrict huff);
 
+IM_HIDE
+uint8_t
+jpg_nextbit(ImScan * __restrict scan);
+
+IM_INLINE
 int32_t
 jpg_receive(ImScan    * __restrict scan,
             ImHuffTbl * __restrict huff,
-            int32_t                ssss);
+            int32_t                ssss) {
+  int32_t i, v;
 
+  for (v = i = 0; i < ssss; i++)
+    v = (v << 1) | jpg_nextbit(scan);
+
+  return v;
+}
+
+IM_INLINE
 int32_t
-jpg_extend(int32_t v, int32_t t);
+jpg_extend(int32_t v, int32_t t) {
+  /* vt = ipow(2, t - 1); */
 
-uint8_t
-jpg_nextbit(ImScan * __restrict scan) ;
+  return (v < (1u << (t - 1))) ? v + (-1u << t) + 1 : v;
+}
 
 #endif /* src_jpg_huff_h */
