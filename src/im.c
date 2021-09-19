@@ -136,7 +136,7 @@ im_on_worker_idct(void *argv) {
     if (!(im = jpg->im))
       continue;
     
-    int row, col, width, xi, yi, k, Ns, stride;
+    int row, col, width, xi, yi, k, Ns;
     
     /* consume avail blocks */
     for (;;) {
@@ -146,14 +146,9 @@ im_on_worker_idct(void *argv) {
 
       thread_lock(&blk->mutex);
 
-      stride = 3;
-      row   = blk->mcuy * 8;
-      col   = blk->mcux * 8;
       width = jpg->frm.width;
       p     = ((ImByte *)im->data);
       Ns    = jpg->scan->Ns;
-      xi    = blk->xi;
-      yi    = blk->yi;
 
       for (k = 0; k < Ns; k++) {
         int Hi, Vi, V, H, samplerClass;
@@ -163,6 +158,10 @@ im_on_worker_idct(void *argv) {
         Hi           = jpg->frm.hmax / H;
         Vi           = jpg->frm.vmax / V;
         samplerClass = Hi << 1 | Vi;
+        yi           = min(blk->yi, (jpg->frm.height - (blk->mcuy) * 8) * H / jpg->frm.hmax);
+        xi           = min(blk->xi, (jpg->frm.width  - (blk->mcux) * 8) * V / jpg->frm.vmax);
+        row          = blk->mcuy * 8 * V;
+        col          = blk->mcux * 8 * H;
 
         for (int v = 0; v < V; v++) {
           for (int h = 0; h < H; h++) {
@@ -170,41 +169,27 @@ im_on_worker_idct(void *argv) {
             for (int i = 0; i < yi; i++) {
               for (int j = 0; j < xi; j++) {
                 pix = *p2++;
-                pi  = &p[3 * ((row + i * Vi + v * 8) * width + (col + j * Hi + h * 8)) + k];
+                pi  = &p[3 * (((row + i) * Vi + v * 8) * width
+                            + ((col + j) * Hi + h * 8))
+                            + k];
+
                 switch (samplerClass) {
                   case IM_SAMPLER_11:
-                    p[3 * ((row + i * Vi + v * 8) * width + (col + j * Hi + h * 8)) + k] = pix;
+                    pi[0] = pix;
                     break;
                   default:
                     /* horizontal */
                     for (int sh = 0; sh < Hi; sh++) {
                       pi[Ns * sh] = pix;
                     }
-                    
+
                     /* vertical */
                     for (int sv = 1; sv < Vi; sv++) {
-                      pi[width*3 * sv]      = pix;
-                      pi[width*3 * sv + Ns] = pix;
+                      pi[width * Ns * sv]      = pix;
+                      pi[width * Ns * sv + Ns] = pix;
                     }
                     break;
                 }
-
-//                switch (samplerClass) {
-//                  case IM_SAMPLER_11:
-//                    p[3 * ((row + i * Vi + v * 8) * width + (col + j * Hi + h * 8)) + k] = pix;
-//                    break;
-//                  case IM_SAMPLER_22:
-//                    im_upsample8_2x2(pix,
-//                                     &p[3 * ((row + i * Vi + v * 8) * width + (col + j * Hi + h * 8)) + k],
-//                                     3,
-//                                     width * 3);
-//                    break;
-//                  default:
-//                    printf("olamazzzz\n");
-//                    break;
-//
-//
-//                }
               } /* for j */
             } /* for i */
           } /* for h */
@@ -228,15 +213,6 @@ im_on_worker_idct(void *argv) {
   if (im) {
     im_YCbCrToRGB(jpg->im->data, im->width, im->height);
   }
-
-//  im_resample(jpg->im->data,
-//              im->width,
-//              im->height,
-//              (ImSampleFactor[]){
-//                jpg->frm.compo[0].sf,
-//                jpg->frm.compo[1].sf,
-//                jpg->frm.compo[2].sf
-//              });
 }
 
 IM_EXPORT
