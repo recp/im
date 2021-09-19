@@ -28,11 +28,9 @@ IM_HIDE
 uint32_t
 jpg_huffcodes(ImByte    * __restrict BITS,
               ImHuffTbl * __restrict huff) {
-  int32_t  count;
-  uint16_t code;
-  uint8_t  i, j, Li;
-  
-  for (i = 0, j = 0, code = 0, count = 0; i < 16; i++) {
+  uint16_t code, i, j, Li;
+
+  for (i = 0, j = 0, code = 0; i < 16; i++) {
     Li = BITS[i];
 
     if (Li) {
@@ -40,13 +38,12 @@ jpg_huffcodes(ImByte    * __restrict BITS,
       huff->maxcode[i] = code + Li - 1;
       j               += Li;
       code            += Li;
-      count           += Li;
     }
 
     code <<= 1;
   }
 
-  return count;
+  return j;
 }
 
 IM_HIDE
