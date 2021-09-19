@@ -22,8 +22,10 @@
 typedef unsigned char ImByte;
 
 typedef enum ImFormat {
-  IM_FORMAT_RGB  = 1,
-  IM_FORMAT_RGBA = 2
+  IM_FORMAT_RGB   = 1,
+  IM_FORMAT_RGBA  = 2,
+  IM_FORMAT_CMYK  = 3,
+  IM_FORMAT_YCbCr = 4
 
   /* TODO: */
 } ImFormat;
