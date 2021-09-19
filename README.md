@@ -11,15 +11,19 @@ Companion Libaries:
 TODO
 -----
 
-- [ ] JPEG Decoder (In Progress)
-- [ ] PNG Decoder (In Progress)
+- [ ] JPEG (In Progress)
+- [ ] PNG (In Progress)
+- [ ] JPEG 2000
+- [ ] TIFF
 - [ ] GIF
 - [ ] BMP
 - [ ] PSD
 - [ ] TGA
 - [ ] HDR
+- [ ] EXR
 - [ ] WebP
 - [ ] AVIF
 - [ ] HEIF, HEIC, HEVC
+- [ ] PDF
 - [ ] SVG with library extension (**im.svg** library)
 - [ ] ...
