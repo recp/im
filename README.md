@@ -13,3 +13,12 @@ TODO
 
 - [ ] JPEG Decoder (In Progress)
 - [ ] PNG Decoder (In Progress)
+- [ ] GIF
+- [ ] BMP
+- [ ] PSD
+- [ ] TGA
+- [ ] HDR
+- [ ] WebP
+- [ ] AVIF
+- [ ] HEIF, HEIC, HEVC
+- [ ] ...
