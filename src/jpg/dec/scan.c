@@ -102,7 +102,7 @@ jpg_scan_block(ImJpeg         * __restrict jpg,
   jpg_decode_ac(jpg, scan, huff_ac, data);
 }
 
-IM_HIDE
+IM_INLINE
 void
 jpg_dequant(ImQuantTbl * __restrict qt,
             int16_t    * __restrict data) {
