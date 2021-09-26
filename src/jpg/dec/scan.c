@@ -109,45 +109,45 @@ jpg_dequant(ImQuantTbl * __restrict qt,
 #if defined(__SSE__) || defined(__SSE2__)
   __m128i r0, r1, r2, r3, l0, l1, l2, l3;
   
-  l0 = _mm_loadu_si16(&data[0]);
-  l1 = _mm_loadu_si16(&data[8]);
-  l2 = _mm_loadu_si16(&data[16]);
-  l3 = _mm_loadu_si16(&data[24]);
+  l0 = _mm_load_si128((__m128i *)&data[0]);
+  l1 = _mm_load_si128((__m128i *)&data[8]);
+  l2 = _mm_load_si128((__m128i *)&data[16]);
+  l3 = _mm_load_si128((__m128i *)&data[24]);
 
-  r0 = _mm_loadu_si16(&qt->qt[0]);
-  r1 = _mm_loadu_si16(&qt->qt[8]);
-  r2 = _mm_loadu_si16(&qt->qt[16]);
-  r3 = _mm_loadu_si16(&qt->qt[24]);
+  r0 = _mm_load_si128((__m128i *)&qt->qt[0]);
+  r1 = _mm_load_si128((__m128i *)&qt->qt[8]);
+  r2 = _mm_load_si128((__m128i *)&qt->qt[16]);
+  r3 = _mm_load_si128((__m128i *)&qt->qt[24]);
   
   l0 = _mm_mullo_epi16(l0, r0);
   l1 = _mm_mullo_epi16(l1, r1);
   l2 = _mm_mullo_epi16(l2, r2);
   l3 = _mm_mullo_epi16(l3, r3);
   
-  _mm_storeu_si16(&data[0],  l0);
-  _mm_storeu_si16(&data[8],  l1);
-  _mm_storeu_si16(&data[16], l2);
-  _mm_storeu_si16(&data[24], l3);
+  _mm_store_si128((__m128i *)&data[0],  l0);
+  _mm_store_si128((__m128i *)&data[8],  l1);
+  _mm_store_si128((__m128i *)&data[16], l2);
+  _mm_store_si128((__m128i *)&data[24], l3);
   
-  l0 = _mm_loadu_si16(&data[32]);
-  l1 = _mm_loadu_si16(&data[40]);
-  l2 = _mm_loadu_si16(&data[48]);
-  l3 = _mm_loadu_si16(&data[56]);
+  l0 = _mm_load_si128((__m128i *)&data[32]);
+  l1 = _mm_load_si128((__m128i *)&data[40]);
+  l2 = _mm_load_si128((__m128i *)&data[48]);
+  l3 = _mm_load_si128((__m128i *)&data[56]);
 
-  r0 = _mm_loadu_si16(&qt->qt[32]);
-  r1 = _mm_loadu_si16(&qt->qt[40]);
-  r2 = _mm_loadu_si16(&qt->qt[48]);
-  r3 = _mm_loadu_si16(&qt->qt[56]);
-  
+  r0 = _mm_load_si128((__m128i *)&qt->qt[32]);
+  r1 = _mm_load_si128((__m128i *)&qt->qt[40]);
+  r2 = _mm_load_si128((__m128i *)&qt->qt[48]);
+  r3 = _mm_load_si128((__m128i *)&qt->qt[56]);
+
   l0 = _mm_mullo_epi16(l0, r0);
   l1 = _mm_mullo_epi16(l1, r1);
   l2 = _mm_mullo_epi16(l2, r2);
   l3 = _mm_mullo_epi16(l3, r3);
-  
-  _mm_storeu_si16(&data[32], l0);
-  _mm_storeu_si16(&data[40], l1);
-  _mm_storeu_si16(&data[48], l2);
-  _mm_storeu_si16(&data[56], l3);
+
+  _mm_store_si128((__m128i *)&data[32], l0);
+  _mm_store_si128((__m128i *)&data[40], l1);
+  _mm_store_si128((__m128i *)&data[48], l2);
+  _mm_store_si128((__m128i *)&data[56], l3);
 #else
   int16_t i;
   for (i = 0; i < 64; i++) {
@@ -161,10 +161,10 @@ ImByte*
 jpg_scan_intr(ImByte * __restrict pRaw,
               ImJpeg * __restrict jpg,
               ImScan * __restrict scan) {
-  ImFrm           *frm;
-  ImThreadedBlock *tb;
-  int16_t          data[64];
-  int              mcux, mcuy, i, j, k, hmax, vmax, Ns, X, Y;
+  ImFrm               *frm;
+  ImThreadedBlock     *tb;
+  IM_ALIGN(16) int16_t data[64];
+  int                  mcux, mcuy, i, j, k, hmax, vmax, Ns, X, Y;
 
   frm  = &jpg->frm;
   hmax = frm->hmax;
