@@ -24,7 +24,7 @@
 # include <emmintrin.h>
 #endif
 
-uint32_t unzig[64] = {
+IM_ALIGN(16) uint32_t unzig[64] = {
   0,  1,  8,  16, 9,  2,  3,  10,
   17, 24, 32, 25, 18, 11, 4,  5,
   12, 19, 26, 33, 40, 48, 41, 34,
@@ -43,7 +43,7 @@ jpg_entropy(ImByte * __restrict pRaw,
   return NULL;
 }
 
-IM_HIDE
+IM_INLINE
 void
 jpg_decode_dc(ImJpeg    * __restrict jpg,
               ImScan    * __restrict scan,
@@ -56,7 +56,7 @@ jpg_decode_dc(ImJpeg    * __restrict jpg,
   }
 }
 
-IM_HIDE
+IM_INLINE
 void
 jpg_decode_ac(ImJpeg    * __restrict jpg,
               ImScan    * __restrict scan,
