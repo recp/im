@@ -20,6 +20,10 @@
 #include <stdio.h>
 #include <math.h>
 
+#if defined(__SSE__) || defined(__SSE2__)
+# include <emmintrin.h>
+#endif
+
 uint32_t unzig[64] = {
   0,  1,  8,  16, 9,  2,  3,  10,
   17, 24, 32, 25, 18, 11, 4,  5,
@@ -102,10 +106,54 @@ IM_HIDE
 void
 jpg_dequant(ImQuantTbl * __restrict qt,
             int16_t    * __restrict data) {
+#if defined(__SSE__) || defined(__SSE2__)
+  __m128i r0, r1, r2, r3, l0, l1, l2, l3;
+  
+  l0 = _mm_loadu_si16(&data[0]);
+  l1 = _mm_loadu_si16(&data[8]);
+  l2 = _mm_loadu_si16(&data[16]);
+  l3 = _mm_loadu_si16(&data[24]);
+
+  r0 = _mm_loadu_si16(&qt->qt[0]);
+  r1 = _mm_loadu_si16(&qt->qt[8]);
+  r2 = _mm_loadu_si16(&qt->qt[16]);
+  r3 = _mm_loadu_si16(&qt->qt[24]);
+  
+  l0 = _mm_mullo_epi16(l0, r0);
+  l1 = _mm_mullo_epi16(l1, r1);
+  l2 = _mm_mullo_epi16(l2, r2);
+  l3 = _mm_mullo_epi16(l3, r3);
+  
+  _mm_storeu_si16(&data[0],  l0);
+  _mm_storeu_si16(&data[8],  l1);
+  _mm_storeu_si16(&data[16], l2);
+  _mm_storeu_si16(&data[24], l3);
+  
+  l0 = _mm_loadu_si16(&data[32]);
+  l1 = _mm_loadu_si16(&data[40]);
+  l2 = _mm_loadu_si16(&data[48]);
+  l3 = _mm_loadu_si16(&data[56]);
+
+  r0 = _mm_loadu_si16(&qt->qt[32]);
+  r1 = _mm_loadu_si16(&qt->qt[40]);
+  r2 = _mm_loadu_si16(&qt->qt[48]);
+  r3 = _mm_loadu_si16(&qt->qt[56]);
+  
+  l0 = _mm_mullo_epi16(l0, r0);
+  l1 = _mm_mullo_epi16(l1, r1);
+  l2 = _mm_mullo_epi16(l2, r2);
+  l3 = _mm_mullo_epi16(l3, r3);
+  
+  _mm_storeu_si16(&data[32], l0);
+  _mm_storeu_si16(&data[40], l1);
+  _mm_storeu_si16(&data[48], l2);
+  _mm_storeu_si16(&data[56], l3);
+#else
   int16_t i;
   for (i = 0; i < 64; i++) {
     data[i] *= qt->qt[i];
   }
+#endif
 }
 
 IM_HIDE
