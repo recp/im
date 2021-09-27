@@ -34,11 +34,11 @@ uint8_t
 jpg_nextbit(ImScan * __restrict scan);
 
 IM_INLINE
-int32_t
+int16_t
 jpg_receive(ImScan    * __restrict scan,
             ImHuffTbl * __restrict huff,
-            int32_t                ssss) {
-  int32_t i, v;
+            int16_t                ssss) {
+  int16_t i, v;
 
   for (v = i = 0; i < ssss; i++)
     v = (v << 1) | jpg_nextbit(scan);
@@ -47,8 +47,8 @@ jpg_receive(ImScan    * __restrict scan,
 }
 
 IM_INLINE
-int32_t
-jpg_extend(int32_t v, int32_t t) {
+int16_t
+jpg_extend(int16_t v, int16_t t) {
   /* vt = ipow(2, t - 1); */
 
   return (v < (1u << (t - 1))) ? v + (-1u << t) + 1 : v;
