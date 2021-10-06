@@ -1,6 +1,6 @@
 # 🎞 Digital Image Processing ( In-Progress )
 
-Image loader library to fast load images, it will be optimized for render engines. 
+Image loader library to fast load images, it will be optimized for render engines, image processing and more...
 
 It will provide lot of options, wait until first release. 
 
