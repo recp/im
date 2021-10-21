@@ -14,10 +14,13 @@
  * limitations under the License.
  */
 
-#include "png.h"
+#ifndef sc_bmp_h
+#define sc_bmp_h
+
+#include "../common.h"
 
 IM_HIDE
 void
-png_dec(ImByte *raw, ImImage *im) {
-  
-}
+bmp_dec(ImByte *raw, ImImage *im);
+
+#endif /* sc_bmp_h */
