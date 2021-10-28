@@ -17,8 +17,10 @@
 #ifndef thread_common_h
 #define thread_common_h
 
-#if defined(_WIN32)
-#  ifdef LIBIM_DLL
+#if defined(_MSC_VER)
+#  ifdef TH_STATIC
+#    define TH_EXPORT
+#  elif defined(TH_EXPORTS)
 #    define TH_EXPORT __declspec(dllexport)
 #  else
 #    define TH_EXPORT __declspec(dllimport)

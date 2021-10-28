@@ -17,8 +17,10 @@
 #ifndef common_h
 #define common_h
 
-#if defined(_WIN32)
-#  ifdef LIBIM_DLL
+#if defined(_MSC_VER)
+#  ifdef IM_STATIC
+#    define IM_EXPORT
+#  elif defined(IM_EXPORTS)
 #    define IM_EXPORT __declspec(dllexport)
 #  else
 #    define IM_EXPORT __declspec(dllimport)
