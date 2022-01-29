@@ -161,13 +161,12 @@ im_on_worker_idct(void *argv) {
         Hi           = jpg->frm.hmax / H;
         Vi           = jpg->frm.vmax / V;
         samplerClass = Hi << 1 | Vi;
-        
-      
+
         yi           = min(8, (height - blk->mcuy * 8 * vmax) * V / vmax);
         xi           = min(8, (width  - blk->mcux * 8 * hmax) * H / hmax);
         row          = blk->mcuy * 8 * V;
         col          = blk->mcux * 8 * H;
-        
+
         H            = max(1, H * (float)min((width  - blk->mcux * 8 * hmax), hmax * 8) / (hmax * 8));
         V            = max(1, V * (float)min((height - blk->mcuy * 8 * vmax), vmax * 8) / (vmax * 8));
 
@@ -249,12 +248,16 @@ im_load(const char * __restrict path) {
   thread_mutex_init(&jpg->blkpool[2].mutex);
 
   scan_worker = thread_new(im_on_worker, &arg);
-  idct_worker = thread_new(im_on_worker_idct, &arg);
-
   thread_join(scan_worker);
-  thread_cond_signal(&jpg->cond);
-  thread_join(idct_worker);
 
+  if (!arg.failed) {
+    idct_worker = thread_new(im_on_worker_idct, &arg);
+    thread_cond_signal(&jpg->cond);
+    thread_join(idct_worker);
+  } else {
+    idct_worker = NULL;
+  }
+  
   thread_release(scan_worker);
   thread_release(idct_worker);
   
