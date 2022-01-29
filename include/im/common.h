@@ -17,7 +17,23 @@
 #ifndef common_h
 #define common_h
 
-#if defined(_MSC_VER)
+/* since C99 or compiler ext */
+#include <stdint.h>
+#include <stddef.h>
+#include <float.h>
+#include <stdbool.h>
+#include <errno.h>
+
+#ifdef DEBUG
+#  include <assert.h>
+#  include <stdio.h>
+#endif
+
+#if defined(_MSC_VER) || defined(__MINGW32__) || defined(__MINGW64__)
+#  define IM_WINAPI
+#endif
+
+#if defined(_MSC_VER) || defined(__MINGW32__) || defined(__MINGW64__)
 #  ifdef IM_STATIC
 #    define IM_EXPORT
 #  elif defined(IM_EXPORTS)
@@ -26,17 +42,22 @@
 #    define IM_EXPORT __declspec(dllimport)
 #  endif
 #  define IM_HIDE
-#  define IM_INLINE __forceinline
-#  define IM_ALIGN(X) __declspec(align(X))
 #else
-#  define IM_EXPORT  __attribute__((visibility("default")))
-#  define IM_HIDE    __attribute__((visibility("hidden")))
-#  define IM_INLINE inline __attribute((always_inline))
-#  define IM_ALIGN(X) __attribute((aligned(X)))
+#  define IM_EXPORT   __attribute__((visibility("default")))
+#  define IM_HIDE     __attribute__((visibility("hidden")))
 #endif
 
-#include <stdlib.h>
-#include <stdint.h>
-#include <stdbool.h>
+#if defined(_MSC_VER)
+#  define IM_INLINE   __forceinline
+#  define IM_ALIGN(X) __declspec(align(X))
+#else
+#  define IM_ALIGN(X) __attribute((aligned(X)))
+#  define IM_INLINE   static inline __attribute((always_inline))
+#endif
+
+
+#ifndef __has_builtin
+#  define __has_builtin(x) 0
+#endif
 
 #endif /* common_h */
