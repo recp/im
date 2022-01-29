@@ -60,4 +60,14 @@
 #  define __has_builtin(x) 0
 #endif
 
+typedef enum ImResult {
+  IM_NOOP     =  1,     /* no operation needed */
+  IM_OK       =  0,
+  IM_ERR      = -1,    /* UKNOWN ERR */
+  IM_EFOUND   = -1000,
+  IM_ENOMEM   = -ENOMEM,
+  IM_EPERM    = -EPERM,
+  IM_EBADF    = -EBADF /* docoumnt couldn't parsed / loaded */
+} ImResult;
+
 #endif /* common_h */
