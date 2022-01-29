@@ -50,7 +50,7 @@
   For more on the actual algorithm, see Z. Wang, "Fast algorithms for the
   discrete W transform and for the discrete Fourier transform", IEEE Trans. on
   ASSP, Vol. ASSP- 32, pp. 803-816, Aug. 1984
-*/
+ */
 #include <math.h>
 
 IM_HIDE
@@ -81,6 +81,8 @@ jpg_idct3(int16_t blk[64]) {
   }
 }
 
+#define LEFT_SHIFT(a, b)  ((unsigned long)((unsigned long)(a) << (b)))
+
 IM_HIDE
 void
 jpg_idct(int16_t * __restrict blk) {
@@ -94,13 +96,13 @@ jpg_idct(int16_t * __restrict blk) {
     s = blk + y * 8;
 
     /* if all the AC components are zero, then the IDCT is trivial */
-    if (!((x1 = (s[4] << 11)) | (x2 = s[6]) | (x3 = s[2]) | (x4 = s[1])
-        | (x5 = s[7]) | (x6 = s[5]) | (x7 = s[3]))) {
-      s[0] = s[1] = s[2] = s[3] = s[4] = s[5] = s[6] = s[7] = s[0] << 3;
+    if (!((x1 = (int32_t)LEFT_SHIFT(s[4], 11)) | (x2 = s[6]) | (x3 = s[2]) | (x4 = s[1])
+          | (x5 = s[7]) | (x6 = s[5]) | (x7 = s[3]))) {
+      s[0] = s[1] = s[2] = s[3] = s[4] = s[5] = s[6] = s[7] = (int32_t)LEFT_SHIFT(s[0], 3);
       continue;
     }
 
-    x0  = (s[0] << 11) + 128;
+    x0  = (int32_t)LEFT_SHIFT(s[0], 11) + 128;
 
     /* stage 1 */
     x8  = w7 * (x4 + x5);
@@ -148,8 +150,8 @@ jpg_idct(int16_t * __restrict blk) {
      however, after performing the horizontal 1-D IDCT, there are typically
      non-zero AC components, so
      we do not bother to check for the all-zero case. */
-    y0 = (s[8 * 0] << 8) + 8192;
-    y1 = s[8 * 4] << 8;
+    y0 = (int32_t)LEFT_SHIFT(s[8 * 0], 8) + 8192;
+    y1 = (int32_t)LEFT_SHIFT(s[8 * 4], 8);
     y2 = s[8 * 6];
     y3 = s[8 * 2];
     y4 = s[8 * 1];
