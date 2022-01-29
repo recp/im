@@ -248,10 +248,10 @@ im_load(const char * __restrict path) {
   thread_mutex_init(&jpg->blkpool[2].mutex);
 
   scan_worker = thread_new(im_on_worker, &arg);
-  thread_join(scan_worker);
 
   if (!arg.failed) {
     idct_worker = thread_new(im_on_worker_idct, &arg);
+    thread_join(scan_worker);
     thread_cond_signal(&jpg->cond);
     thread_join(idct_worker);
   } else {
