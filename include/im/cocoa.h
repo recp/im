@@ -39,6 +39,9 @@ im_cgimage(ImImage *im, bool copydata) {
   size_t            width, height, bytesPerRow;
   int               elemSize, bitsPerPixel;
   
+  if (!im)
+    return NULL;
+
   /* TODO: read from ImImage */
   elemSize     = 3;
   bitsPerPixel = 8;
