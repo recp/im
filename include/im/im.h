@@ -32,10 +32,13 @@ typedef enum ImFileType {
 } ImFileType;
 
 typedef enum ImFormat {
-  IM_FORMAT_RGB   = 1,
-  IM_FORMAT_RGBA  = 2,
-  IM_FORMAT_CMYK  = 3,
-  IM_FORMAT_YCbCr = 4
+  IM_FORMAT_NONE       = 0,
+  IM_FORMAT_BLACKWHITE = 1,
+  IM_FORMAT_GRAY       = 2,
+  IM_FORMAT_RGB        = 3,
+  IM_FORMAT_RGBA       = 4,
+  IM_FORMAT_CMYK       = 5,
+  IM_FORMAT_YCbCr      = 6
 
   /* TODO: */
 } ImFormat;
