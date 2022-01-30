@@ -28,6 +28,23 @@
 
 #define IM_ARRAY_LEN(ARR) (sizeof(ARR) / sizeof(ARR[0]))
 
+#ifdef __GNUC__
+#  define IM_DESTRUCTOR  __attribute__((destructor))
+#  define IM_CONSTRUCTOR __attribute__((constructor))
+#else
+#  define IM_DESTRUCTOR
+#  define IM_CONSTRUCTOR
+#endif
+
+#define IM__UNUSED(X) (void)X
+
+#define IM_ARRAY_SEP_CHECK (c == ' ' || c == '\n' || c == '\t' \
+                            || c == '\r' || c == '\f' || c == '\v')
+
+#define IM_ARRAY_SEPLINE_CHECK (c == ' ' || c == '\t' || c == '\f' || c == '\v')
+#define IM_ARRAY_SPACE_CHECK   (c == ' ' || c == '\t' || c == '\f' || c == '\v')
+#define IM_ARRAY_NLINE_CHECK   (c == '\n' || c == '\r')
+
 typedef struct ImQuantTbl {
   IM_ALIGN(16) uint16_t qt[64]; /* zig-zag order */
   bool                  valid;
