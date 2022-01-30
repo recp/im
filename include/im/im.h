@@ -21,6 +21,16 @@
 
 typedef unsigned char ImByte;
 
+typedef enum ImFileType {
+  IM_FILE_TYPE_AUTO = 0,
+  IM_FILE_TYPE_JPEG,
+  IM_FILE_TYPE_PNG,
+
+  IM_FILE_TYPE_PBM,
+  IM_FILE_TYPE_PGM,
+  IM_FILE_TYPE_PPM
+} ImFileType;
+
 typedef enum ImFormat {
   IM_FORMAT_RGB   = 1,
   IM_FORMAT_RGBA  = 2,
@@ -39,8 +49,8 @@ typedef struct ImImage {
 } ImImage;
 
 IM_EXPORT
-ImImage*
-im_load(const char * __restrict path);
+ImResult
+im_load(ImImage ** __restrict dest, const char * __restrict url, ...);
 
 IM_EXPORT
 ImImage*

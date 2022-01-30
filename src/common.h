@@ -26,6 +26,8 @@
 #include <string.h>
 #include <stdlib.h>
 
+#define IM_ARRAY_LEN(ARR) (sizeof(ARR) / sizeof(ARR[0]))
+
 typedef struct ImQuantTbl {
   IM_ALIGN(16) uint16_t qt[64]; /* zig-zag order */
   bool                  valid;
