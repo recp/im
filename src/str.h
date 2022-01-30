@@ -58,10 +58,17 @@ im_strtod(char   * __restrict src,
 
 IM_HIDE
 unsigned long
-im_strtoui(char     * __restrict src,
-           size_t                srclen,
-           unsigned long         n,
-           uint32_t * __restrict dest);
+im_strtoui(char    * __restrict * __restrict src,
+           size_t                            srclen,
+           unsigned long                     n,
+           uint32_t             * __restrict dest);
+
+IM_HIDE
+unsigned long
+im_strtoui_line(const char * __restrict src,
+                size_t                  srclen,
+                unsigned long           n,
+                uint32_t * __restrict   dest);
 
 IM_HIDE
 unsigned long

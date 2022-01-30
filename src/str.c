@@ -282,10 +282,55 @@ im_strtod(char   * __restrict src,
 
 IM_HIDE
 unsigned long
-im_strtoui(char     * __restrict src,
-           size_t                srclen,
-           unsigned long         n,
-           uint32_t * __restrict dest) {
+im_strtoui(char    * __restrict * __restrict src,
+           size_t                            srclen,
+           unsigned long                     n,
+           uint32_t             * __restrict dest) {
+  char *tok, *tok_end, *end;
+  char  c;
+  
+  if (n == 0)
+    return 0;
+  
+  dest = dest + n - 1ul;
+  tok = *src;
+  
+  if (srclen != 0) {
+    end = *src + srclen;
+
+    do {
+      while (tok < end && ((void)(c = *tok), IM_ARRAY_SEP_CHECK))
+        tok++;
+
+      *(dest - --n) = (uint32_t)strtoul(tok, &tok_end, 10);
+      tok = tok_end;
+
+      while (tok < end && ((void)(c = *tok), IM_ARRAY_SEP_CHECK))
+        tok++;
+    } while (n > 0ul && tok < end);
+  } else {
+    do {
+      while (((void)(c = *tok), IM_ARRAY_SEP_CHECK))
+        tok++;
+
+      *(dest - --n) = (uint32_t)strtoul(tok, &tok_end, 10);
+      tok = tok_end;
+
+      while (((void)(c = *tok), IM_ARRAY_SEP_CHECK))
+        tok++;
+    } while (n > 0ul && *tok != '\0');
+  }
+  
+  *src = tok;
+  return n;
+}
+
+IM_HIDE
+unsigned long
+im_strtoui_line(const char * __restrict src,
+                size_t                  srclen,
+                unsigned long           n,
+                uint32_t * __restrict   dest) {
   char *tok, *tok_end, *end;
   char  c;
   
@@ -299,24 +344,24 @@ im_strtoui(char     * __restrict src,
     end = src + srclen;
     
     do {
-      while (tok < end && ((void)(c = *tok), IM_ARRAY_SEP_CHECK))
+      while (tok < end && ((void)(c = *tok), IM_ARRAY_SEPLINE_CHECK))
         tok++;
       
       *(dest - --n) = (uint32_t)strtoul(tok, &tok_end, 10);
       tok = tok_end;
       
-      while (tok < end && ((void)(c = *tok), IM_ARRAY_SEP_CHECK))
+      while (tok < end && ((void)(c = *tok), IM_ARRAY_SEPLINE_CHECK))
         tok++;
     } while (n > 0ul && tok < end);
   } else {
     do {
-      while (((void)(c = *tok), IM_ARRAY_SEP_CHECK))
+      while (((void)(c = *tok), IM_ARRAY_SEPLINE_CHECK))
         tok++;
       
       *(dest - --n) = (uint32_t)strtoul(tok, &tok_end, 10);
       tok = tok_end;
       
-      while (((void)(c = *tok), IM_ARRAY_SEP_CHECK))
+      while (((void)(c = *tok), IM_ARRAY_SEPLINE_CHECK))
         tok++;
     } while (n > 0ul && *tok != '\0');
   }
