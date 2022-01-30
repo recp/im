@@ -21,6 +21,7 @@
 #include "../include/im/im.h"
 
 #include "thread/thread.h"
+#include "mem/mmap.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -105,8 +106,6 @@ typedef struct ImScan {
   int32_t  cnt;
   uint8_t  b;
   ImByte  *pRaw;
-  
-
 } ImScan;
 
 typedef struct ImComment {

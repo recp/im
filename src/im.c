@@ -23,6 +23,8 @@
 #include <sys/stat.h>
 #include <assert.h>
 
+#include <stdarg.h>
+
 #include "jpg/dec/dec.h"
 
 #include "thread/thread.h"
@@ -30,70 +32,36 @@
 #include "color.h"
 #include "sampler.h"
 
+#include "file.h"
+
 typedef struct worker_arg_t {
-  const char *path;
-  ImImage    *image;
-  ImJpeg     *jpg;
-  bool        failed;
+  const char  *path;
+  ImImage     *image;
+  ImJpeg      *jpg;
+  bool         failed;
+  ImFileResult fres;
 } worker_arg_t;
+
+typedef struct floader_t {
+  const char * fext;
+  ImResult (*floader_fn)(ImImage ** __restrict, const char * __restrict);
+} floader_t;
 
 IM_HIDE
 void
 im_on_worker(void *argv) {
   worker_arg_t *arg;
   ImByte       *raw;
-  FILE         *infile;
   ImImage      *im;
   ImJpeg       *jpg;
-  size_t        blksize;
-  size_t        fsize;
-  size_t        fcontents_size;
-  size_t        total_read;
-  size_t        nread;
-  struct stat   infile_st;
-  int           infile_no;
-  
-  arg = argv;
+  ImFileResult  fres;
 
-  infile = fopen(arg->path, "rb");
-  if (!infile)
+  arg  = argv;
+  fres = im_readfile(arg->path);
+
+  if (fres.ret != IM_OK) {
     goto err;
-
-  infile_no = fileno(infile);
-
-  if (fstat(infile_no, &infile_st) != 0)
-    goto err;
-
-#ifndef _MSC_VER
-  blksize = infile_st.st_blksize;
-#else
-  blksize = 512;
-#endif
-
-  fsize          = infile_st.st_size;
-  fcontents_size = sizeof(char) * fsize;
-
-  raw  = malloc(fcontents_size + 1);
-
-  assert(raw && "malloc failed");
-
-  memset(raw + fcontents_size, '\0', 1);
-
-  total_read = 0;
-
-  do {
-    if ((fcontents_size - total_read) < blksize)
-      blksize = fcontents_size - total_read;
-
-    nread = fread(raw + total_read,
-                  sizeof(char),
-                  blksize,
-                  infile);
-
-    total_read += nread;
-  } while (nread > 0 && total_read < fsize);
-
-  fclose(infile);
+  }
 
   /* decode, this process will be optimized after decoding is done */
   im      = calloc(1, sizeof(*im));
@@ -101,8 +69,9 @@ im_on_worker(void *argv) {
   jpg->im = im;
 
   arg->image = im;
+  arg->fres  = fres;
 
-  jpg_dec(jpg, raw);
+  jpg_dec(jpg, fres.raw);
 
 err:
   arg->failed = true;
@@ -261,5 +230,9 @@ im_load(const char * __restrict path) {
   thread_release(scan_worker);
   thread_release(idct_worker);
   
+  if (arg.fres.mmap) {
+    im_unmap(arg.fres.raw, arg.fres.size);
+  }
+
   return arg.image;
 }
