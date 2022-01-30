@@ -43,7 +43,22 @@ im_cgimage(ImImage *im, bool copydata) {
     return NULL;
 
   /* TODO: read from ImImage */
-  elemSize     = 3;
+  
+  switch (im->format) {
+    case IM_FORMAT_RGB:
+    case IM_FORMAT_YCbCr:
+      elemSize = 3;
+      break;
+    case IM_FORMAT_RGBA:
+    case IM_FORMAT_CMYK:
+      elemSize = 4;
+      break;
+    case IM_FORMAT_GRAY:       elemSize = 1; break;
+    case IM_FORMAT_BLACKWHITE: elemSize = 1; break; /* TODO: ? */
+    default:
+      return NULL;
+  }
+
   bitsPerPixel = 8;
   
   width       = im->width;
@@ -59,8 +74,15 @@ im_cgimage(ImImage *im, bool copydata) {
   if (elemSize == 1) {
     colorSpace = CGColorSpaceCreateDeviceGray();
   } else {
-    colorSpace = CGColorSpaceCreateDeviceRGB();
+    if (im->format != IM_FORMAT_CMYK) {
+      colorSpace = CGColorSpaceCreateDeviceCMYK();
+    } else {
+      colorSpace = CGColorSpaceCreateDeviceRGB();
+    }
   }
+  
+  CGColorSpaceRef dstColorSpace = CGColorSpaceCreateWithName(kCGColorSpaceExtendedLinearGray);
+  colorSpace = dstColorSpace;
 
 #if __has_feature(objc_arc)
   provider = CGDataProviderCreateWithCFData((__bridge CFDataRef)data);
