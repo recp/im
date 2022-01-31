@@ -25,6 +25,12 @@ TODO
 - [ ] AVIF
 - [ ] HEIF, HEIC, HEVC
 - [ ] Netpbm (pgm, ppm, pbm, pam)
+  - [x] Plain pbm
+  - [ ] Binary pbm
+  - [x] Plain pgm
+  - [ ] Binary pgm
+  - [x] Plain ppm
+  - [ ] Binary ppm
 - [ ] PDF
 - [ ] SVG with library extension (**im.svg** library)
 - [ ] ...
