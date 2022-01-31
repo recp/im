@@ -14,13 +14,13 @@
  * limitations under the License.
  */
 
-#ifndef pgm_h
-#define pgm_h
-
 /*
  References:
  [0] http://netpbm.sourceforge.net/doc/
  */
+
+#ifndef pgm_h
+#define pgm_h
 
 #include "../common.h"
 

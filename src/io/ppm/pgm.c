@@ -14,14 +14,14 @@
  * limitations under the License.
  */
 
-#include "pgm.h"
-#include "../../file.h"
-#include "../../str.h"
-
 /*
  References:
  [0] http://netpbm.sourceforge.net/doc/
  */
+
+#include "pgm.h"
+#include "../../file.h"
+#include "../../str.h"
 
 IM_HIDE
 ImResult

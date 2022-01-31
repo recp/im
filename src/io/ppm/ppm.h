@@ -14,15 +14,15 @@
  * limitations under the License.
  */
 
-#ifndef ppm_h
-#define ppm_h
-
-#include "../common.h"
-
 /*
  References:
  [0] http://netpbm.sourceforge.net/doc/
  */
+
+#ifndef ppm_h
+#define ppm_h
+
+#include "../common.h"
 
 IM_HIDE
 ImResult
