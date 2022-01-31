@@ -14,23 +14,14 @@
  * limitations under the License.
  */
 
-#include "ppm.h"
-#include "../../file.h"
-#include "../../str.h"
+#ifndef pgm_h
+#define pgm_h
 
 /*
  References:
  [0] http://netpbm.sourceforge.net/doc/
  */
 
-IM_HIDE
-ImResult
-pbm_dec(ImImage ** __restrict dest, const char * __restrict path) {
-  return IM_OK;
-}
+#include "../common.h"
 
-IM_HIDE
-ImResult
-ppm_dec(ImImage ** __restrict dest, const char * __restrict path) {
-  return IM_OK;
-}
+#endif /* pgm_h */
