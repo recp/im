@@ -59,8 +59,8 @@ im_cgimage(ImImage *im, bool copydata) {
       return NULL;
   }
   
-  if (im->bytesPerPixel != 0) {
-    bitsPerPixel = im->bytesPerPixel * 8;
+  if (im->bitsPerPixel != 0) {
+    bitsPerPixel = im->bitsPerPixel;
   } else {
     bitsPerPixel = 8;
   }
@@ -80,9 +80,9 @@ im_cgimage(ImImage *im, bool copydata) {
     colorSpace = CGColorSpaceCreateDeviceGray();
   } else {
     if (im->format != IM_FORMAT_CMYK) {
-      colorSpace = CGColorSpaceCreateDeviceCMYK();
-    } else {
       colorSpace = CGColorSpaceCreateDeviceRGB();
+    } else {
+      colorSpace = CGColorSpaceCreateDeviceCMYK();
     }
   }
 
