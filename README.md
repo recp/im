@@ -24,6 +24,7 @@ TODO
 - [ ] WebP
 - [ ] AVIF
 - [ ] HEIF, HEIC, HEVC
+- [ ] Netpbm (pgm, ppm, pbm, pam)
 - [ ] PDF
 - [ ] SVG with library extension (**im.svg** library)
 - [ ] ...
