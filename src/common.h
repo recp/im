@@ -25,6 +25,7 @@
 
 #include <string.h>
 #include <stdlib.h>
+#include <math.h>
 
 #define IM_ARRAY_LEN(ARR) (sizeof(ARR) / sizeof(ARR[0]))
 
@@ -181,6 +182,14 @@ IM_INLINE
 uint8_t
 im_maxiu8(uint8_t a, uint8_t b) {
   if (a > b)
+    return a;
+  return b;
+}
+
+IM_INLINE
+uint8_t
+im_minu8(uint8_t a, uint8_t b) {
+  if (a < b)
     return a;
   return b;
 }

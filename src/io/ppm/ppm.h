@@ -21,6 +21,45 @@
 
 IM_HIDE
 ImResult
+pbm_dec(ImImage ** __restrict im, const char * __restrict path);
+
+IM_HIDE
+ImResult
+pgm_dec(ImImage ** __restrict im, const char * __restrict path);
+
+IM_HIDE
+ImResult
 ppm_dec(ImImage ** __restrict im, const char * __restrict path);
+
+#define SKIP_SPACES                                                           \
+  {                                                                           \
+    while (c != '\0' && IM_ARRAY_SEP_CHECK) c = *++p;                         \
+    if (c == '\0')                                                            \
+      break; /* to break loop */                                              \
+  }
+
+/* spaces in single line */
+#define SKIP_HSPACES                                                          \
+  do {                                                                        \
+    while (c == ' ' || c == '\t' || c == '\v')                                \
+      c = *++p;                                                               \
+  } while (0)
+
+/* newline */
+#define SKIP_VSPACES                                                          \
+  do {                                                                        \
+    while (c == '\n' || c == '\r' || c == '\f' || c == '\v')                  \
+      c = *++p;                                                               \
+  } while (0)
+
+#define NEXT_LINE                                                             \
+  do {                                                                        \
+    c = p ? *p : '\0';                                                        \
+    while (p                                                                  \
+           && p[0] != '\0'                                                    \
+           && !IM_ARRAY_NLINE_CHECK                                           \
+           && (c = *++p) != '\0'                                              \
+           && !IM_ARRAY_NLINE_CHECK);                                         \
+  } while(0);
 
 #endif /* ppm_h */

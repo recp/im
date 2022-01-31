@@ -72,6 +72,7 @@ im_cgimage(ImImage *im, bool copydata) {
   }
 
   if (elemSize == 1) {
+    /* CGColorSpaceCreateWithName(kCGColorSpaceLinearGray) */
     colorSpace = CGColorSpaceCreateDeviceGray();
   } else {
     if (im->format != IM_FORMAT_CMYK) {
@@ -80,9 +81,6 @@ im_cgimage(ImImage *im, bool copydata) {
       colorSpace = CGColorSpaceCreateDeviceRGB();
     }
   }
-  
-  CGColorSpaceRef dstColorSpace = CGColorSpaceCreateWithName(kCGColorSpaceExtendedLinearGray);
-  colorSpace = dstColorSpace;
 
 #if __has_feature(objc_arc)
   provider = CGDataProviderCreateWithCFData((__bridge CFDataRef)data);

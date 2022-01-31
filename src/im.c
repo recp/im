@@ -59,8 +59,8 @@ im_load(ImImage ** __restrict dest, const char * __restrict url, ...) {
     return IM_EBADF;
 
   floader_t floaders[] = {
-    {"pbm",  ppm_dec},
-    {"pgm",  ppm_dec},
+    {"pbm",  pbm_dec},
+    {"pgm",  pgm_dec},
     {"ppm",  ppm_dec},
     {"jpeg", jpg_dec},
     {"jpg",  jpg_dec}
