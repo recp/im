@@ -33,6 +33,9 @@
 #include "sampler.h"
 
 #include "io/ppm/ppm.h"
+#include "io/ppm/pgm.h"
+#include "io/ppm/pbm.h"
+
 #include "file.h"
 
 typedef struct floader_t {

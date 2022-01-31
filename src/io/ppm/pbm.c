@@ -25,11 +25,11 @@
 
 IM_HIDE
 ImResult
-pgm_dec_ascii(ImImage * __restrict im, char * __restrict p);
+pbm_dec_ascii(ImImage * __restrict im, char * __restrict p);
 
 IM_HIDE
 ImResult
-pgm_dec(ImImage ** __restrict dest, const char * __restrict path) {
+pbm_dec(ImImage ** __restrict dest, const char * __restrict path) {
   ImImage      *im;
   char         *p;
   ImFileResult  fres;
@@ -43,14 +43,14 @@ pgm_dec(ImImage ** __restrict dest, const char * __restrict path) {
   im = calloc(1, sizeof(*im));
   p  = fres.raw;
   
-  /* PGM ASCII */
-  if (p[0] == 'P' && p[1] == '2') {
+  /* PBM ASCII */
+  if (p[0] == 'P' && p[1] == '1') {
     p += 2;
-    pgm_dec_ascii(im, p);
+    pbm_dec_ascii(im, p);
   }
   
-  /* PGM Binary */
-  else if (p[0] == 'P' && p[1] == '5') {
+  /* PBM Binary */
+  else if (p[0] == 'P' && p[1] == '4') {
     
   }
   
@@ -68,19 +68,17 @@ err:
 
 IM_HIDE
 ImResult
-pgm_dec_ascii(ImImage * __restrict im, char * __restrict p) {
+pbm_dec_ascii(ImImage * __restrict im, char * __restrict p) {
   char    *pd;
-  uint32_t width, height, maxpix, count, i, tmp, maxRef, bytesPerPixel;
-  float    pe;
+  uint32_t width, height, count, i, bytesPerPixel;
   char     c;
   bool     parsedHeader;
   
-  parsedHeader = false;
-  c            = *p;
-  count        = i = 0;
-  pd           = NULL;
-  maxRef       = 255;
-  pe           = 1.0f;
+  parsedHeader  = false;
+  c             = *p;
+  count         = i = 0;
+  pd            = NULL;
+  bytesPerPixel = 1;
   
   /* parse ASCII STL */
   do {
@@ -95,16 +93,7 @@ pgm_dec_ascii(ImImage * __restrict im, char * __restrict p) {
     if (!parsedHeader) {
       im_strtoui(&p, 0, 1, &width);
       im_strtoui(&p, 0, 1, &height);
-      im_strtoui(&p, 0, 1, &maxpix);
       parsedHeader = true;
-      
-      if (maxpix > 255) {
-        maxRef        = 65535;
-        bytesPerPixel = 2;
-      } else {
-        maxRef        = 255;
-        bytesPerPixel = 1;
-      }
       
       im->data          = malloc(width * height * bytesPerPixel);
       im->format        = IM_FORMAT_GRAY;
@@ -113,20 +102,17 @@ pgm_dec_ascii(ImImage * __restrict im, char * __restrict p) {
       im->height        = height;
       im->bytesPerPixel = bytesPerPixel;
       pd                = im->data;
-      
-      pe = ((float)maxRef) / ((float)maxpix);
     }
-    
+
     /* TODO: improve seepd of parsing int arrays (parse it manually, optimize loop...) */
-    im_strtoui(&p, 0, 1, &tmp);
-    
-    pd[i++] = min(tmp * pe, maxRef);
-  } while (p && p[0] != '\0'/* && (c = *++p) != '\0'*/ && (count--) > 0);
+
+    pd[i++] = (!(*p - '0')) * 255;
+  } while (p && p[0] != '\0' && (c = *++p) != '\0' && (--count) > 0);
   
   /* ensure that unhandled pixels are black. */
   for (; i < count; i++) {
     pd[i] = 0;
   }
-  
+
   return IM_OK;
 }

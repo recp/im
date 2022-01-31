@@ -26,14 +26,6 @@
 
 IM_HIDE
 ImResult
-pbm_dec(ImImage ** __restrict im, const char * __restrict path);
-
-IM_HIDE
-ImResult
-pgm_dec(ImImage ** __restrict im, const char * __restrict path);
-
-IM_HIDE
-ImResult
 ppm_dec(ImImage ** __restrict im, const char * __restrict path);
 
 #endif /* ppm_h */

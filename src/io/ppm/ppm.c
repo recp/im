@@ -25,12 +25,6 @@
 
 IM_HIDE
 ImResult
-pbm_dec(ImImage ** __restrict dest, const char * __restrict path) {
-  return IM_OK;
-}
-
-IM_HIDE
-ImResult
 ppm_dec(ImImage ** __restrict dest, const char * __restrict path) {
   return IM_OK;
 }

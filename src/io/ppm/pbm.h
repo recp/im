@@ -24,4 +24,8 @@
 
 #include "../common.h"
 
+IM_HIDE
+ImResult
+pbm_dec(ImImage ** __restrict im, const char * __restrict path);
+
 #endif /* pbm_h */
