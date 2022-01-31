@@ -58,8 +58,12 @@ im_cgimage(ImImage *im, bool copydata) {
     default:
       return NULL;
   }
-
-  bitsPerPixel = 8;
+  
+  if (im->bytesPerPixel != 0) {
+    bitsPerPixel = im->bytesPerPixel * 8;
+  } else {
+    bitsPerPixel = 8;
+  }
   
   width       = im->width;
   height      = im->height;

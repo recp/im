@@ -71,7 +71,7 @@ IM_HIDE
 ImResult
 pgm_dec_ascii(ImImage * __restrict im, char * __restrict p) {
   char    *pd;
-  uint32_t width, height, maxpix, count, i, tmp, maxRef;
+  uint32_t width, height, maxpix, count, i, tmp, maxRef, bytesPerPixel;
   float    pe;
   char     c;
   bool     parsedHeader;
@@ -99,17 +99,21 @@ pgm_dec_ascii(ImImage * __restrict im, char * __restrict p) {
       im_strtoui(&p, 0, 1, &maxpix);
       parsedHeader = true;
 
-      im->data   = malloc(width * height);
-      im->format = IM_FORMAT_GRAY;
-      im->len    = count = width * height;
-      im->width  = width;
-      im->height = height;
-      pd         = im->data;
-      
-      if (maxpix > 255)
-        maxRef = 65535;
-      else
-        maxRef = 255;
+      if (maxpix > 255) {
+        maxRef        = 65535;
+        bytesPerPixel = 2;
+      } else {
+        maxRef        = 255;
+        bytesPerPixel = 1;
+      }
+
+      im->data          = malloc(width * height * bytesPerPixel);
+      im->format        = IM_FORMAT_GRAY;
+      im->len           = count = width * height;
+      im->width         = width;
+      im->height        = height;
+      im->bytesPerPixel = bytesPerPixel;
+      pd                = im->data;
 
       pe = ((float)maxRef) / ((float)maxpix);
     }

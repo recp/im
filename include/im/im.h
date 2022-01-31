@@ -48,6 +48,7 @@ typedef struct ImImage {
   size_t   len;
   uint32_t width;
   uint32_t height;
+  uint32_t bytesPerPixel;
   ImFormat format;
 } ImImage;
 
