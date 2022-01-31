@@ -4,6 +4,8 @@ Image loader library to fast load images, it will be optimized for render engine
 
 It will provide lot of options, wait until first release. 
 
+It will try to support **vector**, **raster** and **raw** images as possible it can be, iternally or with extension library/libraries...
+
 Companion Libaries:
 
 - [filt: Image Filter](https://github.com/recp/filt)
@@ -31,6 +33,9 @@ TODO
   - [ ] Binary pgm
   - [x] Plain ppm
   - [ ] Binary ppm
+- [ ] DPX?
+- [ ] PCX?
+- [ ] ECW?
 - [ ] PDF
 - [ ] SVG with library extension (**im.svg** library)
 - [ ] ...
