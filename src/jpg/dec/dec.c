@@ -83,9 +83,10 @@ im_on_worker(void *argv) {
   }
   
   /* decode, this process will be optimized after decoding is done */
-  im      = calloc(1, sizeof(*im));
-  jpg     = arg->jpg;
-  jpg->im = im;
+  im         = calloc(1, sizeof(*im));
+  im->format = IM_FORMAT_RGB; /* TODO: override this in frame header */
+  jpg        = arg->jpg;
+  jpg->im    = im;
   
   arg->image = im;
   arg->fres  = fres;
