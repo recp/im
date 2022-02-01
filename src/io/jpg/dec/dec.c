@@ -24,7 +24,7 @@
 #include "jfif/jfif.h"
 #include "exif/exif.h"
 
-#include "../../file.h"
+#include "../../../file.h"
 
 typedef struct worker_arg_t {
   const char  *path;

@@ -21,7 +21,7 @@
 #include "markers.h"
 #include <netinet/in.h>
 
-#include "../color.h"
+#include "../../color.h"
 
 #if DEBUG
 IM_HIDE

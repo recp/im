@@ -25,13 +25,12 @@
 
 #include <stdarg.h>
 
-#include "jpg/dec/dec.h"
-
 #include "thread/thread.h"
 
 #include "color.h"
 #include "sampler.h"
 
+#include "io/jpg/dec/dec.h"
 #include "io/ppm/ppm.h"
 #include "io/ppm/pgm.h"
 #include "io/ppm/pbm.h"
