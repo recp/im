@@ -38,7 +38,6 @@ ppm_dec(ImImage ** __restrict dest, const char * __restrict path) {
   ImImage      *im;
   char         *p, *end;
   ImFileResult  fres;
-  bool          isBinary;
   
   im   = NULL;
   fres = im_readfile(path);
@@ -56,14 +55,12 @@ ppm_dec(ImImage ** __restrict dest, const char * __restrict path) {
   if (p[0] == 'P' && p[1] == '3') {
     p += 2;
     ppm_dec_ascii(im, p, end);
-    isBinary = true;
   }
   
   /* PPM Binary */
   else if (p[0] == 'P' && p[1] == '6') {
     p += 2;
     ppm_dec_bin(im, p, end);
-    isBinary = false;
   } else {
     goto err;
   }

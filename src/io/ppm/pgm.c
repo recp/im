@@ -75,7 +75,6 @@ pgm_dec_ascii(ImImage * __restrict im, char * __restrict p, const char * __restr
   char           *pd;
   uint32_t        count, i, maxRef;
   float           pe;
-  char            c;
 
   i                 = 0;
   header            = pnm_dec_header(im, 1, &p, end, true);
@@ -83,17 +82,12 @@ pgm_dec_ascii(ImImage * __restrict im, char * __restrict p, const char * __restr
   im->format        = IM_FORMAT_GRAY;
   im->bytesPerPixel = header.bytesPerCompoment;
   pd                = im->data;
-  c                 = *p;
   pe                = header.pe;
   maxRef            = header.maxRef;
 
-  /* parse ASCII STL */
   do {
-    /* skip spaces */
-    while (IM_ALLSPACES) { c = *++p; }
-
     pd[i++] = min(im_getu8_skipspaces(&p, end) * pe, maxRef);
-  } while (p && p[0] != '\0' && (c = *++p) != '\0' && (--count) > 0);
+  } while (p && p[0] != '\0' && *++p != '\0' && (--count) > 0);
 
   /* ensure that unhandled pixels are black. */
   for (; i < count; i++) {
