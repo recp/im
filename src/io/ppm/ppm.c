@@ -125,11 +125,6 @@ ppm_dec_bin(ImImage * __restrict im, char * __restrict p, const char * __restric
     } while (--count > 0);
   }
 
-  /* ensure that unhandled pixels are black. */
-  for (; i < count * 3; i++) {
-    pd[i] = 0;
-  }
-
   return IM_OK;
 }
 
