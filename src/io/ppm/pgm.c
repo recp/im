@@ -39,7 +39,9 @@ pgm_dec(ImImage ** __restrict dest, const char * __restrict path) {
   char         *p, *end;
   ImFileResult  fres;
   
+  im   = NULL;
   fres = im_readfile(path);
+  
   if (fres.ret != IM_OK) {
     goto err;
   }
@@ -59,6 +61,8 @@ pgm_dec(ImImage ** __restrict dest, const char * __restrict path) {
   else if (p[0] == 'P' && p[1] == '5') {
     p += 2;
     pgm_dec_bin(im, p, end);
+  } else {
+    goto err;
   }
   
   *dest = im;
@@ -69,6 +73,14 @@ pgm_dec(ImImage ** __restrict dest, const char * __restrict path) {
   
   return IM_OK;
 err:
+  if (fres.mmap) {
+    im_unmap(fres.raw, fres.size);
+  }
+  
+  if (im) {
+    free(im);
+  }
+  
   *dest = NULL;
   return IM_ERR;
 }

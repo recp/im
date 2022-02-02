@@ -35,7 +35,9 @@ pbm_dec(ImImage ** __restrict dest, const char * __restrict path) {
   char         *p, *end;
   ImFileResult  fres;
   
+  im   = NULL;
   fres = im_readfile(path);
+  
   if (fres.ret != IM_OK) {
     goto err;
   }
@@ -54,6 +56,8 @@ pbm_dec(ImImage ** __restrict dest, const char * __restrict path) {
   /* PBM Binary */
   else if (p[0] == 'P' && p[1] == '4') {
     
+  } else {
+    goto err;
   }
   
   *dest = im;
@@ -64,6 +68,14 @@ pbm_dec(ImImage ** __restrict dest, const char * __restrict path) {
   
   return IM_OK;
 err:
+  if (fres.mmap) {
+    im_unmap(fres.raw, fres.size);
+  }
+  
+  if (im) {
+    free(im);
+  }
+  
   *dest = NULL;
   return IM_ERR;
 }
