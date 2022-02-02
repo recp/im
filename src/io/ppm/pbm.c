@@ -89,10 +89,10 @@ IM_HIDE
 ImResult
 pbm_dec_bin(ImImage * __restrict im, char * __restrict p, const char * __restrict end) {
   im_pnm_header_t header;
-  char           *pd;
-  uint32_t        count, i, bitOff;
-  char            c;
-  
+  ImByte         *pd;
+  uint32_t        count, i, j, k, bitOff;
+  ImByte          c;
+
   i                 = bitOff = 0;
   header            = pnm_dec_header(im, 1, &p, end, false);
   count             = header.count;
@@ -100,17 +100,23 @@ pbm_dec_bin(ImImage * __restrict im, char * __restrict p, const char * __restric
   im->bytesPerPixel = header.bytesPerCompoment;
   pd                = im->data;
   c                 = *p;
-
+  
   /* parse raster */
-  do {
-    pd[i++] = (!((c >> 7) & 1)) * 255;
-    c     <<= 1;
+  
+  for (j = 0; j < header.height; j++) {
+    for (k = 0; k < header.width; k++) {
+      pd[i++] = (!((c >> 7) & 1)) * 255;
+      c     <<= 1;
 
-    if (++bitOff > 8) {
-      bitOff = 0;
-      c      = *p++;
+      if (++bitOff > 7) {
+        bitOff = 0;
+        c      = *++p;
+      }
     }
-  } while (--count > 0);
+
+    if (bitOff != 0)
+      c = *++p;
+  }
 
   /* ensure that unhandled pixels are black. */
   for (; i < count; i++) {

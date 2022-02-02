@@ -76,11 +76,11 @@ pnm_dec_header(ImImage                 * __restrict im,
   im->height        = height;
   im->bytesPerPixel = bytesPerPixel;
 
-  header.width  = width;
-  header.height = height;
+  header.width      = width;
+  header.height     = height;
+  header.pe         = ((float)header.maxRef) / ((float)maxval);
 
-  header.pe = ((float)header.maxRef) / ((float)maxval);
-  *start    = im_skip_spaces_and_comments(p, end);
+  *start            = im_skip_spaces_and_comments(p, end);
 
   return header;
 }
