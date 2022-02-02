@@ -90,7 +90,7 @@ ImResult
 pbm_dec_bin(ImImage * __restrict im, char * __restrict p, const char * __restrict end) {
   im_pnm_header_t header;
   ImByte         *pd;
-  uint32_t        count, i, j, k, bitOff;
+  uint32_t        count, i, j, k, bitOff, width, height;
   ImByte          c;
 
   i                 = bitOff = 0;
@@ -98,14 +98,16 @@ pbm_dec_bin(ImImage * __restrict im, char * __restrict p, const char * __restric
   count             = header.count;
   im->format        = IM_FORMAT_BLACKWHITE;
   im->bytesPerPixel = header.bytesPerCompoment;
+  width             = header.width;
+  height            = header.height;
   pd                = im->data;
   c                 = *p;
   
   /* parse raster */
   
-  for (j = 0; j < header.height; j++) {
-    for (k = 0; k < header.width; k++) {
-      pd[i++] = (!((c >> 7) & 1)) * 255;
+  for (j = 0; j < height; j++) {
+    for (k = 0; k < width; k++) {
+      pd[i++] = (!(c >> 7)) * 255;
       c     <<= 1;
 
       if (++bitOff > 7) {
@@ -114,13 +116,10 @@ pbm_dec_bin(ImImage * __restrict im, char * __restrict p, const char * __restric
       }
     }
 
-    if (bitOff != 0)
-      c = *++p;
-  }
-
-  /* ensure that unhandled pixels are black. */
-  for (; i < count; i++) {
-    pd[i] = 0;
+    if (bitOff != 0) {
+      c      = *++p;
+      bitOff = 0;
+    }
   }
 
   return IM_OK;
