@@ -90,12 +90,11 @@ ImResult
 pbm_dec_bin(ImImage * __restrict im, char * __restrict p, const char * __restrict end) {
   im_pnm_header_t header;
   ImByte         *pd;
-  uint32_t        count, i, j, k, bitOff, width, height;
+  uint32_t        i, j, k, bitOff, width, height;
   ImByte          c;
 
   i                 = bitOff = 0;
   header            = pnm_dec_header(im, 1, &p, end, false);
-  count             = header.count;
   im->format        = IM_FORMAT_BLACKWHITE;
   im->bytesPerPixel = header.bytesPerCompoment;
   width             = header.width;
