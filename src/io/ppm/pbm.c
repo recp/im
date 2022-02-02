@@ -20,18 +20,19 @@
  */
 
 #include "pbm.h"
+#include "pnm.h"
 #include "../../file.h"
 #include "../../str.h"
 
 IM_HIDE
 ImResult
-pbm_dec_ascii(ImImage * __restrict im, char * __restrict p);
+pbm_dec_ascii(ImImage * __restrict im, char * __restrict p, const char * __restrict end);
 
 IM_HIDE
 ImResult
 pbm_dec(ImImage ** __restrict dest, const char * __restrict path) {
   ImImage      *im;
-  char         *p;
+  char         *p, *end;
   ImFileResult  fres;
   
   fres = im_readfile(path);
@@ -40,13 +41,14 @@ pbm_dec(ImImage ** __restrict dest, const char * __restrict path) {
   }
   
   /* decode, this process will be optimized after decoding is done */
-  im = calloc(1, sizeof(*im));
-  p  = fres.raw;
+  im  = calloc(1, sizeof(*im));
+  p   = fres.raw;
+  end = p + fres.size;
   
   /* PBM ASCII */
   if (p[0] == 'P' && p[1] == '1') {
     p += 2;
-    pbm_dec_ascii(im, p);
+    pbm_dec_ascii(im, p, end);
   }
   
   /* PBM Binary */
@@ -68,43 +70,24 @@ err:
 
 IM_HIDE
 ImResult
-pbm_dec_ascii(ImImage * __restrict im, char * __restrict p) {
-  char    *pd;
-  uint32_t width, height, count, i, bytesPerPixel;
-  char     c;
-  bool     parsedHeader;
-  
-  parsedHeader  = false;
-  c             = *p;
-  count         = i = 0;
-  pd            = NULL;
-  bytesPerPixel = 1;
-  
-  /* parse ASCII STL */
+pbm_dec_ascii(ImImage * __restrict im, char * __restrict p, const char * __restrict end) {
+  im_pnm_header_t header;
+  char           *pd;
+  uint32_t        count, i;
+  char            c;
+
+  i                 = 0;
+  header            = pnm_dec_header(im, 1, &p, end, false);
+  count             = header.count;
+  im->format        = IM_FORMAT_GRAY;
+  im->bytesPerPixel = header.bytesPerCompoment;
+  pd                = im->data;
+  c                 = *p;
+
+  /* parse raster */
   do {
     /* skip spaces */
-    SKIP_SPACES
-    
-    if (p[0] == '#') {
-      NEXT_LINE
-      SKIP_SPACES
-    }
-    
-    if (!parsedHeader) {
-      im_strtoui(&p, 0, 1, &width);
-      im_strtoui(&p, 0, 1, &height);
-      parsedHeader = true;
-      
-      im->data          = malloc(width * height * bytesPerPixel);
-      im->format        = IM_FORMAT_GRAY;
-      im->len           = count = width * height;
-      im->width         = width;
-      im->height        = height;
-      im->bytesPerPixel = bytesPerPixel;
-      pd                = im->data;
-    }
-
-    /* TODO: improve seepd of parsing int arrays (parse it manually, optimize loop...) */
+    while (IM_ALLSPACES) { c = *++p; }
 
     pd[i++] = (!(*p - '0')) * 255;
   } while (p && p[0] != '\0' && (c = *++p) != '\0' && (--count) > 0);

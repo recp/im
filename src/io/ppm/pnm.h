@@ -19,13 +19,17 @@
  [0] http://netpbm.sourceforge.net/doc/
  */
 
-#ifndef ppm_h
-#define ppm_h
+#ifndef pnm_h
+#define pnm_h
 
 #include "common.h"
 
 IM_HIDE
-ImResult
-ppm_dec(ImImage ** __restrict im, const char * __restrict path);
+im_pnm_header_t
+pnm_dec_header(ImImage                 * __restrict im,
+               uint32_t                             ncomponents,
+               char       * __restrict * __restrict start,
+               const char              * __restrict end,
+               bool                                 includeMaxVal);
 
-#endif /* ppm_h */
+#endif /* pnm_h */

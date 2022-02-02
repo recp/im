@@ -22,7 +22,7 @@
 #ifndef pgm_h
 #define pgm_h
 
-#include "../common.h"
+#include "common.h"
 
 IM_HIDE
 ImResult

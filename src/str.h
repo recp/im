@@ -19,84 +19,75 @@
 
 #include "common.h"
 
-IM_HIDE
-const char*
-im_strltrim_fast(const char * __restrict str);
+#define IM_ALLSPACES (c == ' ' || c == '\n' || c == '\t' \
+                       || c == '\r' || c == '\f' || c == '\v')
 
-IM_HIDE
-int
-im_strtok_count(char * __restrict buff,
-                char * __restrict sep,
-                size_t           *len);
-
-IM_HIDE
-int
-im_strtok_count_fast(char * __restrict buff,
-                     size_t            srclen,
-                     size_t           *len);
-
-IM_HIDE
-unsigned long
-im_strtof(char  * __restrict src,
-          size_t             srclen,
-          unsigned long      n,
-          float * __restrict dest);
-
-IM_HIDE
-unsigned long
-im_strtof_line(char  * __restrict src,
-               size_t             srclen,
-               unsigned long      n,
-               float * __restrict dest);
-
-IM_HIDE
-unsigned long
-im_strtod(char   * __restrict src,
-          size_t              srclen,
-          unsigned long       n,
-          double * __restrict dest);
-
-IM_HIDE
-unsigned long
-im_strtoui(char    * __restrict * __restrict src,
-           size_t                            srclen,
-           unsigned long                     n,
-           uint32_t             * __restrict dest);
-
-IM_HIDE
-unsigned long
-im_strtoui_line(const char * __restrict src,
-                size_t                  srclen,
-                unsigned long           n,
-                uint32_t * __restrict   dest);
-
-IM_HIDE
-unsigned long
-im_strtoi(char    * __restrict src,
-          size_t               srclen,
-          unsigned long        n,
-          int32_t * __restrict dest);
-
-IM_HIDE
-unsigned long
-im_strtoi_line(char    * __restrict src,
-               size_t               srclen,
-               unsigned long        n,
-               int32_t * __restrict dest);
-
-IM_HIDE
-unsigned long
-im_strtob(char  * __restrict src,
-          size_t             srclen,
-          unsigned long      n,
-          bool  * __restrict dest);
-
-IM_HIDE
+IM_INLINE
 char*
-im_tolower(char *str);
+im_skip_spaces(char * __restrict p) {
+  char c;
+  c = *p;
+  while (IM_ALLSPACES) {
+    c = *++p;
+  }
+  return p;
+}
 
-IM_HIDE
-char*
-im_toupper(char *str);
+IM_INLINE
+bool
+im_isdigit(char c) {
+  return c >= '0' && c <= '9';
+}
+
+#define IM_DEFINE_GET_INTEGER(TYPE, NAME)                                     \
+IM_INLINE                                                                     \
+TYPE                                                                          \
+im_ ## NAME(char * __restrict * __restrict src,                               \
+            const char * __restrict end) {                                    \
+  char   *p;                                                                  \
+  TYPE    value;                                                              \
+  char    c;                                                                  \
+                                                                              \
+  value = 0;                                                                  \
+  p     = *src;                                                               \
+  c     = *p;                                                                 \
+                                                                              \
+  while (p < end && c != '\0' && im_isdigit(c)) {                             \
+    value = value * 10 + (c - '0');                                           \
+    c     = *++p;                                                             \
+  }                                                                           \
+                                                                              \
+  *src = p;                                                                   \
+  return value;                                                               \
+}
+
+#define IM_DEFINE_GET_INTEGER_WITH_IGORING_ALL_SPACES(TYPE, NAME)             \
+IM_INLINE                                                                     \
+TYPE                                                                          \
+im_ ## NAME ## _skipspaces(char * __restrict * __restrict src,                \
+                           const char * __restrict end) {                     \
+  char   *p;                                                                  \
+  TYPE    value;                                                              \
+  char    c;                                                                  \
+                                                                              \
+  value = 0;                                                                  \
+  p     = im_skip_spaces(*src);                                               \
+  c     = *p;                                                                 \
+                                                                              \
+  while (p < end && c != '\0' && im_isdigit(c)) {                             \
+    value = value * 10 + (c - '0');                                           \
+    c     = *++p;                                                             \
+  }                                                                           \
+                                                                              \
+  *src = p;                                                                   \
+  return value;                                                               \
+}
+
+IM_DEFINE_GET_INTEGER(int32_t,  geti32)
+IM_DEFINE_GET_INTEGER(uint32_t, getu32)
+
+IM_DEFINE_GET_INTEGER_WITH_IGORING_ALL_SPACES(int32_t,  geti32)
+IM_DEFINE_GET_INTEGER_WITH_IGORING_ALL_SPACES(uint32_t, getu32)
+IM_DEFINE_GET_INTEGER_WITH_IGORING_ALL_SPACES(uint8_t,  getu8)
 
 #endif /* str_h */

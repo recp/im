@@ -20,18 +20,19 @@
  */
 
 #include "pgm.h"
+#include "pnm.h"
 #include "../../file.h"
 #include "../../str.h"
 
 IM_HIDE
 ImResult
-pgm_dec_ascii(ImImage * __restrict im, char * __restrict p);
+pgm_dec_ascii(ImImage * __restrict im, char * __restrict p, const char * __restrict end);
 
 IM_HIDE
 ImResult
 pgm_dec(ImImage ** __restrict dest, const char * __restrict path) {
   ImImage      *im;
-  char         *p;
+  char         *p, *end;
   ImFileResult  fres;
   
   fres = im_readfile(path);
@@ -40,13 +41,14 @@ pgm_dec(ImImage ** __restrict dest, const char * __restrict path) {
   }
   
   /* decode, this process will be optimized after decoding is done */
-  im = calloc(1, sizeof(*im));
-  p  = fres.raw;
-
+  im  = calloc(1, sizeof(*im));
+  p   = fres.raw;
+  end = p + fres.size;
+  
   /* PGM ASCII */
   if (p[0] == 'P' && p[1] == '2') {
     p += 2;
-    pgm_dec_ascii(im, p);
+    pgm_dec_ascii(im, p, end);
   }
   
   /* PGM Binary */
@@ -68,60 +70,30 @@ err:
 
 IM_HIDE
 ImResult
-pgm_dec_ascii(ImImage * __restrict im, char * __restrict p) {
-  char    *pd;
-  uint32_t width, height, maxpix, count, i, tmp, maxRef, bytesPerPixel;
-  float    pe;
-  char     c;
-  bool     parsedHeader;
-  
-  parsedHeader = false;
-  c            = *p;
-  count        = i = 0;
-  pd           = NULL;
-  maxRef       = 255;
-  pe           = 1.0f;
-  
+pgm_dec_ascii(ImImage * __restrict im, char * __restrict p, const char * __restrict end) {
+  im_pnm_header_t header;
+  char           *pd;
+  uint32_t        count, i, maxRef;
+  float           pe;
+  char            c;
+
+  i                 = 0;
+  header            = pnm_dec_header(im, 1, &p, end, true);
+  count             = header.count;
+  im->format        = IM_FORMAT_GRAY;
+  im->bytesPerPixel = header.bytesPerCompoment;
+  pd                = im->data;
+  c                 = *p;
+  pe                = header.pe;
+  maxRef            = header.maxRef;
+
   /* parse ASCII STL */
   do {
     /* skip spaces */
-    SKIP_SPACES
-    
-    if (p[0] == '#') {
-      NEXT_LINE
-      SKIP_SPACES
-    }
-    
-    if (!parsedHeader) {
-      im_strtoui(&p, 0, 1, &width);
-      im_strtoui(&p, 0, 1, &height);
-      im_strtoui(&p, 0, 1, &maxpix);
-      parsedHeader = true;
-      
-      if (maxpix > 255) {
-        maxRef        = 65535;
-        bytesPerPixel = 2;
-      } else {
-        maxRef        = 255;
-        bytesPerPixel = 1;
-      }
-      
-      im->data          = malloc(width * height * bytesPerPixel);
-      im->format        = IM_FORMAT_GRAY;
-      im->len           = count = width * height;
-      im->width         = width;
-      im->height        = height;
-      im->bytesPerPixel = bytesPerPixel;
-      pd                = im->data;
-      
-      pe = ((float)maxRef) / ((float)maxpix);
-    }
-    
-    /* TODO: improve seepd of parsing int arrays (parse it manually, optimize loop...) */
-    im_strtoui(&p, 0, 1, &tmp);
+    while (IM_ALLSPACES) { c = *++p; }
 
-    pd[i++] = min(tmp * pe, maxRef);
-  } while (p && p[0] != '\0'/* && (c = *++p) != '\0'*/ && (count--) > 0);
+    pd[i++] = min(im_getu8_skipspaces(&p, end) * pe, maxRef);
+  } while (p && p[0] != '\0' && (c = *++p) != '\0' && (--count) > 0);
 
   /* ensure that unhandled pixels are black. */
   for (; i < count; i++) {

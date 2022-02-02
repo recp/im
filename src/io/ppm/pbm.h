@@ -22,7 +22,7 @@
 #ifndef pbm_h
 #define pbm_h
 
-#include "../common.h"
+#include "common.h"
 
 IM_HIDE
 ImResult

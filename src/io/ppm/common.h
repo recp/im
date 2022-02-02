@@ -19,13 +19,19 @@
  [0] http://netpbm.sourceforge.net/doc/
  */
 
-#ifndef ppm_h
-#define ppm_h
+#ifndef pnm_common_h
+#define pnm_common_h
 
-#include "common.h"
+#include "../common.h"
+#include "../../str.h"
 
-IM_HIDE
-ImResult
-ppm_dec(ImImage ** __restrict im, const char * __restrict path);
+typedef struct im_pnm_header_t {
+  uint32_t width;
+  uint32_t height;
+  uint32_t count;
+  uint32_t bytesPerCompoment;
+  uint32_t maxRef;
+  float    pe;
+} im_pnm_header_t;
 
-#endif /* ppm_h */
+#endif /* pnm_common_h */
