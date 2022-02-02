@@ -30,6 +30,10 @@ pgm_dec_ascii(ImImage * __restrict im, char * __restrict p, const char * __restr
 
 IM_HIDE
 ImResult
+pgm_dec_bin(ImImage * __restrict im, char * __restrict p, const char * __restrict end);
+
+IM_HIDE
+ImResult
 pgm_dec(ImImage ** __restrict dest, const char * __restrict path) {
   ImImage      *im;
   char         *p, *end;
@@ -53,7 +57,8 @@ pgm_dec(ImImage ** __restrict dest, const char * __restrict path) {
   
   /* PGM Binary */
   else if (p[0] == 'P' && p[1] == '5') {
-    
+    p += 2;
+    pgm_dec_bin(im, p, end);
   }
   
   *dest = im;
@@ -70,10 +75,48 @@ err:
 
 IM_HIDE
 ImResult
+pgm_dec_bin(ImImage * __restrict im, char * __restrict p, const char * __restrict end) {
+  im_pnm_header_t header;
+  char           *pd;
+  int32_t         count, i, maxRef, bytesPerCompoment, tmp;
+  float           pe;
+
+  i                 = 0;
+  header            = pnm_dec_header(im, 1, &p, end, true);
+  count             = header.count;
+  bytesPerCompoment = header.bytesPerCompoment;
+  im->format        = IM_FORMAT_GRAY;
+  im->bytesPerPixel = header.bytesPerCompoment;
+  pd                = im->data;
+  pe                = header.pe;
+  maxRef            = header.maxRef;
+  
+  if (bytesPerCompoment == 1) {
+    do {
+      pd[i++] = min(*p++ * pe, maxRef);
+    } while (--count > 0);
+  } else if (bytesPerCompoment == 2) {
+    do {
+      memcpy(&tmp, p, 2);
+      p      += 2;
+      pd[i++] = min(tmp * pe, maxRef);
+    } while (--count > 0);
+  }
+
+  /* ensure that unhandled pixels are black. */
+  for (; i < count; i++) {
+    pd[i] = 0;
+  }
+  
+  return IM_OK;
+}
+
+IM_HIDE
+ImResult
 pgm_dec_ascii(ImImage * __restrict im, char * __restrict p, const char * __restrict end) {
   im_pnm_header_t header;
   char           *pd;
-  uint32_t        count, i, maxRef;
+  int32_t         count, i, maxRef;
   float           pe;
 
   i                 = 0;
