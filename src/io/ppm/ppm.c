@@ -30,12 +30,19 @@ ppm_dec_ascii(ImImage * __restrict im, char * __restrict p, const char * __restr
 
 IM_HIDE
 ImResult
+ppm_dec_bin(ImImage * __restrict im, char * __restrict p, const char * __restrict end);
+
+IM_HIDE
+ImResult
 ppm_dec(ImImage ** __restrict dest, const char * __restrict path) {
   ImImage      *im;
   char         *p, *end;
   ImFileResult  fres;
+  bool          isBinary;
   
+  im   = NULL;
   fres = im_readfile(path);
+
   if (fres.ret != IM_OK) {
     goto err;
   }
@@ -49,11 +56,16 @@ ppm_dec(ImImage ** __restrict dest, const char * __restrict path) {
   if (p[0] == 'P' && p[1] == '3') {
     p += 2;
     ppm_dec_ascii(im, p, end);
+    isBinary = true;
   }
   
   /* PPM Binary */
   else if (p[0] == 'P' && p[1] == '6') {
-    
+    p += 2;
+    ppm_dec_bin(im, p, end);
+    isBinary = false;
+  } else {
+    goto err;
   }
   
   *dest = im;
@@ -64,8 +76,64 @@ ppm_dec(ImImage ** __restrict dest, const char * __restrict path) {
   
   return IM_OK;
 err:
+  if (fres.mmap) {
+    im_unmap(fres.raw, fres.size);
+  }
+
+  if (im) {
+    free(im);
+  }
+
   *dest = NULL;
   return IM_ERR;
+}
+
+IM_HIDE
+ImResult
+ppm_dec_bin(ImImage * __restrict im, char * __restrict p, const char * __restrict end) {
+  im_pnm_header_t header;
+  char           *pd;
+  int32_t         count, i, R, G, B, maxRef, bytesPerCompoment;
+  float           pe;
+  
+  i                 = 0;
+  header            = pnm_dec_header(im, 3, &p, end, true);
+  count             = header.count;
+  bytesPerCompoment = header.bytesPerCompoment;
+  im->format        = IM_FORMAT_RGB;
+  im->bytesPerPixel = bytesPerCompoment * 3;
+  pd                = im->data;
+  pe                = header.pe;
+  maxRef            = header.maxRef;
+
+  if (bytesPerCompoment == 1) {
+    do {
+      R = *p++;
+      G = *p++;
+      B = *p++;
+      
+      pd[i++] = min(R * pe, maxRef);
+      pd[i++] = min(G * pe, maxRef);
+      pd[i++] = min(B * pe, maxRef);
+    } while (--count > 0);
+  } else if (bytesPerCompoment == 2) {
+    do {
+      memcpy(&R, p, 2);  p += 2;
+      memcpy(&G, p, 2);  p += 2;
+      memcpy(&B, p, 2);  p += 2;
+
+      pd[i++] = min(R * pe, maxRef);
+      pd[i++] = min(G * pe, maxRef);
+      pd[i++] = min(B * pe, maxRef);
+    } while (--count > 0);
+  }
+
+  /* ensure that unhandled pixels are black. */
+  for (; i < count * 3; i++) {
+    pd[i] = 0;
+  }
+
+  return IM_OK;
 }
 
 IM_HIDE
