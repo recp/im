@@ -30,6 +30,10 @@ pbm_dec_ascii(ImImage * __restrict im, char * __restrict p, const char * __restr
 
 IM_HIDE
 ImResult
+pbm_dec_bin(ImImage * __restrict im, char * __restrict p, const char * __restrict end);
+
+IM_HIDE
+ImResult
 pbm_dec(ImImage ** __restrict dest, const char * __restrict path) {
   ImImage      *im;
   char         *p, *end;
@@ -55,7 +59,8 @@ pbm_dec(ImImage ** __restrict dest, const char * __restrict path) {
   
   /* PBM Binary */
   else if (p[0] == 'P' && p[1] == '4') {
-    
+    p += 2;
+    pbm_dec_bin(im, p, end);
   } else {
     goto err;
   }
@@ -82,6 +87,41 @@ err:
 
 IM_HIDE
 ImResult
+pbm_dec_bin(ImImage * __restrict im, char * __restrict p, const char * __restrict end) {
+  im_pnm_header_t header;
+  char           *pd;
+  uint32_t        count, i, bitOff;
+  char            c;
+  
+  i                 = bitOff = 0;
+  header            = pnm_dec_header(im, 1, &p, end, false);
+  count             = header.count;
+  im->format        = IM_FORMAT_BLACKWHITE;
+  im->bytesPerPixel = header.bytesPerCompoment;
+  pd                = im->data;
+  c                 = *p;
+
+  /* parse raster */
+  do {
+    pd[i++] = (!((c >> 7) & 1)) * 255;
+    c     <<= 1;
+
+    if (++bitOff > 8) {
+      bitOff = 0;
+      c      = *p++;
+    }
+  } while (--count > 0);
+
+  /* ensure that unhandled pixels are black. */
+  for (; i < count; i++) {
+    pd[i] = 0;
+  }
+
+  return IM_OK;
+}
+
+IM_HIDE
+ImResult
 pbm_dec_ascii(ImImage * __restrict im, char * __restrict p, const char * __restrict end) {
   im_pnm_header_t header;
   char           *pd;
@@ -91,7 +131,7 @@ pbm_dec_ascii(ImImage * __restrict im, char * __restrict p, const char * __restr
   i                 = 0;
   header            = pnm_dec_header(im, 1, &p, end, false);
   count             = header.count;
-  im->format        = IM_FORMAT_GRAY;
+  im->format        = IM_FORMAT_BLACKWHITE;
   im->bytesPerPixel = header.bytesPerCompoment;
   pd                = im->data;
   c                 = *p;
