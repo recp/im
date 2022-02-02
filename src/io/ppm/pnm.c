@@ -45,11 +45,10 @@ pnm_dec_header(ImImage                 * __restrict im,
                bool                                 includeMaxVal) {
   im_pnm_header_t header;
   char           *p;
-  uint32_t        width, height, maxval, bytesPerCompoment;
+  uint32_t        width, height, maxval, bytesPerPixel;
 
   p                 = *start;
   maxval            = 0;
-  bytesPerCompoment = 1;
 
   p                 = im_skip_spaces_and_comments(p, end);
   width             = im_getu32(&p, end);
@@ -60,17 +59,7 @@ pnm_dec_header(ImImage                 * __restrict im,
     p      = im_skip_spaces_and_comments(p, end);
     maxval = im_getu32(&p, end);
   }
-
-  im->data          = malloc(width * height * bytesPerCompoment * ncomponents);
-  im->format        = IM_FORMAT_GRAY;
-  im->len           = header.count = width * height;
-  im->width         = width;
-  im->height        = height;
-  im->bytesPerPixel = bytesPerCompoment;
   
-  header.width  = width;
-  header.height = height;
-
   if (maxval > 255) {
     header.maxRef            = 65535;
     header.bytesPerCompoment = 2;
@@ -78,6 +67,17 @@ pnm_dec_header(ImImage                 * __restrict im,
     header.maxRef            = 255;
     header.bytesPerCompoment = 1;
   }
+  
+  bytesPerPixel     = header.bytesPerCompoment * ncomponents;
+  im->data          = malloc(width * height * bytesPerPixel);
+  im->format        = IM_FORMAT_GRAY;
+  im->len           = header.count = width * height;
+  im->width         = width;
+  im->height        = height;
+  im->bytesPerPixel = bytesPerPixel;
+
+  header.width  = width;
+  header.height = height;
 
   header.pe = ((float)header.maxRef) / ((float)maxval);
   *start    = im_skip_spaces_and_comments(p, end);
