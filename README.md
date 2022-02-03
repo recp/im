@@ -8,7 +8,8 @@ It will try to support **vector**, **raster** and **raw** images as possible it 
 
 Companion Libaries:
 
-- [filt: Image Filter](https://github.com/recp/filt)
+- [filt](https://github.com/recp/filt) - Image filter
+- [vision](https://github.com/recp/vision) - Computer vision
 
 TODO
 -----
