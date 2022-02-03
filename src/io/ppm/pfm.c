@@ -92,6 +92,7 @@ pfm_dec_rgb(ImImage * __restrict im, char * __restrict p, const char * __restric
   ImByte         *pd;
   int32_t         count, i, maxRef;
   float           R, G, B;
+  bool            isLittleEndian;
 
   i                 = 0;
   header            = pfm_dec_header(im, 3, &p, end);
@@ -100,11 +101,12 @@ pfm_dec_rgb(ImImage * __restrict im, char * __restrict p, const char * __restric
   im->bytesPerPixel = header.bytesPerCompoment * 3;
   pd                = im->data;
   maxRef            = header.maxRef;
-  
+  isLittleEndian    = header.byteOrderHint < 0;
+
   do {
-    memcpy(&R, p, 4);  p += 4;
-    memcpy(&G, p, 4);  p += 4;
-    memcpy(&B, p, 4);  p += 4;
+    R = im_get_f32_endian(p, isLittleEndian);  p += 4;
+    G = im_get_f32_endian(p, isLittleEndian);  p += 4;
+    B = im_get_f32_endian(p, isLittleEndian);  p += 4;
 
     pd[i++] = im_clampf_zo(R) * maxRef;
     pd[i++] = im_clampf_zo(G) * maxRef;
@@ -121,7 +123,8 @@ pfm_dec_mono(ImImage * __restrict im, char * __restrict p, const char * __restri
   ImByte         *pd;
   int32_t         count, i, maxRef;
   float           R;
-  
+  bool            isLittleEndian;
+
   i                 = 0;
   header            = pfm_dec_header(im, 1, &p, end);
   count             = header.count;
@@ -129,9 +132,10 @@ pfm_dec_mono(ImImage * __restrict im, char * __restrict p, const char * __restri
   im->bytesPerPixel = header.bytesPerCompoment;
   pd                = im->data;
   maxRef            = header.maxRef;
-  
+  isLittleEndian    = header.byteOrderHint < 0;
+
   do {
-    memcpy(&R, p, 4);
+    R       = im_get_f32_endian(p, isLittleEndian);
     p      += 4;
     pd[i++] = im_clampf_zo(R) * maxRef;
   } while (--count > 0);
