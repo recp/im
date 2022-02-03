@@ -89,7 +89,7 @@ IM_HIDE
 ImResult
 pfm_dec_rgb(ImImage * __restrict im, char * __restrict p, const char * __restrict end) {
   im_pfm_header_t header;
-  char           *pd;
+  ImByte         *pd;
   int32_t         count, i, maxRef;
   float           R, G, B;
 
@@ -106,10 +106,9 @@ pfm_dec_rgb(ImImage * __restrict im, char * __restrict p, const char * __restric
     memcpy(&G, p, 4);  p += 4;
     memcpy(&B, p, 4);  p += 4;
 
-
-    pd[i++] = min((ImByte)(im_clampf_zo(R) * 255), maxRef);
-    pd[i++] = min((ImByte)(im_clampf_zo(G) * 255), maxRef);
-    pd[i++] = min((ImByte)(im_clampf_zo(B) * 255), maxRef);
+    pd[i++] = im_clampf_zo(R) * maxRef;
+    pd[i++] = im_clampf_zo(G) * maxRef;
+    pd[i++] = im_clampf_zo(B) * maxRef;
   } while (--count > 0);
 
   return IM_OK;
@@ -119,7 +118,7 @@ IM_HIDE
 ImResult
 pfm_dec_mono(ImImage * __restrict im, char * __restrict p, const char * __restrict end) {
   im_pfm_header_t header;
-  char           *pd;
+  ImByte         *pd;
   int32_t         count, i, maxRef;
   float           R;
   
@@ -134,7 +133,7 @@ pfm_dec_mono(ImImage * __restrict im, char * __restrict p, const char * __restri
   do {
     memcpy(&R, p, 4);
     p      += 4;
-    pd[i++] = min(R, maxRef);
+    pd[i++] = im_clampf_zo(R) * maxRef;
   } while (--count > 0);
   
   return IM_OK;
