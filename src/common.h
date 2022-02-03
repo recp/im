@@ -232,6 +232,40 @@ max(int a, int b) {
 
 IM_INLINE
 int
+im_clamp(int a, int minVal, int maxVal) {
+  return max(min(a, maxVal), minVal);
+}
+
+IM_INLINE
+float
+im_minf(float a, float b) {
+  if (a < b)
+    return a;
+  return b;
+}
+
+IM_INLINE
+float
+im_maxf(float a, float b) {
+  if (a > b)
+    return a;
+  return b;
+}
+
+IM_INLINE
+float
+im_clampf(float a, float minVal, float maxVal) {
+  return im_maxf(im_minf(a, maxVal), minVal);
+}
+
+IM_INLINE
+float
+im_clampf_zo(float a) {
+  return im_maxf(im_minf(a, 1.0f), 0.0f);
+}
+
+IM_INLINE
+int
 clampi(int num, int minVal, int maxVal) {
   return max(min(num, maxVal), minVal);
 }

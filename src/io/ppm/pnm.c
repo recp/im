@@ -84,3 +84,52 @@ pnm_dec_header(ImImage                 * __restrict im,
 
   return header;
 }
+
+IM_HIDE
+im_pfm_header_t
+pfm_dec_header(ImImage                 * __restrict im,
+               uint32_t                             ncomponents,
+               char       * __restrict * __restrict start,
+               const char              * __restrict end) {
+  im_pfm_header_t header;
+  char           *p;
+  uint32_t        width, height, maxval, bytesPerPixel;
+  
+  p                    = *start;
+  maxval               = 0;
+
+  /* Actually there are no comments and
+     "each of the three lines of text ends with a 1-byte Unix-style
+      carriage return: 0x0a in hex, not the Windows/DOS CR/LF combination"
+     
+     but let's make it more safe by using more generic way to ignore spaces
+     and comments
+   */
+
+  p                    = im_skip_spaces_and_comments(p, end);
+  width                = im_getu32(&p, end);
+  p                    = im_skip_spaces_and_comments(p, end);
+  height               = im_getu32(&p, end);
+  p                    = im_skip_spaces_and_comments(p, end);
+  header.byteOrderHint = strtof(p, &p);
+
+  /* TODO: option to  provide more range since its float RGB */
+  header.bytesPerCompoment = 4;
+  header.maxRef            = 255;
+
+  bytesPerPixel     = header.bytesPerCompoment * ncomponents;
+  im->data          = malloc(width * height * bytesPerPixel);
+  im->format        = IM_FORMAT_GRAY;
+  im->len           = header.count = width * height;
+  im->width         = width;
+  im->height        = height;
+  im->bytesPerPixel = bytesPerPixel;
+
+  header.width      = width;
+  header.height     = height;
+  
+  *start            = im_skip_spaces_and_comments(p, end);
+  
+  return header;
+}
+

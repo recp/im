@@ -34,6 +34,7 @@
 #include "io/ppm/ppm.h"
 #include "io/ppm/pgm.h"
 #include "io/ppm/pbm.h"
+#include "io/ppm/pfm.h"
 
 #include "file.h"
 
@@ -64,6 +65,7 @@ im_load(ImImage ** __restrict dest, const char * __restrict url, ...) {
     {"pbm",  pbm_dec},
     {"pgm",  pgm_dec},
     {"ppm",  ppm_dec},
+    {"pfm",  pfm_dec},
     {"jpeg", jpg_dec},
     {"jpg",  jpg_dec}
   };

@@ -32,4 +32,11 @@ pnm_dec_header(ImImage                 * __restrict im,
                const char              * __restrict end,
                bool                                 includeMaxVal);
 
+IM_HIDE
+im_pfm_header_t
+pfm_dec_header(ImImage                 * __restrict im,
+               uint32_t                             ncomponents,
+               char       * __restrict * __restrict start,
+               const char              * __restrict end);
+
 #endif /* pnm_h */

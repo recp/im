@@ -14,33 +14,13 @@
  * limitations under the License.
  */
 
-/*
- References:
- [0] http://netpbm.sourceforge.net/doc/
- */
+#ifndef pfm_h
+#define pfm_h
 
-#ifndef pnm_common_h
-#define pnm_common_h
+#include "common.h"
 
-#include "../common.h"
-#include "../../str.h"
+IM_HIDE
+ImResult
+pfm_dec(ImImage ** __restrict dest, const char * __restrict path);
 
-typedef struct im_pnm_header_t {
-  uint32_t width;
-  uint32_t height;
-  uint32_t count;
-  uint32_t bytesPerCompoment;
-  uint32_t maxRef;
-  float    pe;
-} im_pnm_header_t;
-
-typedef struct im_pfm_header_t {
-  uint32_t width;
-  uint32_t height;
-  uint32_t count;
-  uint32_t bytesPerCompoment;
-  uint32_t maxRef;
-  int32_t  byteOrderHint; /* negative is Little-Endian otherwise Big-Endian */
-} im_pfm_header_t;
-
-#endif /* pnm_common_h */
+#endif /* pfm_h */

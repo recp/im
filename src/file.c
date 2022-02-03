@@ -65,7 +65,10 @@ im_readfile(const char * __restrict file) {
 #endif
 
   res.raw = malloc(fcontents_size + 1);
+
+#if DEBUG
   assert(res.raw && "malloc failed");
+#endif
   
   memset((char *)res.raw + fcontents_size, '\0', 1);
   
