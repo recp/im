@@ -36,8 +36,9 @@ im_cgimage(ImImage *im, bool copydata) {
   CGColorSpaceRef   colorSpace;
   CGDataProviderRef provider;
   CGImageRef        imageRef;
+  CGBitmapInfo      bitmapInfo;
   size_t            width, height, bytesPerRow;
-  int               elemSize, bitsPerPixel;
+  int               elemSize, bitsPerComponent;
   
   if (!im)
     return NULL;
@@ -60,9 +61,9 @@ im_cgimage(ImImage *im, bool copydata) {
   }
   
   if (im->bitsPerPixel != 0) {
-    bitsPerPixel = im->bitsPerPixel;
+    bitsPerComponent = im->bitsPerPixel;
   } else {
-    bitsPerPixel = 8;
+    bitsPerComponent = 8;
   }
   
   width       = im->width;
@@ -92,17 +93,19 @@ im_cgimage(ImImage *im, bool copydata) {
   provider = CGDataProviderCreateWithCFData(data);
 #endif
 
-  imageRef = CGImageCreate(width,                                       /* width              */
-                           height,                                      /* height             */
-                           bitsPerPixel,                                /* bits per component */
-                           bitsPerPixel * elemSize,                     /* bits per pixel     */
-                           bytesPerRow,                                 /* bytesPerRow        */
-                           colorSpace,                                  /* colorspace         */
-                           kCGImageAlphaNone|kCGBitmapByteOrderDefault, /* bitmap info        */
-                           provider,                                    /* CGDataProviderRef  */
-                           NULL,                                        /* decode             */
-                           false,                                       /* should interpolate */
-                           kCGRenderingIntentDefault                    /* intent             */
+  bitmapInfo = kCGBitmapByteOrderDefault | im->alphaInfo;
+  
+  imageRef = CGImageCreate(width,                       /* width              */
+                           height,                      /* height             */
+                           bitsPerComponent,            /* bits per component */
+                           bitsPerComponent * elemSize, /* bits per pixel     */
+                           bytesPerRow,                 /* bytesPerRow        */
+                           colorSpace,                  /* colorspace         */
+                           bitmapInfo,                  /* bitmap info        */
+                           provider,                    /* CGDataProviderRef  */
+                           NULL,                        /* decode             */
+                           false,                       /* should interpolate */
+                           kCGRenderingIntentDefault    /* intent             */
                            );
 
   CGDataProviderRelease(provider);

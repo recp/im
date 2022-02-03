@@ -45,14 +45,27 @@ typedef enum ImFormat {
   /* TODO: */
 } ImFormat;
 
+/* same as CGImageAlphaInfo */
+typedef enum ImAlphaInfo {
+  IM_ALPHA_NONE,               /* For example, RGB. */
+  IM_ALPHA_PREMUL_LAST,        /* For example, premultiplied RGBA */
+  IM_ALPHA_PREMUL_FIRST,       /* For example, premultiplied ARGB */
+  IM_ALPHA_LAST,               /* For example, non-premultiplied RGBA */
+  IM_ALPHA_FIRST,              /* For example, non-premultiplied ARGB */
+  IM_ALPHA_NONE_SKIP_LAST,     /* For example, RBGX. */
+  IM_ALPHA_NONE_SKIP_FIRST,    /* For example, XRGB. */
+  IM_ALPHA_ONLY                /* No color data, alpha data only */
+} ImAlphaInfo;
+
 typedef struct ImImage {
-  void    *data;
-  size_t   len;
-  uint32_t width;
-  uint32_t height;
-  uint32_t bytesPerPixel;
-  uint32_t bitsPerPixel;
-  ImFormat format;
+  void       *data;
+  size_t      len;
+  uint32_t    width;
+  uint32_t    height;
+  uint32_t    bytesPerPixel;
+  uint32_t    bitsPerPixel;
+  ImFormat    format;
+  ImAlphaInfo alphaInfo;
 } ImImage;
 
 IM_EXPORT

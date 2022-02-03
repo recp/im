@@ -34,6 +34,10 @@ pfm_dec_mono(ImImage * __restrict im, char * __restrict p, const char * __restri
 
 IM_HIDE
 ImResult
+pfm_dec_rgba(ImImage * __restrict im, char * __restrict p, const char * __restrict end);
+
+IM_HIDE
+ImResult
 pfm_dec(ImImage ** __restrict dest, const char * __restrict path) {
   ImImage      *im;
   char         *p, *end;
@@ -53,10 +57,15 @@ pfm_dec(ImImage ** __restrict dest, const char * __restrict path) {
   
   /* PPM ASCII */
   if (p[0] == 'P' && p[1] == 'F') {
-    p += 2;
-    pfm_dec_rgb(im, p, end);
+    if (p[2] != '4') {
+      p += 2;
+      pfm_dec_rgb(im, p, end);
+    } else {
+      p += 3;
+      pfm_dec_rgba(im, p, end);
+    }
   }
-  
+
   /* PPM Binary */
   else if (p[0] == 'P' && p[1] == 'f') {
     p += 2;
@@ -160,5 +169,53 @@ pfm_dec_mono(ImImage * __restrict im, char * __restrict p, const char * __restri
     } while (--count > 0);
   }
 
+  return IM_OK;
+}
+
+IM_HIDE
+ImResult
+pfm_dec_rgba(ImImage * __restrict im, char * __restrict p, const char * __restrict end) {
+  im_pfm_header_t header;
+  ImByte         *pd;
+  int32_t         count, i, maxRef;
+  float           R, G, B, A;
+  bool            isLittleEndian;
+  
+  i                 = 0;
+  header            = pfm_dec_header(im, 4, &p, end);
+  count             = header.count;
+  im->format        = IM_FORMAT_RGBA;
+  im->alphaInfo     = IM_ALPHA_LAST;
+  im->bytesPerPixel = header.bytesPerCompoment * 4;
+  pd                = im->data;
+  maxRef            = header.maxRef;
+  isLittleEndian    = header.byteOrderHint < 0;
+
+  if (isLittleEndian) {
+    do {
+      R = im_get_f32_endian(p, true);  p += 4;
+      G = im_get_f32_endian(p, true);  p += 4;
+      B = im_get_f32_endian(p, true);  p += 4;
+      A = im_get_f32_endian(p, true);  p += 4;
+      
+      pd[i++] = im_clampf_zo(R) * maxRef;
+      pd[i++] = im_clampf_zo(G) * maxRef;
+      pd[i++] = im_clampf_zo(B) * maxRef;
+      pd[i++] = im_clampf_zo(A) * maxRef;
+    } while (--count > 0);
+  } else {
+    do {
+      R = im_get_f32_endian(p, false);  p += 4;
+      G = im_get_f32_endian(p, false);  p += 4;
+      B = im_get_f32_endian(p, false);  p += 4;
+      A = im_get_f32_endian(p, false);  p += 4;
+      
+      pd[i++] = im_clampf_zo(R) * maxRef;
+      pd[i++] = im_clampf_zo(G) * maxRef;
+      pd[i++] = im_clampf_zo(B) * maxRef;
+      pd[i++] = im_clampf_zo(A) * maxRef;
+    } while (--count > 0);
+  }
+  
   return IM_OK;
 }
