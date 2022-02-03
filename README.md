@@ -26,13 +26,14 @@ TODO
 - [ ] WebP
 - [ ] AVIF
 - [ ] HEIF, HEIC, HEVC
-- [x] Netpbm (pgm, ppm, pbm, pam)
+- [x] Netpbm (pgm, ppm, pbm, pam, pfm)
   - [x] Plain pbm
   - [x] Binary pbm
   - [x] Plain pgm
   - [x] Binary pgm
   - [x] Plain ppm
   - [x] Binary ppm
+  - [x] pfm (portable floatmap)
 - [ ] DPX?
 - [ ] PCX?
 - [ ] ECW?
