@@ -93,10 +93,7 @@ pfm_dec_header(ImImage                 * __restrict im,
                const char              * __restrict end) {
   im_pfm_header_t header;
   char           *p;
-  uint32_t        width, height, maxval, bytesPerPixel;
-  
-  p                    = *start;
-  maxval               = 0;
+  uint32_t        width, height, bytesPerPixel;
 
   /* Actually there are no comments and
      "each of the three lines of text ends with a 1-byte Unix-style
@@ -106,6 +103,7 @@ pfm_dec_header(ImImage                 * __restrict im,
      and comments
    */
 
+  p                    = *start;
   p                    = im_skip_spaces_and_comments(p, end);
   width                = im_getu32(&p, end);
   p                    = im_skip_spaces_and_comments(p, end);
