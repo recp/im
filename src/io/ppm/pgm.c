@@ -104,9 +104,13 @@ pgm_dec_bin(ImImage * __restrict im, char * __restrict p, const char * __restric
   maxRef            = header.maxRef;
   
   if (bytesPerCompoment == 1) {
-    do {
-      pd[i++] = min(*p++ * pe, maxRef);
-    } while (--count > 0);
+    if (pe == 1.0f && maxRef == 255) {
+      im_memcpy(pd, p, count);
+    } else {
+      do {
+        pd[i++] = min(*p++ * pe, maxRef);
+      } while (--count > 0);
+    }
   } else if (bytesPerCompoment == 2) {
     do {
       memcpy(&tmp, p, 2);

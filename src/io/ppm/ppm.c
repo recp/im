@@ -104,15 +104,18 @@ ppm_dec_bin(ImImage * __restrict im, char * __restrict p, const char * __restric
   maxRef            = header.maxRef;
 
   if (bytesPerCompoment == 1) {
-    do {
-      R = *p++;
-      G = *p++;
-      B = *p++;
-      
-      pd[i++] = min(R * pe, maxRef);
-      pd[i++] = min(G * pe, maxRef);
-      pd[i++] = min(B * pe, maxRef);
-    } while (--count > 0);
+    if (pe == 1.0f && maxRef == 255) {
+      im_memcpy(pd, p, count * 3);
+    } else {
+      do {
+        pd[0]  = min(p[0] * pe, maxRef);
+        pd[1]  = min(p[1] * pe, maxRef);
+        pd[2]  = min(p[2] * pe, maxRef);
+
+        pd    += 3;
+        p     += 3;
+      } while (--count > 0);
+    }
   } else if (bytesPerCompoment == 2) {
     do {
       memcpy(&R, p, 2);  p += 2;
