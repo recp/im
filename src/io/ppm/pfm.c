@@ -17,6 +17,9 @@
 /*
  References:
  [0] http://netpbm.sourceforge.net/doc/
+ [1] https://en.wikipedia.org/wiki/Netpbm
+ [2] https://www.cse.cuhk.edu.hk/~ttwong/data/hdrfire/hdrfire.html
+ [3] http://www.pauldebevec.com/Research/HDR/PFM/
  */
 
 #include "pfm.h"

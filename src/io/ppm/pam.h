@@ -14,6 +14,11 @@
  * limitations under the License.
  */
 
+/*
+ References:
+ [0] http://netpbm.sourceforge.net/doc/
+ */
+
 #ifndef pam_h
 #define pam_h
 
