@@ -43,4 +43,25 @@ typedef struct im_pfm_header_t {
   int32_t  byteOrderHint; /* negative is Little-Endian otherwise Big-Endian */
 } im_pfm_header_t;
 
+typedef enum pam_tuple_type_t {
+  PAM_TUPLE_TYPE_UNKNOWN       = 0,
+  PAM_TUPLE_TYPE_BLACKANDWHITE = 1,
+  PAM_TUPLE_TYPE_GRAYSCALE     = 2,
+  PAM_TUPLE_TYPE_RGB           = 3,
+  PAM_TUPLE_TYPE_RGB_ALPHA     = 4
+} pam_tuple_type_t;
+
+typedef struct im_pam_header_t {
+  uint32_t         width;
+  uint32_t         height;
+  uint32_t         depth;
+  uint32_t         maxval;
+  pam_tuple_type_t tupltype;
+  uint32_t         count;
+  uint32_t         bytesPerCompoment;
+  uint32_t         maxRef;
+  float            pe;
+  bool             failed;
+} im_pam_header_t;
+
 #endif /* pnm_common_h */

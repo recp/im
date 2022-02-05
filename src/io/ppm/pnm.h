@@ -39,4 +39,10 @@ pfm_dec_header(ImImage                 * __restrict im,
                char       * __restrict * __restrict start,
                const char              * __restrict end);
 
+IM_HIDE
+im_pam_header_t
+pam_dec_header(ImImage                 * __restrict im,
+               char       * __restrict * __restrict start,
+               const char              * __restrict end);
+
 #endif /* pnm_h */

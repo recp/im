@@ -14,22 +14,13 @@
  * limitations under the License.
  */
 
-/*
- References:
- [0] http://netpbm.sourceforge.net/doc/
- */
-
-#ifndef ppm_h
-#define ppm_h
+#ifndef pam_h
+#define pam_h
 
 #include "common.h"
 
 IM_HIDE
 ImResult
-ppm_dec(ImImage ** __restrict im, const char * __restrict path);
+pam_dec(ImImage ** __restrict im, const char * __restrict path);
 
-IM_HIDE
-ImResult
-ppm_dec_bin(ImImage * __restrict im, char * __restrict p, const char * __restrict end);
-
-#endif /* ppm_h */
+#endif /* pam_h */
