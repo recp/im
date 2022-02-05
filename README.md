@@ -36,6 +36,7 @@ TODO
   - [x] Binary ppm
   - [x] pfm (portable floatmap)
   - [x] pfm alpha (pf4) / augmented pfm
+  - [x] pam
 - [ ] DPX?
 - [ ] PCX?
 - [ ] ECW?
