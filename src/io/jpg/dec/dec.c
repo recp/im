@@ -93,6 +93,8 @@ im_on_worker(void *argv) {
   
   jpg_dec_start(jpg, fres.raw);
   
+  return;
+
 err:
   arg->failed = true;
 }
@@ -218,6 +220,8 @@ jpg_dec(ImImage ** __restrict dest, const char * __restrict path) {
   th_thread   *scan_worker, *idct_worker;
   worker_arg_t arg;
   
+  memset(&arg, 0, sizeof(arg));
+
   jpg       = calloc(1, sizeof(*jpg));
   arg.path  = path;
   arg.jpg   = jpg;
