@@ -13,7 +13,7 @@ Companion Libaries:
 
 TODO
 -----
-
+- [ ] GPU support
 - [ ] JPEG (In Progress)
 - [ ] PNG (In Progress)
 - [ ] JPEG 2000
