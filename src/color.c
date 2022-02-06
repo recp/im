@@ -39,9 +39,9 @@ im_YCbCrToRGB(ImByte * __restrict src, uint32_t width, uint32_t height) {
     G    = Y - 0.344136 * (Cb - 128.0) - 0.714136 * (Cr - 128.0);
     B    = Y + 1.772 * (Cb - 128.0);
 
-    p[0] = clampi(R, 0, 255);
-    p[1] = clampi(G, 0, 255);
-    p[2] = clampi(B, 0, 255);
+    p[0] = im_clamp_i32(R, 0, 255);
+    p[1] = im_clamp_i32(G, 0, 255);
+    p[2] = im_clamp_i32(B, 0, 255);
 
     p += 3;
   }

@@ -153,13 +153,13 @@ im_on_worker_idct(void *argv) {
         Vi           = jpg->frm.vmax / V;
         samplerClass = Hi << 1 | Vi;
         
-        yi           = min(8, (height - blk->mcuy * 8 * vmax) * V / vmax);
-        xi           = min(8, (width  - blk->mcux * 8 * hmax) * H / hmax);
+        yi           = im_min_i32(8, (height - blk->mcuy * 8 * vmax) * V / vmax);
+        xi           = im_min_i32(8, (width  - blk->mcux * 8 * hmax) * H / hmax);
         row          = blk->mcuy * 8 * V;
         col          = blk->mcux * 8 * H;
         
-        H            = max(1, H * (float)min((width  - blk->mcux * 8 * hmax), hmax * 8) / (hmax * 8));
-        V            = max(1, V * (float)min((height - blk->mcuy * 8 * vmax), vmax * 8) / (vmax * 8));
+        H            = im_max_i32(1, H * (float)im_min_i32((width  - blk->mcux * 8 * hmax), hmax * 8) / (hmax * 8));
+        V            = im_max_i32(1, V * (float)im_min_i32((height - blk->mcuy * 8 * vmax), vmax * 8) / (vmax * 8));
         
         for (int v = 0; v < V; v++) {
           for (int h = 0; h < H; h++) {

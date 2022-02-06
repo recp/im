@@ -39,9 +39,9 @@ im_YCbCrToRGB_8x8(ImByte blk[3][64], ImByte * __restrict dest) {
       G = Y - 0.344136 * (1.0 * Cb - 128.0) - 0.714136 * (1.0 * Cr - 128.0);
       B = Y + 1.772 * (1.0 * Cb - 128.0);
 
-      R = max(0, min(R, 255));
-      G = max(0, min(G, 255));
-      B = max(0, min(B, 255));
+      R = im_max_i32(0, im_min_i32(R, 255));
+      G = im_max_i32(0, im_min_i32(G, 255));
+      B = im_max_i32(0, im_min_i32(B, 255));
 
       dest[3 * (y * 8 + x) + 0] = R;
       dest[3 * (y * 8 + x) + 1] = G;

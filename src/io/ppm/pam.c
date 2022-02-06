@@ -72,12 +72,12 @@ pam_dec(ImImage ** __restrict dest, const char * __restrict path) {
 
       if (bytesPerCompoment == 1) {
         do {
-          *pd++ = min(*p++ * pe, maxRef);
+          *pd++ = im_min_i32(*p++ * pe, maxRef);
         } while (--count > 0);
       } else if (bytesPerCompoment == 2) {
         do {
           memcpy(&R, p, 2);  p += 2;
-          pd[i++] = min(R * pe, maxRef);
+          pd[i++] = im_min_i32(R * pe, maxRef);
         } while (--count > 0);
       }
     }

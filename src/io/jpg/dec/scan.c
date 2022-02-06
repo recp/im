@@ -230,8 +230,8 @@ jpg_scan_intr(ImByte * __restrict pRaw,
 
       tb->mcux = j;
       tb->mcuy = i;
-      tb->xi   = min(X - 8 * j, 8);
-      tb->yi   = min(Y - 8 * i, 8);
+      tb->xi   = im_min_i32(X - 8 * j, 8);
+      tb->yi   = im_min_i32(Y - 8 * i, 8);
       
       if (++jpg->dec_index > 2)
         jpg->dec_index = 0;

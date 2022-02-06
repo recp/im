@@ -77,7 +77,7 @@ jpg_idct3(int16_t blk[64]) {
   }
 
   for (int y = 0; y < 64; y++) {
-    blk[y] = clampi(roundl(data[y]) + 128, 0, 255);
+    blk[y] = im_clamp_i32(roundl(data[y]) + 128, 0, 255);
   }
 }
 
@@ -198,6 +198,6 @@ jpg_idct(int16_t * __restrict blk) {
   }
 
   for (int y = 0; y < 64; y++) {
-    blk[y] = clampi(roundl(blk[y]) + 128, 0, 255);
+    blk[y] = im_clamp_i32(roundl(blk[y]) + 128, 0, 255);
   }
 }

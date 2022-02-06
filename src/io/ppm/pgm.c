@@ -108,14 +108,14 @@ pgm_dec_bin(ImImage * __restrict im, char * __restrict p, const char * __restric
       im_memcpy(pd, p, count);
     } else {
       do {
-        pd[i++] = min(*p++ * pe, maxRef);
+        pd[i++] = im_min_i32(*p++ * pe, maxRef);
       } while (--count > 0);
     }
   } else if (bytesPerCompoment == 2) {
     do {
       memcpy(&tmp, p, 2);
       p      += 2;
-      pd[i++] = min(tmp * pe, maxRef);
+      pd[i++] = im_min_i32(tmp * pe, maxRef);
     } while (--count > 0);
   }
 
@@ -140,7 +140,7 @@ pgm_dec_ascii(ImImage * __restrict im, char * __restrict p, const char * __restr
   maxRef            = header.maxRef;
 
   do {
-    pd[i++] = min(im_getu8_skipspaces(&p, end) * pe, maxRef);
+    pd[i++] = im_min_i32(im_getu8_skipspaces(&p, end) * pe, maxRef);
   } while (p && p[0] != '\0' && *++p != '\0' && (--count) > 0);
 
   /* ensure that unhandled pixels are black. */

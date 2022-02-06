@@ -218,7 +218,7 @@ im_1bit(ImByte * __restrict pbyte,
 
 IM_INLINE
 int
-min(int a, int b) {
+im_min_i32(int a, int b) {
   if (a < b)
     return a;
   return b;
@@ -226,7 +226,7 @@ min(int a, int b) {
 
 IM_INLINE
 int
-max(int a, int b) {
+im_max_i32(int a, int b) {
   if (a > b)
     return a;
   return b;
@@ -234,8 +234,8 @@ max(int a, int b) {
 
 IM_INLINE
 int
-im_clamp(int a, int minVal, int maxVal) {
-  return max(min(a, maxVal), minVal);
+im_clamp_i32(int a, int minVal, int maxVal) {
+  return im_max_i32(im_min_i32(a, maxVal), minVal);
 }
 
 IM_INLINE
@@ -264,12 +264,6 @@ IM_INLINE
 float
 im_clampf_zo(float a) {
   return im_maxf(im_minf(a, 1.0f), 0.0f);
-}
-
-IM_INLINE
-int
-clampi(int num, int minVal, int maxVal) {
-  return max(min(num, maxVal), minVal);
 }
 
 #pragma GCC diagnostic push
