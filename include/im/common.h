@@ -23,6 +23,7 @@
 #include <float.h>
 #include <stdbool.h>
 #include <errno.h>
+#include <stdlib.h>
 
 #ifdef DEBUG
 #  include <assert.h>
