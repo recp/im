@@ -40,7 +40,7 @@ typedef struct im_pfm_header_t {
   uint32_t count;
   uint32_t bytesPerCompoment;
   uint32_t maxRef;
-  int32_t  byteOrderHint; /* negative is Little-Endian otherwise Big-Endian */
+  float    byteOrderHint; /* negative is Little-Endian otherwise Big-Endian */
 } im_pfm_header_t;
 
 typedef enum pam_tuple_type_t {

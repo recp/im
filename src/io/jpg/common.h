@@ -19,7 +19,12 @@
 
 #include "../common.h"
 #include "markers.h"
-#include <netinet/in.h>
+
+#ifndef IM_WINAPI
+# include <netinet/in.h>
+#else
+# include <winsock.h>
+#endif
 
 #include "../../color.h"
 

@@ -17,6 +17,18 @@
 #ifndef common_h
 #define common_h
 
+#ifndef _USE_MATH_DEFINES
+#  define _USE_MATH_DEFINES       /* for windows */
+#endif
+
+#ifndef _CRT_SECURE_NO_WARNINGS
+#  define _CRT_SECURE_NO_WARNINGS /* for windows */
+#endif
+
+#ifndef _CRT_NONSTDC_NO_DEPRECATE
+#  define _CRT_NONSTDC_NO_DEPRECATE /* for windows */
+#endif
+
 /* since C99 or compiler ext */
 #include <stdint.h>
 #include <stddef.h>
@@ -32,6 +44,7 @@
 
 #if defined(_MSC_VER) || defined(__MINGW32__) || defined(__MINGW64__)
 #  define IM_WINAPI
+#  pragma warning (disable : 4068) /* disable unknown pragma warnings */
 #endif
 
 #if defined(_MSC_VER) || defined(__MINGW32__) || defined(__MINGW64__)

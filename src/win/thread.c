@@ -45,13 +45,10 @@ thread_entry(void *arg) {
 TH_HIDE
 th_thread*
 thread_new(void (*func)(void *), void *obj) {
-  th_allocator   *alc;
   th_thread       *th;
   th_thread_entry *entry;
 
-
-  alc         = th_get_allocator();
-  th          = alc->calloc(1, sizeof(*th));
+  th          = calloc(1, sizeof(*th));
   entry       = calloc(1, sizeof(*entry));
   entry->func = func;
   entry->arg  = obj;

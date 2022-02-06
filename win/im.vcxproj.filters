@@ -1,0 +1,170 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="src">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="include">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
+    </Filter>
+    <Filter Include="include\im">
+      <UniqueIdentifier>{4aba9dc7-2892-41d8-8c94-0d2e6f8464ec}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\arch">
+      <UniqueIdentifier>{8c673e3f-1172-4faa-92fb-7ef08664bf8d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\io">
+      <UniqueIdentifier>{017674bb-b01a-4830-991e-0b68b28a422b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\io\ppm">
+      <UniqueIdentifier>{650ce876-1db2-47ad-a738-bf645edefbcf}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\io\bmp">
+      <UniqueIdentifier>{713fad93-459c-45df-86f8-b0d890b8a81f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\io\tga">
+      <UniqueIdentifier>{de24ea91-6d83-40ce-80a3-85a3be9726cd}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\io\jpg">
+      <UniqueIdentifier>{35c2b70f-fd0d-4164-991f-870b785bb0c3}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\io\png">
+      <UniqueIdentifier>{80cfd266-45b2-4479-a9ee-6f9275abb190}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\io\tiff">
+      <UniqueIdentifier>{e3ee478e-a751-4850-a59c-f677a865ce49}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\io\jp2">
+      <UniqueIdentifier>{e52dd1dd-b2d1-4a7a-8461-0c9803cab938}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\io\gif">
+      <UniqueIdentifier>{fcac23b4-632d-4d0e-8b76-7ee2bd4fb7cd}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\io\webp">
+      <UniqueIdentifier>{cd418647-ea02-45a9-8739-5f2b62662641}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\mem">
+      <UniqueIdentifier>{1c65d706-6335-4fa7-86f8-1df446c2b3b0}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\win">
+      <UniqueIdentifier>{2b3e17c5-df98-4402-ab56-dabf3e3466fd}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\thread">
+      <UniqueIdentifier>{efa567b0-53a9-4c26-93b6-8d21ea891263}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\include\im\cocoa.h">
+      <Filter>include\im</Filter>
+    </ClInclude>
+    <ClInclude Include="..\include\im\common.h">
+      <Filter>include\im</Filter>
+    </ClInclude>
+    <ClInclude Include="..\include\im\im.h">
+      <Filter>include\im</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\io\ppm\common.h">
+      <Filter>src\io\ppm</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\io\ppm\pam.h">
+      <Filter>src\io\ppm</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\io\ppm\pbm.h">
+      <Filter>src\io\ppm</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\io\ppm\pfm.h">
+      <Filter>src\io\ppm</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\io\ppm\pgm.h">
+      <Filter>src\io\ppm</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\io\ppm\pnm.h">
+      <Filter>src\io\ppm</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\io\ppm\ppm.h">
+      <Filter>src\io\ppm</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\io\bmp\bmp.h">
+      <Filter>src\io\bmp</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\arch\intrin.h">
+      <Filter>src\arch</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\io\common.h">
+      <Filter>src\io</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\mem\mmap.h">
+      <Filter>src\mem</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\win\thread.h">
+      <Filter>src\win</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\thread\common.h">
+      <Filter>src\thread</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\thread\thread.h">
+      <Filter>src\thread</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\color.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\common.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\endian.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\file.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\sampler.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\str.h">
+      <Filter>src</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\src\io\ppm\pam.c">
+      <Filter>src\io\ppm</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\io\ppm\pbm.c">
+      <Filter>src\io\ppm</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\io\ppm\pfm.c">
+      <Filter>src\io\ppm</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\io\ppm\pgm.c">
+      <Filter>src\io\ppm</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\io\ppm\pnm.c">
+      <Filter>src\io\ppm</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\io\ppm\ppm.c">
+      <Filter>src\io\ppm</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\io\bmp\bmp.c">
+      <Filter>src\io\bmp</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\mem\mmap.c">
+      <Filter>src\mem</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\win\thread.c">
+      <Filter>src\win</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\color.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\file.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\im.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\win\dllmain.c">
+      <Filter>src\win</Filter>
+    </ClCompile>
+  </ItemGroup>
+</Project>

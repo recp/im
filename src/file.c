@@ -58,7 +58,7 @@ im_readfile(const char * __restrict file) {
     return res;
   }
 
-#ifndef AK_WINAPI
+#ifndef IM_WINAPI
   blksize = infile_st.st_blksize;
 #else
   blksize = 512;
