@@ -75,6 +75,8 @@ im_win32_bitmap(ImImage* __restrict im, HDC hdc) {
   hdcImage = CreateCompatibleDC(hdc);
   SelectObject(hdcImage, bitmap);
   
+  /* TODO: provide option to call DeleteObject() by user */
+
   return hdcImage;
 }
 

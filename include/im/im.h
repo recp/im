@@ -86,6 +86,8 @@ typedef enum ImFileFormatType {
 
 typedef struct ImImageData {
   void *data;
+  
+  /* TODO: close handle on win32 if it is opened */
   void *udata;
 } ImImageData;
 
