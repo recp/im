@@ -40,10 +40,67 @@
 
 #include "file.h"
 
+#ifdef IM_WINAPI
+/* Exclude rarely - used stuff from Windows headers */
+#  define WIN32_LEAN_AND_MEAN
+#  include <SDKDDKVer.h>
+
+/* Windows Header Files : */
+#  include <windows.h>
+#endif
+
 typedef struct floader_t {
   const char * fext;
   ImResult (*floader_fn)(ImImage ** __restrict, const char * __restrict);
 } floader_t;
+
+IM_EXPORT
+void*
+im_init_data(ImImage * __restrict im, size_t size) {
+#ifdef IM_WINAPI
+  /* TODO: disable mapping with option */
+  /* https://docs.microsoft.com/en-us/windows/win32/memory/creating-named-shared-memory */
+  HANDLE hMapFile;
+  LPVOID pBuf;
+
+  hMapFile = CreateFileMapping(INVALID_HANDLE_VALUE, /* use paging file                        */
+                               NULL,                 /* default security                       */
+                               PAGE_READWRITE,       /* read/write access                      */
+                               0,                    /* maximum object size (high-order DWORD) */
+                               size,                 /* maximum object size (low-order DWORD)  */
+                               NULL);                /* name of mapping object                 */
+
+  if (hMapFile == NULL) {
+    im->data.data = malloc(size);
+    return im->data.data;
+  }
+
+  pBuf = MapViewOfFile(hMapFile,            /* handle to map object */
+                       FILE_MAP_ALL_ACCESS, /* read/write permission */
+                       0,
+                       0,
+                       size);
+
+  if (pBuf == NULL) {
+    CloseHandle(hMapFile);
+    im->data.data = malloc(size);
+    return im->data.data;
+  } else {
+    im->data.data  = pBuf;
+    im->data.udata = hMapFile;
+  }
+
+  return im->data.data;
+
+#else
+  if (im->data.data)
+    return im->data.data;
+
+  im->data.data = malloc(size);
+
+  return im->data.data;
+#endif
+}
 
 IM_EXPORT
 ImResult

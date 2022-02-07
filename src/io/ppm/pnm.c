@@ -45,6 +45,7 @@ pnm_dec_header(ImImage                 * __restrict im,
                const char              * __restrict end,
                bool                                 includeMaxVal) {
   im_pnm_header_t header;
+  size_t          imlen;
   char           *p;
   uint32_t        width, height, maxval, bytesPerPixel;
 
@@ -70,9 +71,11 @@ pnm_dec_header(ImImage                 * __restrict im,
   }
   
   bytesPerPixel        = header.bytesPerCompoment * ncomponents;
-  im->data.data        = malloc(width * height * bytesPerPixel);
+  header.count         = width * height;
+  imlen                = header.count * bytesPerPixel;
+  im->data.data        = im_init_data(im, imlen); /* malloc(imlen); */
   im->format           = IM_FORMAT_GRAY;
-  im->len              = header.count = width * height;
+  im->len              = imlen;
   im->width            = width;
   im->height           = height;
   im->bytesPerPixel    = bytesPerPixel;
@@ -99,6 +102,7 @@ pfm_dec_header(ImImage                 * __restrict im,
                char       * __restrict * __restrict start,
                const char              * __restrict end) {
   im_pfm_header_t header;
+  size_t          imlen;
   char           *p;
   uint32_t        width, height, bytesPerPixel;
 
@@ -123,9 +127,11 @@ pfm_dec_header(ImImage                 * __restrict im,
   header.maxRef            = 255;
 
   bytesPerPixel        = header.bytesPerCompoment * ncomponents;
-  im->data.data        = malloc(width * height * bytesPerPixel);
+  header.count         = width * height;
+  imlen                = header.count * bytesPerPixel;
+  im->data.data        = im_init_data(im, imlen); /* malloc(imlen); */
   im->format           = IM_FORMAT_GRAY;
-  im->len              = header.count = width * height;
+  im->len              = imlen;
   im->width            = width;
   im->height           = height;
   
@@ -149,6 +155,7 @@ pam_dec_header(ImImage                 * __restrict im,
                char       * __restrict * __restrict start,
                const char              * __restrict end) {
   im_pam_header_t header;
+  size_t          imlen;
   char           *p, c;
   uint32_t        width, height, depth, maxval, bytesPerPixel;
   bool            foundENDHDR;
@@ -281,11 +288,13 @@ pam_dec_header(ImImage                 * __restrict im,
     header.maxRef            = 255;
     header.bytesPerCompoment = 1;
   }
-  
+
   bytesPerPixel        = header.bytesPerCompoment * depth;
-  im->data.data        = malloc(width * height * bytesPerPixel);
+  header.count         = width * height;
+  imlen                = header.count * bytesPerPixel;
+  im->data.data        = im_init_data(im, imlen); /* malloc(imlen); */
   im->format           = IM_FORMAT_GRAY;
-  im->len              = header.count = width * height;
+  im->len              = imlen;
   im->width            = width;
   im->height           = height;
   im->bytesPerPixel    = bytesPerPixel;

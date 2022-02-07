@@ -63,13 +63,8 @@ im_win32_bitmap(ImImage* __restrict im, HDC hdc) {
   dbmi.bmiColors->rgbReserved    = 0;
  
   /* TODO: use file map? */
-  /*
-  HANDLE hmap;
-  if (!((hmap = CreateFileMapping(INVALID_HANDLE_VALUE, 0, PAGE_READWRITE, 0, 0, 0))))
-      return NULL;
-  */
-
-  bitmap = CreateDIBSection(hdc, &dbmi, DIB_RGB_COLORS, &ppvBits, NULL, 0);
+  
+  bitmap = CreateDIBSection(hdc, &dbmi, DIB_RGB_COLORS, &ppvBits, im->data.udata, 0);
   if (ppvBits == NULL || bitmap == NULL) {
      /* TODO: release memory */
      return NULL;

@@ -103,6 +103,10 @@ typedef struct ImImage {
 } ImImage;
 
 IM_EXPORT
+void*
+im_init_data(ImImage * __restrict im, size_t size);
+
+IM_EXPORT
 ImResult
 im_load(ImImage ** __restrict dest, const char * __restrict url, ...);
 
