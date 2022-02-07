@@ -63,18 +63,20 @@ im_win32_bitmap(ImImage* __restrict im, HDC hdc) {
   dbmi.bmiColors->rgbReserved    = 0;
  
   /* TODO: use file map? */
-  
+
   bitmap = CreateDIBSection(hdc, &dbmi, DIB_RGB_COLORS, &ppvBits, im->data.udata, 0);
   if (ppvBits == NULL || bitmap == NULL) {
      /* TODO: release memory */
      return NULL;
   }
-  
-  memcpy(ppvBits, im->data.data, im->width * im->height * im->bytesPerPixel);
-  
+
+  if (!im->data.udata) {
+    memcpy(ppvBits, im->data.data, im->len);
+  }
+
   hdcImage = CreateCompatibleDC(hdc);
   SelectObject(hdcImage, bitmap);
-  
+
   /* TODO: provide option to call DeleteObject() by user */
 
   im->data.reserved0 = hdcImage;
