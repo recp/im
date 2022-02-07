@@ -84,7 +84,7 @@ im_win32_bitmap(ImImage* __restrict im, HDC hdc) {
 
 IM_INLINE
 BOOL
-im_win32_draw(ImImage * __restrict im, HDC destHDC, uint32_t x, uint32_t y) {
+im_win32_draw_fixed(ImImage * __restrict im, HDC destHDC, uint32_t x, uint32_t y) {
   if (!(im->data.data && im->data.reserved0))
     return false;
 
@@ -101,26 +101,91 @@ im_win32_draw(ImImage * __restrict im, HDC destHDC, uint32_t x, uint32_t y) {
 
 IM_INLINE
 BOOL
-im_win32_draw_stretched(ImImage * __restrict im,
-                        HDC                  destHDC,
-                        uint32_t             x,
-                        uint32_t             y,
-                        uint32_t             width,
-                        uint32_t             height) {
+im_win32_draw(ImImage * __restrict im,
+              HDC                  destHDC,
+              uint32_t             x,
+              uint32_t             y,
+              uint32_t             width,
+              uint32_t             height,
+              uint32_t             maxWidth,
+              uint32_t             maxHeight,
+              bool                 keepAspectRatio,
+              bool                 centerIfNeeded) {
+  float    _aspect;
+  uint32_t _w, _h, _hf, nWidth, nHeight;
+  RECT     rcCli;
+
   if (!(im->data.data && im->data.reserved0))
     return false;
+  
+  _aspect = (float)im->height / (float)im->width;
+  
+  if (width > maxWidth) {
+    _w = maxWidth;
+  } else {
+    _w = width;
+  }
+  
+  if (height > maxHeight) {
+    _h = maxHeight;
+  } else {
+    _h = height;
+  }
+  
+  if (keepAspectRatio) {
+    _hf = _w * _aspect;
 
+    if (_h < _hf) {
+      _hf = _h;
+      _w  = _hf / _aspect;
+    }
+
+    _h = _hf;
+  }
+  
+  if (centerIfNeeded) {
+    GetClientRect(WindowFromDC(destHDC), &rcCli);
+    
+    nWidth  = rcCli.right  - rcCli.left;
+    nHeight = rcCli.bottom - rcCli.top;
+    
+    x += (nWidth  - _w) * 0.5;
+    y += (nHeight - _h) * 0.5;
+  }
+  
   return StretchBlt(destHDC,
                     x,
                     y,
-                    width,
-                    height,
+                    _w,
+                    _h,
                     (HDC)im->data.reserved0,
                     0,
                     0,
                     im->width,
                     im->height,
                     SRCCOPY);
+}
+
+IM_INLINE
+BOOL
+im_win32_draw_centered_in(ImImage * __restrict im, HDC destHDC) {
+  RECT rcCli;
+  
+  if (!(im->data.data && im->data.reserved0))
+    return false;
+  
+  GetClientRect(WindowFromDC(destHDC), &rcCli);
+
+  return im_win32_draw(im,
+                       destHDC,
+                       0,
+                       0,
+                       im->width,
+                       im->height,
+                       rcCli.right  - rcCli.left,
+                       rcCli.bottom - rcCli.top,
+                       true,
+                       true);
 }
 
 #ifdef __cplusplus
