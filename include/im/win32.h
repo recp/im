@@ -75,7 +75,7 @@ im_win32_bitmap(ImImage* __restrict im, HDC hdc) {
      return NULL;
   }
   
-  memcpy(ppvBits, im->data, im->width * im->height * im->bytesPerPixel);
+  memcpy(ppvBits, im->data.data, im->width * im->height * im->bytesPerPixel);
   
   hdcImage = CreateCompatibleDC(hdc);
   SelectObject(hdcImage, bitmap);

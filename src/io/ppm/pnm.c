@@ -70,7 +70,7 @@ pnm_dec_header(ImImage                 * __restrict im,
   }
   
   bytesPerPixel        = header.bytesPerCompoment * ncomponents;
-  im->data             = malloc(width * height * bytesPerPixel);
+  im->data.data        = malloc(width * height * bytesPerPixel);
   im->format           = IM_FORMAT_GRAY;
   im->len              = header.count = width * height;
   im->width            = width;
@@ -122,19 +122,23 @@ pfm_dec_header(ImImage                 * __restrict im,
   header.bytesPerCompoment = 4;
   header.maxRef            = 255;
 
-  bytesPerPixel     = header.bytesPerCompoment * ncomponents;
-  im->data          = malloc(width * height * bytesPerPixel);
-  im->format        = IM_FORMAT_GRAY;
-  im->len           = header.count = width * height;
-  im->width         = width;
-  im->height        = height;
-  im->bytesPerPixel = bytesPerPixel;
-  im->bitsPerPixel  = bytesPerPixel * 8;
-
-  header.width      = width;
-  header.height     = height;
+  bytesPerPixel        = header.bytesPerCompoment * ncomponents;
+  im->data.data        = malloc(width * height * bytesPerPixel);
+  im->format           = IM_FORMAT_GRAY;
+  im->len              = header.count = width * height;
+  im->width            = width;
+  im->height           = height;
   
-  *start            = im_skip_spaces_and_comments(p, end);
+  /* TODO: use option to use/set higher bits */
+  im->bytesPerPixel    = 1 * ncomponents;
+  im->bitsPerPixel     = im->bytesPerPixel * 8;
+
+  im->bitsPerComponent = 8;
+
+  header.width         = width;
+  header.height        = height;
+
+  *start               = im_skip_spaces_and_comments(p, end);
   
   return header;
 }
@@ -279,14 +283,14 @@ pam_dec_header(ImImage                 * __restrict im,
   }
   
   bytesPerPixel        = header.bytesPerCompoment * depth;
-  im->data             = malloc(width * height * bytesPerPixel);
+  im->data.data        = malloc(width * height * bytesPerPixel);
   im->format           = IM_FORMAT_GRAY;
   im->len              = header.count = width * height;
   im->width            = width;
   im->height           = height;
   im->bytesPerPixel    = bytesPerPixel;
   im->bitsPerPixel     = bytesPerPixel * 8;
-  im->bitsPerComponent = bytesPerPixel * 8;
+  im->bitsPerComponent = 8;
 
   switch (header.tupltype) {
     case PAM_TUPLE_TYPE_BLACKANDWHITE: im->format = IM_FORMAT_BLACKWHITE; break;
@@ -324,9 +328,9 @@ pam_dec_header(ImImage                 * __restrict im,
   return header;
 
 err:
-  if (im->data) {
-    im->data = NULL;
-    free(im->data);
+  if (im->data.data) {
+    im->data.data = NULL;
+    free(im->data.data);
   }
 
   header.failed = true;

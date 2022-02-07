@@ -84,8 +84,13 @@ typedef enum ImFileFormatType {
   IM_FILEFORMATTYPE_BMP_OS2_Pointer
 } ImFileFormatType;
 
+typedef struct ImImageData {
+  void *data;
+  void *udata;
+} ImImageData;
+
 typedef struct ImImage {
-  void            *data;
+  ImImageData      data;
   size_t           len;
   uint32_t         width;
   uint32_t         height;

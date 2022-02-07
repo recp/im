@@ -28,18 +28,18 @@ jpg_sof(ImByte * __restrict pRaw,
   uint32_t     /* len, */ i, Nf;
 
   /* len             = jpg_get_ui16(pRaw); */
-  frm             = &jpg->frm;
-  frm->precision  = pRaw[2];
-  frm->height     = jpg_get_ui16(&pRaw[3]);
-  frm->width      = jpg_get_ui16(&pRaw[5]);
-  frm->Nf         = Nf = pRaw[7];
-  frm->hmax       = 0;
-  frm->vmax       = 0;
+  frm                = &jpg->frm;
+  frm->precision     = pRaw[2];
+  frm->height        = jpg_get_ui16(&pRaw[3]);
+  frm->width         = jpg_get_ui16(&pRaw[5]);
+  frm->Nf            = Nf = pRaw[7];
+  frm->hmax          = 0;
+  frm->vmax          = 0;
 
-  jpg->im->data   = malloc(Nf * frm->height * frm->width);
-  jpg->im->width  = frm->width;
-  jpg->im->height = frm->height;
-  jpg->im->len    = Nf * frm->height * frm->width;
+  jpg->im->data.data = malloc(Nf * frm->height * frm->width);
+  jpg->im->width     = frm->width;
+  jpg->im->height    = frm->height;
+  jpg->im->len       = Nf * frm->height * frm->width;
 
   pRaw += 8;
 

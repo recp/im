@@ -100,7 +100,7 @@ ppm_dec_bin(ImImage * __restrict im, char * __restrict p, const char * __restric
   im->format        = IM_FORMAT_RGB;
   im->bytesPerPixel = bytesPerCompoment * 3;
   im->bitsPerPixel  = im->bytesPerPixel * 8;
-  pd                = im->data;
+  pd                = im->data.data;
   pe                = header.pe;
   maxRef            = header.maxRef;
 
@@ -146,7 +146,7 @@ ppm_dec_ascii(ImImage * __restrict im, char * __restrict p, const char * __restr
   im->format        = IM_FORMAT_RGB;
   im->bytesPerPixel = header.bytesPerCompoment * 3;
   im->bitsPerPixel  = im->bytesPerPixel * 8;
-  pd                = im->data;
+  pd                = im->data.data;
   pe                = header.pe;
   maxRef            = header.maxRef;
 

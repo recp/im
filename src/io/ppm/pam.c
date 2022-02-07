@@ -63,11 +63,7 @@ pam_dec(ImImage ** __restrict dest, const char * __restrict path) {
     bytesPerCompoment    = header.bytesPerCompoment;
     pe                   = header.pe;
     maxRef               = header.maxRef;
-    pd                   = im->data;
-
-    im->bytesPerPixel    = bytesPerCompoment;
-    im->bitsPerPixel     = bytesPerCompoment * 8;
-    im->bitsPerComponent = bytesPerCompoment * 8;
+    pd                   = im->data.data;
 
     if (pe == 1.0f && maxRef == 255) {
       im_memcpy(pd, p, count * header.depth);

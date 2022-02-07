@@ -139,7 +139,7 @@ im_on_worker_idct(void *argv) {
       
       width  = jpg->frm.width;
       height = jpg->frm.height;
-      p      = ((ImByte *)im->data);
+      p      = ((ImByte *)im->data.data);
       Ns     = jpg->scan->Ns;
       
       for (k = 0; k < Ns; k++) {
@@ -209,7 +209,7 @@ im_on_worker_idct(void *argv) {
   thread_unlock(&jpg->wrkmutex);
   
   if (im) {
-    im_YCbCrToRGB(jpg->im->data, im->width, im->height);
+    im_YCbCrToRGB(jpg->im->data.data, im->width, im->height);
   }
 }
 
