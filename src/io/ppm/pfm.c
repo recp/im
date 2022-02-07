@@ -111,6 +111,7 @@ pfm_dec_rgb(ImImage * __restrict im, char * __restrict p, const char * __restric
   count             = header.count;
   im->format        = IM_FORMAT_RGB;
   im->bytesPerPixel = header.bytesPerCompoment * 3;
+  im->bitsPerPixel  = im->bytesPerPixel * 8;
   pd                = im->data;
   maxRef            = header.maxRef;
   isLittleEndian    = header.byteOrderHint < 0;
@@ -149,14 +150,16 @@ pfm_dec_mono(ImImage * __restrict im, char * __restrict p, const char * __restri
   float           R;
   bool            isLittleEndian;
 
-  i                 = 0;
-  header            = pfm_dec_header(im, 1, &p, end);
-  count             = header.count;
-  im->format        = IM_FORMAT_MONOCHROME;
-  im->bytesPerPixel = header.bytesPerCompoment;
-  pd                = im->data;
-  maxRef            = header.maxRef;
-  isLittleEndian    = header.byteOrderHint < 0;
+  i                    = 0;
+  header               = pfm_dec_header(im, 1, &p, end);
+  count                = header.count;
+  im->format           = IM_FORMAT_MONOCHROME;
+  im->bytesPerPixel    = header.bytesPerCompoment;
+  im->bitsPerPixel     = im->bytesPerPixel * 8;
+  im->bitsPerComponent = header.bytesPerCompoment * 8;
+  pd                   = im->data;
+  maxRef               = header.maxRef;
+  isLittleEndian       = header.byteOrderHint < 0;
 
   if (isLittleEndian) {
     do {
@@ -190,6 +193,7 @@ pfm_dec_rgba(ImImage * __restrict im, char * __restrict p, const char * __restri
   im->format        = IM_FORMAT_RGBA;
   im->alphaInfo     = IM_ALPHA_LAST;
   im->bytesPerPixel = header.bytesPerCompoment * 4;
+  im->bitsPerPixel  = im->bytesPerPixel * 8;
   pd                = im->data;
   maxRef            = header.maxRef;
   isLittleEndian    = header.byteOrderHint < 0;

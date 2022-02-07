@@ -30,12 +30,13 @@
 #include "color.h"
 #include "sampler.h"
 
-#include "io/jpg/dec/dec.h"
+//#include "io/jpg/dec/dec.h"
 #include "io/ppm/ppm.h"
 #include "io/ppm/pgm.h"
 #include "io/ppm/pbm.h"
 #include "io/ppm/pfm.h"
 #include "io/ppm/pam.h"
+#include "io/bmp/bmp.h"
 
 #include "file.h"
 
@@ -68,8 +69,9 @@ im_load(ImImage ** __restrict dest, const char * __restrict url, ...) {
     {"ppm",  ppm_dec},
     {"pfm",  pfm_dec},
     {"pam",  pam_dec},
-    {"jpeg", jpg_dec},
-    {"jpg",  jpg_dec}
+//    {"jpeg", jpg_dec},
+//    {"jpg",  jpg_dec},
+    {"bmp",  bmp_dec}
   };
 
   floader = NULL;

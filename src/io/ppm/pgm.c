@@ -99,6 +99,7 @@ pgm_dec_bin(ImImage * __restrict im, char * __restrict p, const char * __restric
   bytesPerCompoment = header.bytesPerCompoment;
   im->format        = IM_FORMAT_GRAY;
   im->bytesPerPixel = header.bytesPerCompoment;
+  im->bitsPerPixel  = im->bytesPerPixel * 8;
   pd                = im->data;
   pe                = header.pe;
   maxRef            = header.maxRef;
@@ -135,6 +136,7 @@ pgm_dec_ascii(ImImage * __restrict im, char * __restrict p, const char * __restr
   count             = header.count;
   im->format        = IM_FORMAT_GRAY;
   im->bytesPerPixel = header.bytesPerCompoment;
+  im->bitsPerPixel  = im->bytesPerPixel * 8;
   pd                = im->data;
   pe                = header.pe;
   maxRef            = header.maxRef;

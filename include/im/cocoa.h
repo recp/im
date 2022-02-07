@@ -17,6 +17,9 @@
 #ifndef im_cocoa_h
 #define im_cocoa_h
 #ifdef __APPLE__
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #import <TargetConditionals.h>
 #include "common.h"
@@ -60,8 +63,8 @@ im_cgimage(ImImage *im, bool copydata) {
       return NULL;
   }
   
-  if (im->bitsPerPixel != 0) {
-    bitsPerComponent = im->bitsPerPixel;
+  if (im->bitsPerComponent != 0) {
+    bitsPerComponent = im->bitsPerComponent;
   } else {
     bitsPerComponent = 8;
   }
@@ -98,7 +101,7 @@ im_cgimage(ImImage *im, bool copydata) {
   imageRef = CGImageCreate(width,                       /* width              */
                            height,                      /* height             */
                            bitsPerComponent,            /* bits per component */
-                           bitsPerComponent * elemSize, /* bits per pixel     */
+                           im->bitsPerPixel,            /* bits per pixel     */
                            bytesPerRow,                 /* bytesPerRow        */
                            colorSpace,                  /* colorspace         */
                            bitmapInfo,                  /* bitmap info        */
@@ -145,5 +148,8 @@ im_uiimage(ImImage * __restrict im, bool copydata) {
 
 #endif
 
+#ifdef __cplusplus
+}
+#endif
 #endif
 #endif /* im_cocoa_h */

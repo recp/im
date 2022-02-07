@@ -155,6 +155,7 @@
     <ClInclude Include="..\include\im\cocoa.h" />
     <ClInclude Include="..\include\im\common.h" />
     <ClInclude Include="..\include\im\im.h" />
+    <ClInclude Include="..\include\im\win32.h" />
     <ClInclude Include="..\src\arch\intrin.h" />
     <ClInclude Include="..\src\color.h" />
     <ClInclude Include="..\src\common.h" />

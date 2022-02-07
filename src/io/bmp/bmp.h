@@ -20,7 +20,7 @@
 #include "../common.h"
 
 IM_HIDE
-void
-bmp_dec(ImByte *raw, ImImage *im);
+ImResult
+bmp_dec(ImImage ** __restrict dest, const char * __restrict path);
 
 #endif /* sc_bmp_h */

@@ -16,6 +16,9 @@
 
 #ifndef common_h
 #define common_h
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #ifndef _USE_MATH_DEFINES
 #  define _USE_MATH_DEFINES       /* for windows */
@@ -83,4 +86,7 @@ typedef enum ImResult {
   IM_EBADF    = -EBADF  /* file couldn't parsed / loaded */
 } ImResult;
 
+#ifdef __cplusplus
+}
+#endif
 #endif /* common_h */

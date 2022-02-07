@@ -69,16 +69,17 @@ pnm_dec_header(ImImage                 * __restrict im,
     header.bytesPerCompoment = 1;
   }
   
-  bytesPerPixel     = header.bytesPerCompoment * ncomponents;
-  im->data          = malloc(width * height * bytesPerPixel);
-  im->format        = IM_FORMAT_GRAY;
-  im->len           = header.count = width * height;
-  im->width         = width;
-  im->height        = height;
-  im->bytesPerPixel = bytesPerPixel;
+  bytesPerPixel        = header.bytesPerCompoment * ncomponents;
+  im->data             = malloc(width * height * bytesPerPixel);
+  im->format           = IM_FORMAT_GRAY;
+  im->len              = header.count = width * height;
+  im->width            = width;
+  im->height           = height;
+  im->bytesPerPixel    = bytesPerPixel;
+  im->bitsPerComponent = header.bytesPerCompoment * 8;
 
-  header.width      = width;
-  header.height     = height;
+  header.width         = width;
+  header.height        = height;
 
   if (header.maxRef != maxval) {
     header.pe = ((float)header.maxRef) / ((float)maxval);
@@ -128,6 +129,7 @@ pfm_dec_header(ImImage                 * __restrict im,
   im->width         = width;
   im->height        = height;
   im->bytesPerPixel = bytesPerPixel;
+  im->bitsPerPixel  = bytesPerPixel * 8;
 
   header.width      = width;
   header.height     = height;
@@ -276,14 +278,16 @@ pam_dec_header(ImImage                 * __restrict im,
     header.bytesPerCompoment = 1;
   }
   
-  bytesPerPixel     = header.bytesPerCompoment * depth;
-  im->data          = malloc(width * height * bytesPerPixel);
-  im->format        = IM_FORMAT_GRAY;
-  im->len           = header.count = width * height;
-  im->width         = width;
-  im->height        = height;
-  im->bytesPerPixel = bytesPerPixel;
-  
+  bytesPerPixel        = header.bytesPerCompoment * depth;
+  im->data             = malloc(width * height * bytesPerPixel);
+  im->format           = IM_FORMAT_GRAY;
+  im->len              = header.count = width * height;
+  im->width            = width;
+  im->height           = height;
+  im->bytesPerPixel    = bytesPerPixel;
+  im->bitsPerPixel     = bytesPerPixel * 8;
+  im->bitsPerComponent = bytesPerPixel * 8;
+
   switch (header.tupltype) {
     case PAM_TUPLE_TYPE_BLACKANDWHITE: im->format = IM_FORMAT_BLACKWHITE; break;
     case PAM_TUPLE_TYPE_GRAYSCALE:     im->format = IM_FORMAT_GRAY;       break;

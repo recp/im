@@ -16,6 +16,9 @@
 
 #ifndef im_h
 #define im_h
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #include "common.h"
 
@@ -57,15 +60,41 @@ typedef enum ImAlphaInfo {
   IM_ALPHA_ONLY                /* No color data, alpha data only */
 } ImAlphaInfo;
 
+/* same as CGImageAlphaInfo */
+typedef enum ImFileFormatType {
+  IM_FILEFORMATTYPE_UNKNOWN,
+  IM_FILEFORMATTYPE_JPEG,
+  IM_FILEFORMATTYPE_PNG,
+
+  IM_FILEFORMATTYPE_PBM_ASCII,
+  IM_FILEFORMATTYPE_PBM_BIN,
+  IM_FILEFORMATTYPE_PGM_ASCII,
+  IM_FILEFORMATTYPE_PGM_BIN,
+  IM_FILEFORMATTYPE_PPM_ASCII,
+  IM_FILEFORMATTYPE_PPM_BIN,
+  IM_FILEFORMATTYPE_PFM,
+  IM_FILEFORMATTYPE_PFM_ALPHA,
+  IM_FILEFORMATTYPE_PAM_BIN,
+
+  IM_FILEFORMATTYPE_BMP_Windows,
+  IM_FILEFORMATTYPE_BMP_OS2_StructBitmapArray,
+  IM_FILEFORMATTYPE_BMP_OS2_StructColorIcon,
+  IM_FILEFORMATTYPE_BMP_OS2_ConstColorPointer,
+  IM_FILEFORMATTYPE_BMP_OS2_Icon,
+  IM_FILEFORMATTYPE_BMP_OS2_Pointer
+} ImFileFormatType;
+
 typedef struct ImImage {
-  void       *data;
-  size_t      len;
-  uint32_t    width;
-  uint32_t    height;
-  uint32_t    bytesPerPixel;
-  uint32_t    bitsPerPixel;
-  ImFormat    format;
-  ImAlphaInfo alphaInfo;
+  void            *data;
+  size_t           len;
+  uint32_t         width;
+  uint32_t         height;
+  uint32_t         bytesPerPixel;
+  uint32_t         bitsPerPixel;
+  uint32_t         bitsPerComponent;
+  ImFormat         format;
+  ImAlphaInfo      alphaInfo;
+  ImFileFormatType fileFormatType;
 } ImImage;
 
 IM_EXPORT
@@ -80,4 +109,7 @@ IM_EXPORT
 ImImage*
 im_load_base64(const char * __restrict base64data);
 
+#ifdef __cplusplus
+}
+#endif
 #endif /* im_h */

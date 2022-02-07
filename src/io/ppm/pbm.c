@@ -97,6 +97,7 @@ pbm_dec_bin(ImImage * __restrict im, char * __restrict p, const char * __restric
   header            = pnm_dec_header(im, 1, &p, end, false);
   im->format        = IM_FORMAT_BLACKWHITE;
   im->bytesPerPixel = header.bytesPerCompoment;
+  im->bitsPerPixel  = im->bytesPerPixel * 8;
   width             = header.width;
   height            = header.height;
   pd                = im->data;
@@ -137,6 +138,7 @@ pbm_dec_ascii(ImImage * __restrict im, char * __restrict p, const char * __restr
   count             = header.count;
   im->format        = IM_FORMAT_BLACKWHITE;
   im->bytesPerPixel = header.bytesPerCompoment;
+  im->bitsPerPixel  = im->bytesPerPixel * 8;
   pd                = im->data;
   c                 = *p;
 
