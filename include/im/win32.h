@@ -31,6 +31,8 @@ extern "C" {
 /* Windows Header Files : */
 #  include <windows.h>
 
+/* TODO: separate function to return HBITMAP ?*/
+
 IM_INLINE
 HDC
 im_win32_bitmap(ImImage* __restrict im, HDC hdc) {
