@@ -89,6 +89,7 @@ typedef struct ImImageData {
   
   /* TODO: close handle on win32 if it is opened */
   void *udata;
+  void *reserved0;
 } ImImageData;
 
 typedef struct ImImage {
