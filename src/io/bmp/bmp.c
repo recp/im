@@ -87,56 +87,47 @@ typedef enum im_bmp_compression_method_t {
  } BITMAPV5HEADER, *LPBITMAPV5HEADER, *PBITMAPV5HEADER;
  */
 typedef struct im_bmp_dip_header_t {
-  uint32_t size;
-  uint32_t width;
-  uint32_t height;
-  uint16_t nColorPlanes;         /* the number of color planes (must be 1) */
-  uint16_t nBitsPerPixel;        /* the number of bits per pixel, which is the color depth of the image. Typical values are 1, 4, 8, 16, 24 and 32 */
-  uint32_t compressionMethod;
-  
-  uint32_t imageSize;
-  int32_t  xPixelsPerMeter;      /* horizontal resolution of the image. (pixel per metre, signed integer) */
-  int32_t  yPixelsPerMeter;      /* vertical resolution of the image. (pixel per metre, signed integer)   */
-  uint32_t nColorsInPalette;     /* the number of colors in the color palette, or 0 to default to 2n */
-  uint32_t nImportantColors;     /* the number of important colors used, or 0 when every color is important; generally ignored */
+  uint32_t        size;
+  int32_t         width;
+  int32_t         height;
+  uint16_t        planes;
+  uint16_t        bitCount;
+  uint32_t        compression;
+  uint32_t        imageSize;
+  int32_t         xPelsPerMeter;
+  int32_t         yPelsPerMeter;
+  uint32_t        clrUsed;
+  uint32_t        clrImportant;
 
-  uint32_t        bV5Size;
-  int32_t         bV5Width;
-  int32_t         bV5Height;
-  uint16_t        bV5Planes;
-  uint16_t        bV5BitCount;
-  uint32_t        bV5Compression;
-  uint32_t        bV5SizeImage;
-  int32_t         bV5XPelsPerMeter;
-  int32_t         bV5YPelsPerMeter;
-  uint32_t        bV5ClrUsed;
-  uint32_t        bV5ClrImportant;
-
-  uint32_t        bV5RedMask;
-  uint32_t        bV5GreenMask;
-  uint32_t        bV5BlueMask;
-  uint32_t        bV5AlphaMask;
-  uint32_t        bV5CSType;
+  /*
+   TODO:
+  uint32_t        redMask;
+  uint32_t        greenMask;
+  uint32_t        blueMask;
+  uint32_t        alphaMask;
+  uint32_t        cSType;
 //  CIEXYZTRIPLE    bV5Endpoints;
-  uint32_t        bV5GammaRed;
-  uint32_t        bV5GammaGreen;
-  uint32_t        bV5GammaBlue;
-  uint32_t        bV5Intent;
-  uint32_t        bV5ProfileData;
-  uint32_t        bV5ProfileSize;
-  uint32_t        bV5Reserved;
-  
+  uint32_t        gammaRed;
+  uint32_t        gammaGreen;
+  uint32_t        gammaBlue;
+  uint32_t        intent;
+  uint32_t        profileData;
+  uint32_t        profileSize;
+  uint32_t        reserved;
+   */
 } im_bmp_dip_header_t;
 
 IM_HIDE
 ImResult
 bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
   ImImage            *im;
-  char               *p, *end;
+  char               *p, *p_back, *end, *pd, *palette;
   ImFileResult        fres;
   im_bmp_dip_header_t dip_header;
-  uint32_t            fileSizes, dataOffset;
-  
+  uint32_t            fileSizes, dataOffset, width, height, i, j, ncomp;
+  size_t              imlen;
+  bool                hasPalette;
+
   im   = NULL;
   fres = im_readfile(path);
   
@@ -173,11 +164,78 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
   /* reserved 4 bytes (unused) */
   p += 4;
   dataOffset        = im_get_u32_endian(p, true);  p += 4;
-  
+
+  p_back = p;
+
   /* DIP header */
-  dip_header.size   = im_get_u32_endian(p, true);  p += 4;
-  dip_header.width  = im_get_u32_endian(p, true);  p += 4;
-  dip_header.height = im_get_u32_endian(p, true);  p += 4;
+  dip_header.size             = im_get_u32_endian(p, true);  p += 4;
+  dip_header.width   = width  = im_get_i32_endian(p, true);  p += 4;
+  dip_header.height  = height = im_get_i32_endian(p, true);  p += 4;
+
+  dip_header.planes           = im_get_u16_endian(p, true);  p += 2;
+  dip_header.bitCount         = im_get_u16_endian(p, true);  p += 2;
+  dip_header.compression      = im_get_u32_endian(p, true);  p += 4;
+  dip_header.imageSize        = im_get_u32_endian(p, true);  p += 4;
+  dip_header.xPelsPerMeter    = im_get_i32_endian(p, true);  p += 4;
+  dip_header.yPelsPerMeter    = im_get_i32_endian(p, true);  p += 4;
+
+  dip_header.clrUsed          = im_get_u32_endian(p, true);  p += 4;
+  dip_header.clrImportant     = im_get_u32_endian(p, true);  p += 4;
+
+  palette    = p = p_back + dip_header.size;
+  hasPalette = dip_header.bitCount < 8;
+  ncomp      = 3;
+
+  if (dip_header.compression == IM_BMP_COMPR_BITFIELDS) {
+    palette += 12;
+  } else if (dip_header.compression == IM_BMP_COMPR_ALPHABITFIELDS) {
+    palette += 16;
+  }
+
+  imlen                = dip_header.width * dip_header.height * ncomp;
+  im->data.data        = im_init_data(im, imlen);
+  im->format           = IM_FORMAT_RGB;
+  im->len              = imlen;
+  im->width            = dip_header.width;
+  im->height           = dip_header.height;
+
+  /* TODO: -
+   DEST Image configuration but may change in the future by options,
+   e.g bit per pixel
+   */
+
+  im->bytesPerPixel    = ncomp;
+  im->bitsPerComponent = 8;
+  im->bitsPerPixel     = ncomp * 8;
+
+  pd                   = im->data.data;
+
+  p                    = (char *)fres.raw + dataOffset;
+  palette              = p_back + dip_header.size;
+
+  uint32_t rem      = width * ncomp % 4;
+  uint32_t row_pad  = 0 == rem ? 0 : 4 - rem;
+  
+  if (dip_header.bitCount == 8) {
+    for (i = 0; i < height; i++) {
+      for (j = 0; j < width; j++) {
+        uint8_t index = p[i * width + j] * 4;
+ 
+        pd[i * width * 3 + j * 3 + 0] = palette[index + 0];
+        pd[i * width * 3 + j * 3 + 1] = palette[index + 1];
+        pd[i * width * 3 + j * 3 + 2] = palette[index + 2];
+      }
+    }
+  } else if (dip_header.bitCount == 24) {
+    for (i = 0; i < height; i++) {
+      for (j = 0; j < width; j++) {
+        pd[i * width * 3 + j * 3 + 0] = p[i * width * 3 + j * 3 + 0];
+        pd[i * width * 3 + j * 3 + 1] = p[i * width * 3 + j * 3 + 1];
+        pd[i * width * 3 + j * 3 + 2] = p[i * width * 3 + j * 3 + 2];
+      }
+      p += row_pad;
+    }
+  }
 
   *dest = im;
   
