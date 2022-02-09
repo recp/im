@@ -21,6 +21,7 @@ extern "C" {
 #endif
 
 #include "common.h"
+#include "options.h"
 
 typedef unsigned char ImByte;
 
@@ -111,7 +112,9 @@ im_init_data(ImImage * __restrict im, size_t size);
 
 IM_EXPORT
 ImResult
-im_load(ImImage ** __restrict dest, const char * __restrict url, ...);
+im_load(ImImage         ** __restrict dest,
+        const char       * __restrict url,
+        im_option_base_t * options[]);
 
 IM_EXPORT
 ImImage*

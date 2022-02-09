@@ -128,6 +128,9 @@
     <ClInclude Include="..\include\im\win32.h">
       <Filter>include\im</Filter>
     </ClInclude>
+    <ClInclude Include="..\include\im\options.h">
+      <Filter>include\im</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\src\io\ppm\pam.c">

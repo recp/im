@@ -104,16 +104,15 @@ im_init_data(ImImage * __restrict im, size_t size) {
 
 IM_EXPORT
 ImResult
-im_load(ImImage ** __restrict dest, const char * __restrict url, ...) {
+im_load(ImImage         ** __restrict dest,
+        const char       * __restrict url,
+        im_option_base_t * options[]) {
   floader_t  *floader;
   const char *localurl;
   int         file_type;
   int         _err_no;
 
-  va_list pref_args;
-  va_start(pref_args, url);
-  file_type = va_arg(pref_args, int);
-  va_end(pref_args);
+  file_type = IM_FILE_TYPE_AUTO;
 
   /* TODO: remote or another kind URL than file URL ? */
   localurl = url;
