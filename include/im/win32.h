@@ -53,7 +53,7 @@ im_win32_bitmap(ImImage* __restrict im, HDC hdc) {
   dbmi.bmiHeader.biPlanes        = 1;
   dbmi.bmiHeader.biBitCount      = im->bitsPerPixel;
   dbmi.bmiHeader.biCompression   = BI_RGB;
-  dbmi.bmiHeader.biSizeImage     = 0;
+  dbmi.bmiHeader.biSizeImage     = im->len;
   dbmi.bmiHeader.biXPelsPerMeter = 0;
   dbmi.bmiHeader.biYPelsPerMeter = 0;
   dbmi.bmiHeader.biClrUsed       = 0;
