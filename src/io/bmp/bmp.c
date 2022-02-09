@@ -192,12 +192,21 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
     palette += 16;
   }
 
-  imlen                = dip_header.width * dip_header.height * ncomp;
+  uint32_t rem         = width * ncomp % 4;
+  uint32_t row_pad     = 0 == rem ? 0 : 4 - rem;
+
+  imlen                = (dip_header.width * ncomp + row_pad) * dip_header.height;
   im->data.data        = im_init_data(im, imlen);
   im->format           = IM_FORMAT_RGB;
   im->len              = imlen;
   im->width            = dip_header.width;
   im->height           = dip_header.height;
+
+  if (ncomp == 3) {
+    im->format = IM_FORMAT_RGB;
+  } else if (ncomp == 4) {
+    im->format = IM_FORMAT_RGBA;
+  }
 
   /* TODO: -
    DEST Image configuration but may change in the future by options,
@@ -213,9 +222,6 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
   p                    = (char *)fres.raw + dataOffset;
   palette              = p_back + dip_header.size;
 
-  uint32_t rem      = width * ncomp % 4;
-  uint32_t row_pad  = 0 == rem ? 0 : 4 - rem;
-  
   if (dip_header.bitCount == 8) {
     for (i = 0; i < height; i++) {
       for (j = 0; j < width; j++) {
