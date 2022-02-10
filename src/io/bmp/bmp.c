@@ -153,11 +153,11 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
    IC OS/2 struct icon
    PT OS/2 pointer
    */
-  
+
   if (p[0] != 'B' && p[1] != 'M') {
     goto err;
   }
-  
+
   p += 2;
   im->fileFormatType = IM_FILEFORMATTYPE_BMP_Windows;
   im->row_pad_last   = 4;
@@ -262,10 +262,14 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
       }
     }
   } else if (bpp == 24) {
-    for (i = 0; i < height; i++) {
-      im_memcpy(pd, p, dst_rowst);
-      p  += dst_rowst;
-      pd += dst_rowst;
+    if (dst_pad == 0 && src_pad == 0) {
+      im_memcpy(pd, p, dst_rowst * height);
+    } else {
+      for (i = 0; i < height; i++) {
+        im_memcpy(pd, p, dst_rowst);
+        p  += dst_rowst;
+        pd += dst_rowst;
+      }
     }
   }
 
