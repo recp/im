@@ -116,42 +116,16 @@ typedef enum im_bmp_compression_method_t {
  } BITMAPV5HEADER, *LPBITMAPV5HEADER, *PBITMAPV5HEADER;
  */
 
-typedef struct im_bmp_dip_header_t {
-  uint32_t        compression;
-  uint32_t        imageSize;
-  int32_t         xResolution;
-  int32_t         yResolution;
-  uint32_t        clrUsed;
-  uint32_t        clrImportant;
-
-  /*
-   TODO:
-  uint32_t        redMask;
-  uint32_t        greenMask;
-  uint32_t        blueMask;
-  uint32_t        alphaMask;
-  uint32_t        cSType;
-//  CIEXYZTRIPLE    bV5Endpoints;
-  uint32_t        gammaRed;
-  uint32_t        gammaGreen;
-  uint32_t        gammaBlue;
-  uint32_t        intent;
-  uint32_t        profileData;
-  uint32_t        profileSize;
-  uint32_t        reserved;
-   */
-} im_bmp_dip_header_t;
-
 IM_HIDE
 ImResult
 bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
   ImImage            *im;
   char               *p, *p_back, *end, *pd, *palette;
-  ImFileResult        fres;
-  im_bmp_dip_header_t dip_header;
-  ImByte              bpp;
-  uint32_t            fileSizes, dataOffset, hsz, width, height, i, j, ncomp, row_pad_last, rowst;
   size_t              imlen;
+  ImFileResult        fres;
+  ImByte              bpp;
+  uint32_t            dataoff, hsz, imsz, width, height, hres, vres, compr,
+                      i, j, ncomp, rowst;
   bool                hasPalette;
 
   im   = NULL;
@@ -185,48 +159,45 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
   im->fileFormatType = IM_FILEFORMATTYPE_BMP_Windows;
   im->row_pad_last   = 4;
 
-  memset(&dip_header, 0, sizeof(dip_header));
-  
-  fileSizes         = im_get_u32_endian(p, true);  p += 4;
-  /* reserved 4 bytes (unused) */
-  p += 4;
-  dataOffset        = im_get_u32_endian(p, true);  p += 4;
+  p      += 4; /* file size: uint32 */
+  p      += 4; /* reserved 4 bytes (unused) */
 
-  p_back = p;
+  dataoff = im_get_u32_endian(p, true);  p += 4;
+  p_back  = p;
 
   /* DIP header */
-  hsz               = im_get_u32_endian(p, true);  p += 4;
+  hsz     = im_get_u32_endian(p, true);  p += 4;
 
-  if (hsz == 12) {
+  if (hsz == 12) { /* BITMAPCOREHEADER, OS21XBITMAPHEADER */
     width  = im_get_u16_endian(p, true);  p += 2;
     height = im_get_u16_endian(p, true);  p += 2;
-  } else if (hsz == 64) {
+  } else if (hsz == 16 || hsz == 64) { /* BITMAPINFOHEADER2, OS22XBITMAPHEADER */
     width  = im_get_u32_endian(p, true);  p += 4;
     height = im_get_u32_endian(p, true);  p += 4;
-  } else {
+  } else { /* BITMAPINFOHEADER <= ... <= BITMAPV5HEADER */
     width  = im_get_i32_endian(p, true);  p += 4;
     height = im_get_i32_endian(p, true);  p += 4;
   }
 
-  /* ignore planes field */
-  im_get_u16_endian(p, true);  p += 2;
+  /* ignore planes field: uint16 */
+  p    += 2;
+  bpp   = im_get_u16_endian(p, true);  p += 2;
 
-  bpp         = im_get_u16_endian(p, true);  p += 2;
-  dip_header.compression      = im_get_u32_endian(p, true);  p += 4;
-  dip_header.imageSize        = im_get_u32_endian(p, true);  p += 4;
-  dip_header.xResolution      = im_get_i32_endian(p, true);  p += 4;
-  dip_header.yResolution      = im_get_i32_endian(p, true);  p += 4;
+  compr = im_get_u32_endian(p, true);  p += 4;
+  imsz  = im_get_u32_endian(p, true);  p += 4;
+  hres  = im_get_i32_endian(p, true);  p += 4;
+  vres  = im_get_i32_endian(p, true);  p += 4;
 
-  dip_header.clrUsed          = im_get_u32_endian(p, true);  p += 4;
-  dip_header.clrImportant     = im_get_u32_endian(p, true);  p += 4;
+  p    += 4; /* color used: uint32 */
+  p    += 4; /* color important: uint32 */
 
   palette    = p = p_back + hsz;
   hasPalette = bpp < 8;
   ncomp      = 3;
 
-  if (dip_header.compression == IM_BMP_COMPR_BITFIELDS) {
+  if (compr == IM_BMP_COMPR_BITFIELDS) {
     palette += 12;
-  } else if (dip_header.compression == IM_BMP_COMPR_ALPHABITFIELDS) {
+  } else if (compr == IM_BMP_COMPR_ALPHABITFIELDS) {
     palette += 16;
   }
 
@@ -263,7 +234,7 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
 
   pd                   = im->data.data;
 
-  p                    = (char *)fres.raw + dataOffset;
+  p                    = (char *)fres.raw + dataoff;
   palette              = p_back + hsz;
 
   if (bpp == 8) {
