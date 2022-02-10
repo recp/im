@@ -127,7 +127,8 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
   ImFileResult        fres;
   ImByte              bpp;
   uint32_t            dataoff, hsz, imsz, width, height, hres, vres, compr,
-                      i, j, idx, ncomp, rowst, pltst;
+                      i, j, idx, src_ncomp, dst_ncomp, pltst,
+                      src_rem, src_pad, dst_rem, dst_pad, src_rowst, dst_rowst;
   bool                hasPalette;
 
   im   = NULL;
@@ -197,7 +198,15 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
 
   palette    = p = p_back + hsz;
   hasPalette = bpp < 8;
-  ncomp      = 3;
+  dst_ncomp  = 3;
+  
+  if (bpp <= 8) {
+    src_ncomp = 1;
+  } else if (bpp == 24) {
+    src_ncomp = 3;
+  } else if (bpp == 32) {
+    src_ncomp = 4;
+  }
 
   if (compr == IM_BMP_COMPR_BITFIELDS) {
     palette += 12;
@@ -205,25 +214,25 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
     palette += 16;
   }
 
-  uint32_t rem         = width * ncomp % 4;
-  uint32_t row_pad     = 0 == rem ? 0 : 4 - rem;
-  
-  uint32_t dst_rem     = width * ncomp % im->row_pad_last;
-  uint32_t dst_row_pad = 0 == dst_rem ? 0 : im->row_pad_last - dst_rem;
+  src_rem   = width * src_ncomp % 4;
+  src_pad   = src_rem == 0 ? 0 : 4 - src_rem;
+  src_rowst = src_pad + width * src_ncomp;
 
-  rowst = dst_row_pad + width * ncomp;
+  dst_rem   = width * dst_ncomp % im->row_pad_last;
+  dst_pad   = dst_rem == 0 ? 0 : im->row_pad_last - dst_rem;
+  dst_rowst = dst_pad + width * dst_ncomp;
 
-  imlen                = (width * ncomp + dst_row_pad) * height;
+  imlen                = (width * dst_ncomp + dst_pad) * height;
   im->data.data        = im_init_data(im, imlen);
   im->format           = IM_FORMAT_RGB;
   im->len              = imlen;
   im->width            = width;
   im->height           = height;
-  im->row_pad_last     = dst_row_pad;
+  im->row_pad_last     = dst_pad;
 
-  if (ncomp == 3) {
+  if (dst_ncomp == 3) {
     im->format = IM_FORMAT_RGB;
-  } else if (ncomp == 4) {
+  } else if (dst_ncomp == 4) {
     im->format = IM_FORMAT_RGBA;
   }
 
@@ -232,30 +241,29 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
    e.g bit per pixel
    */
 
-  im->bytesPerPixel    = ncomp;
+  im->bytesPerPixel    = dst_ncomp;
   im->bitsPerComponent = 8;
-  im->bitsPerPixel     = ncomp * 8;
+  im->bitsPerPixel     = dst_ncomp * 8;
 
   pd                   = im->data.data;
-
   p                    = (char *)fres.raw + dataoff;
   palette              = p_back + hsz;
 
   if (bpp == 8) {
     for (i = 0; i < height; i++) {
       for (j = 0; j < width; j++) {
-        idx = ((uint8_t)p[i * width + j]) * pltst;
+        idx = ((uint8_t)p[i * src_rowst + j]) * pltst;
  
-        pd[i * width * 3 + j * 3 + 0] = palette[idx + 0];
-        pd[i * width * 3 + j * 3 + 1] = palette[idx + 1];
-        pd[i * width * 3 + j * 3 + 2] = palette[idx + 2];
+        pd[i * dst_rowst + j * dst_ncomp + 0] = palette[idx + 0];
+        pd[i * dst_rowst + j * dst_ncomp + 1] = palette[idx + 1];
+        pd[i * dst_rowst + j * dst_ncomp + 2] = palette[idx + 2];
       }
     }
   } else if (bpp == 24) {
     for (i = 0; i < height; i++) {
-      im_memcpy(pd, p, rowst);
-      p  += rowst;
-      pd += rowst;
+      im_memcpy(pd, p, dst_rowst);
+      p  += dst_rowst;
+      pd += dst_rowst;
     }
   }
 
