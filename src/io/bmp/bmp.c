@@ -23,6 +23,8 @@
  References:
  [0] https://en.wikipedia.org/wiki/BMP_file_format
  [1] http://www.edm2.com/0107/os2bmp.html
+ [2] http://netghost.narod.ru/gff/graphics/summary/os2bmp.htm
+ [3] http://www.redwoodsoft.com/~dru/museum/gfx/gff/sample/code/os2bmp/os2_code.txt
  */
 
 typedef enum im_bmp_compression_method_t {
@@ -125,7 +127,7 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
   ImFileResult        fres;
   ImByte              bpp;
   uint32_t            dataoff, hsz, imsz, width, height, hres, vres, compr,
-                      i, j, ncomp, rowst;
+                      i, j, idx, ncomp, rowst, pltst;
   bool                hasPalette;
 
   im   = NULL;
@@ -167,10 +169,12 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
 
   /* DIP header */
   hsz     = im_get_u32_endian(p, true);  p += 4;
+  pltst   = 4;
 
   if (hsz == 12) { /* BITMAPCOREHEADER, OS21XBITMAPHEADER */
     width  = im_get_u16_endian(p, true);  p += 2;
     height = im_get_u16_endian(p, true);  p += 2;
+    pltst  = 3;
   } else if (hsz == 16 || hsz == 64) { /* BITMAPINFOHEADER2, OS22XBITMAPHEADER */
     width  = im_get_u32_endian(p, true);  p += 4;
     height = im_get_u32_endian(p, true);  p += 4;
@@ -240,11 +244,11 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
   if (bpp == 8) {
     for (i = 0; i < height; i++) {
       for (j = 0; j < width; j++) {
-        uint8_t index = p[i * width + j] * 4;
+        idx = ((uint8_t)p[i * width + j]) * pltst;
  
-        pd[i * width * 3 + j * 3 + 0] = palette[index + 0];
-        pd[i * width * 3 + j * 3 + 1] = palette[index + 1];
-        pd[i * width * 3 + j * 3 + 2] = palette[index + 2];
+        pd[i * width * 3 + j * 3 + 0] = palette[idx + 0];
+        pd[i * width * 3 + j * 3 + 1] = palette[idx + 1];
+        pd[i * width * 3 + j * 3 + 2] = palette[idx + 2];
       }
     }
   } else if (bpp == 24) {
