@@ -113,6 +113,7 @@ typedef struct ImImage {
   ImFormat         format;
   ImAlphaInfo      alphaInfo;
   ImFileFormatType fileFormatType;
+  uint32_t         row_pad_last;
 } ImImage;
 
 IM_EXPORT

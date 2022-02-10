@@ -124,7 +124,7 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
   char               *p, *p_back, *end, *pd, *palette;
   ImFileResult        fres;
   im_bmp_dip_header_t dip_header;
-  uint32_t            fileSizes, dataOffset, width, height, i, j, ncomp;
+  uint32_t            fileSizes, dataOffset, width, height, i, j, ncomp, row_pad_last, rowst;
   size_t              imlen;
   bool                hasPalette;
 
@@ -157,7 +157,8 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
   
   p += 2;
   im->fileFormatType = IM_FILEFORMATTYPE_BMP_Windows;
-  
+  im->row_pad_last   = 4;
+
   memset(&dip_header, 0, sizeof(dip_header));
   
   fileSizes         = im_get_u32_endian(p, true);  p += 4;
@@ -194,13 +195,19 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
 
   uint32_t rem         = width * ncomp % 4;
   uint32_t row_pad     = 0 == rem ? 0 : 4 - rem;
+  
+  uint32_t dst_rem     = width * ncomp % im->row_pad_last;
+  uint32_t dst_row_pad = 0 == dst_rem ? 0 : im->row_pad_last - dst_rem;
 
-  imlen                = (dip_header.width * ncomp + row_pad) * dip_header.height;
+  rowst = dst_row_pad + width * ncomp;
+
+  imlen                = (dip_header.width * ncomp + dst_row_pad) * dip_header.height;
   im->data.data        = im_init_data(im, imlen);
   im->format           = IM_FORMAT_RGB;
   im->len              = imlen;
   im->width            = dip_header.width;
   im->height           = dip_header.height;
+  im->row_pad_last     = dst_row_pad;
 
   if (ncomp == 3) {
     im->format = IM_FORMAT_RGB;
@@ -234,12 +241,9 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
     }
   } else if (dip_header.bitCount == 24) {
     for (i = 0; i < height; i++) {
-      for (j = 0; j < width; j++) {
-        pd[i * width * 3 + j * 3 + 0] = p[i * width * 3 + j * 3 + 0];
-        pd[i * width * 3 + j * 3 + 1] = p[i * width * 3 + j * 3 + 1];
-        pd[i * width * 3 + j * 3 + 2] = p[i * width * 3 + j * 3 + 2];
-      }
-      p += row_pad;
+      im_memcpy(pd, p, rowst);
+      p  += rowst;
+      pd += rowst;
     }
   }
 

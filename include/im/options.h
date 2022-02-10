@@ -23,17 +23,34 @@ extern "C" {
 #include "common.h"
 
 typedef enum im_option_type_t {
-  IM_OPTION_ROW_PADDING = 1
+  IM_OPTION_ROW_PAD_LAST           = 0,
+  IM_OPTION_SUPPORTED_FORMATS      = 1,
+  IM_OPTION_SUPPORTED_ORIENTATIONS = 2,
+  IM_OPTION_SUPPORTED_COMPRESSIONS = 3,
+  IM_OPTION_USE_MMAP_FOR_WINDOWS   = 4
 } im_option_type_t;
 
 typedef struct im_option_base_t {
   im_option_type_t type;
 } im_option_base_t;
 
+#define IM_OPTIONS (im_option_base_t *[])
+
 typedef struct im_option_rowpadding_t {
   im_option_base_t base;
   uint32_t         pad;
 } im_option_rowpadding_t;
+
+IM_INLINE
+im_option_rowpadding_t
+im_option_row_padding(uint32_t last) {
+  im_option_rowpadding_t pad;
+  
+  pad.base.type = IM_OPTION_ROW_PAD_LAST;
+  pad.pad       = last;
+
+  return pad;
+}
 
 #ifdef __cplusplus
 }
