@@ -206,6 +206,8 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
     src_ncomp = 3;
   } else if (bpp == 32) {
     src_ncomp = 4;
+  } else {
+    goto err;
   }
 
   if (compr == IM_BMP_COMPR_BITFIELDS) {
