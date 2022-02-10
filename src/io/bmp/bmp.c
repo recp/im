@@ -18,6 +18,13 @@
 #include "../../file.h"
 #include "../../endian.h"
 
+
+/*
+ References:
+ [0] https://en.wikipedia.org/wiki/BMP_file_format
+ [1] http://www.edm2.com/0107/os2bmp.html
+ */
+
 typedef enum im_bmp_compression_method_t {
   IM_BMP_COMPR_RGB            = 0,  /* none                           | Most common */
   IM_BMP_COMPR_RLE8           = 1,  /* RLE 8-bit/pixel                | Can be used only with 8-bit/pixel bitmaps */
@@ -45,6 +52,28 @@ typedef enum im_bmp_compression_method_t {
    DWORD biClrUsed;
    DWORD biClrImportant;
  } BITMAPINFOHEADER, *PBITMAPINFOHEADER;
+ 
+ typedef struct _BITMAPINFOHEADER2 {
+   ULONG cbFix;
+   ULONG cx;
+   ULONG cy;
+   USHORT cPlanes;
+   USHORT cBitCount;
+   ULONG ulCompression;
+   ULONG cbImage;
+   ULONG cxResolution;
+   ULONG cyResolution;
+   ULONG cclrUsed;
+   ULONG cclrImportant;
+   USHORT usUnits;
+   USHORT usReserved;
+   USHORT usRecording;
+   USHORT usRendering;
+   ULONG cSize1;
+   ULONG cSize2;
+   ULONG ulColorEncoding;
+   ULONG ulIdentifier;
+ } BITMAPINFOHEADER2;
  
  typedef struct tagCIEXYZ {
    FXPT2DOT30 ciexyzX;
@@ -86,16 +115,12 @@ typedef enum im_bmp_compression_method_t {
    DWORD        bV5Reserved;
  } BITMAPV5HEADER, *LPBITMAPV5HEADER, *PBITMAPV5HEADER;
  */
+
 typedef struct im_bmp_dip_header_t {
-  uint32_t        size;
-  int32_t         width;
-  int32_t         height;
-  uint16_t        planes;
-  uint16_t        bitCount;
   uint32_t        compression;
   uint32_t        imageSize;
-  int32_t         xPelsPerMeter;
-  int32_t         yPelsPerMeter;
+  int32_t         xResolution;
+  int32_t         yResolution;
   uint32_t        clrUsed;
   uint32_t        clrImportant;
 
@@ -124,7 +149,8 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
   char               *p, *p_back, *end, *pd, *palette;
   ImFileResult        fres;
   im_bmp_dip_header_t dip_header;
-  uint32_t            fileSizes, dataOffset, width, height, i, j, ncomp, row_pad_last, rowst;
+  ImByte              bpp;
+  uint32_t            fileSizes, dataOffset, hsz, width, height, i, j, ncomp, row_pad_last, rowst;
   size_t              imlen;
   bool                hasPalette;
 
@@ -169,22 +195,33 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
   p_back = p;
 
   /* DIP header */
-  dip_header.size             = im_get_u32_endian(p, true);  p += 4;
-  dip_header.width   = width  = im_get_i32_endian(p, true);  p += 4;
-  dip_header.height  = height = im_get_i32_endian(p, true);  p += 4;
+  hsz               = im_get_u32_endian(p, true);  p += 4;
 
-  dip_header.planes           = im_get_u16_endian(p, true);  p += 2;
-  dip_header.bitCount         = im_get_u16_endian(p, true);  p += 2;
+  if (hsz == 12) {
+    width  = im_get_u16_endian(p, true);  p += 2;
+    height = im_get_u16_endian(p, true);  p += 2;
+  } else if (hsz == 64) {
+    width  = im_get_u32_endian(p, true);  p += 4;
+    height = im_get_u32_endian(p, true);  p += 4;
+  } else {
+    width  = im_get_i32_endian(p, true);  p += 4;
+    height = im_get_i32_endian(p, true);  p += 4;
+  }
+
+  /* ignore planes field */
+  im_get_u16_endian(p, true);  p += 2;
+
+  bpp         = im_get_u16_endian(p, true);  p += 2;
   dip_header.compression      = im_get_u32_endian(p, true);  p += 4;
   dip_header.imageSize        = im_get_u32_endian(p, true);  p += 4;
-  dip_header.xPelsPerMeter    = im_get_i32_endian(p, true);  p += 4;
-  dip_header.yPelsPerMeter    = im_get_i32_endian(p, true);  p += 4;
+  dip_header.xResolution      = im_get_i32_endian(p, true);  p += 4;
+  dip_header.yResolution      = im_get_i32_endian(p, true);  p += 4;
 
   dip_header.clrUsed          = im_get_u32_endian(p, true);  p += 4;
   dip_header.clrImportant     = im_get_u32_endian(p, true);  p += 4;
 
-  palette    = p = p_back + dip_header.size;
-  hasPalette = dip_header.bitCount < 8;
+  palette    = p = p_back + hsz;
+  hasPalette = bpp < 8;
   ncomp      = 3;
 
   if (dip_header.compression == IM_BMP_COMPR_BITFIELDS) {
@@ -201,12 +238,12 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
 
   rowst = dst_row_pad + width * ncomp;
 
-  imlen                = (dip_header.width * ncomp + dst_row_pad) * dip_header.height;
+  imlen                = (width * ncomp + dst_row_pad) * height;
   im->data.data        = im_init_data(im, imlen);
   im->format           = IM_FORMAT_RGB;
   im->len              = imlen;
-  im->width            = dip_header.width;
-  im->height           = dip_header.height;
+  im->width            = width;
+  im->height           = height;
   im->row_pad_last     = dst_row_pad;
 
   if (ncomp == 3) {
@@ -227,9 +264,9 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
   pd                   = im->data.data;
 
   p                    = (char *)fres.raw + dataOffset;
-  palette              = p_back + dip_header.size;
+  palette              = p_back + hsz;
 
-  if (dip_header.bitCount == 8) {
+  if (bpp == 8) {
     for (i = 0; i < height; i++) {
       for (j = 0; j < width; j++) {
         uint8_t index = p[i * width + j] * 4;
@@ -239,7 +276,7 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
         pd[i * width * 3 + j * 3 + 2] = palette[index + 2];
       }
     }
-  } else if (dip_header.bitCount == 24) {
+  } else if (bpp == 24) {
     for (i = 0; i < height; i++) {
       im_memcpy(pd, p, rowst);
       p  += rowst;
