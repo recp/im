@@ -53,7 +53,7 @@ im_win32_bitmap(ImImage* __restrict im, HDC hdc) {
   dbmi.bmiHeader.biPlanes        = 1;
   dbmi.bmiHeader.biBitCount      = im->bitsPerPixel;
   dbmi.bmiHeader.biCompression   = BI_RGB;
-  dbmi.bmiHeader.biSizeImage     = im->len;
+  dbmi.bmiHeader.biSizeImage     = (DWORD)im->len;
   dbmi.bmiHeader.biXPelsPerMeter = 0;
   dbmi.bmiHeader.biYPelsPerMeter = 0;
   dbmi.bmiHeader.biClrUsed       = 0;
@@ -137,11 +137,11 @@ im_win32_draw(ImImage * __restrict im,
   }
   
   if (keepAspectRatio) {
-    _hf = _w * _aspect;
+    _hf = (uint32_t)((float)_w * _aspect);
 
     if (_h < _hf) {
       _hf = _h;
-      _w  = _hf / _aspect;
+      _w  = (uint32_t)((float)_hf / _aspect);
     }
 
     _h = _hf;
@@ -153,8 +153,8 @@ im_win32_draw(ImImage * __restrict im,
     nWidth  = rcCli.right  - rcCli.left;
     nHeight = rcCli.bottom - rcCli.top;
     
-    x += (nWidth  - _w) * 0.5;
-    y += (nHeight - _h) * 0.5;
+    x += (uint32_t)((nWidth  - _w) * 0.5f);
+    y += (uint32_t)((nHeight - _h) * 0.5f);
   }
   
   return StretchBlt(destHDC,
