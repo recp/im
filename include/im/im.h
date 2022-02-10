@@ -61,6 +61,15 @@ typedef enum ImAlphaInfo {
   IM_ALPHA_ONLY                /* No color data, alpha data only */
 } ImAlphaInfo;
 
+typedef enum ImCompressionType {
+  IM_COMPRESSION_NONE       = 0
+} ImCompressionType;
+
+typedef enum ImOrientationType {
+  IM_ORIENTATION_UP   = 0,
+  IM_ORIENTATION_DOWN = 1
+} ImOrientationType;
+
 /* same as CGImageAlphaInfo */
 typedef enum ImFileFormatType {
   IM_FILEFORMATTYPE_UNKNOWN,
