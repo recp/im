@@ -39,11 +39,19 @@ typedef enum ImFormat {
   IM_FORMAT_NONE       = 0,
   IM_FORMAT_BLACKWHITE = 1,
   IM_FORMAT_GRAY       = 2,
+
+  /* RGB layout */
   IM_FORMAT_RGB        = 3,
   IM_FORMAT_RGBA       = 4,
-  IM_FORMAT_CMYK       = 5,
-  IM_FORMAT_YCbCr      = 6,
   
+  /* BGR layout */
+  IM_FORMAT_BGR        = 5,
+  IM_FORMAT_BGR0       = 6,
+  IM_FORMAT_BGRA       = 7,
+  
+  IM_FORMAT_CMYK       = 8,
+  IM_FORMAT_YCbCr      = 9,
+
   IM_FORMAT_MONOCHROME = IM_FORMAT_GRAY
 
   /* TODO: */
