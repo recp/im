@@ -40,84 +40,6 @@ typedef enum im_bmp_compression_method_t {
   IM_BMP_COMPR_CMYKRLE4       = 13  /* RLE-4                          | only Windows Metafile CMYK */
 } im_bmp_compression_method_t;
 
-/*
- typedef struct tagBITMAPINFOHEADER {
-   DWORD biSize;
-   LONG  biWidth;
-   LONG  biHeight;
-   WORD  biPlanes;
-   WORD  biBitCount;
-   DWORD biCompression;
-   DWORD biSizeImage;
-   LONG  biXPelsPerMeter;
-   LONG  biYPelsPerMeter;
-   DWORD biClrUsed;
-   DWORD biClrImportant;
- } BITMAPINFOHEADER, *PBITMAPINFOHEADER;
- 
- typedef struct _BITMAPINFOHEADER2 {
-   ULONG cbFix;
-   ULONG cx;
-   ULONG cy;
-   USHORT cPlanes;
-   USHORT cBitCount;
-   ULONG ulCompression;
-   ULONG cbImage;
-   ULONG cxResolution;
-   ULONG cyResolution;
-   ULONG cclrUsed;
-   ULONG cclrImportant;
-   USHORT usUnits;
-   USHORT usReserved;
-   USHORT usRecording;
-   USHORT usRendering;
-   ULONG cSize1;
-   ULONG cSize2;
-   ULONG ulColorEncoding;
-   ULONG ulIdentifier;
- } BITMAPINFOHEADER2;
- 
- typedef struct tagCIEXYZ {
-   FXPT2DOT30 ciexyzX;
-   FXPT2DOT30 ciexyzY;
-   FXPT2DOT30 ciexyzZ;
- } CIEXYZ;
-
- typedef struct tagICEXYZTRIPLE {
-   CIEXYZ ciexyzRed;
-   CIEXYZ ciexyzGreen;
-   CIEXYZ ciexyzBlue;
- } CIEXYZTRIPLE;
- 
- typedef struct {
-   DWORD        bV5Size;
-   LONG         bV5Width;
-   LONG         bV5Height;
-   WORD         bV5Planes;
-   WORD         bV5BitCount;
-   DWORD        bV5Compression;
-   DWORD        bV5SizeImage;
-   LONG         bV5XPelsPerMeter;
-   LONG         bV5YPelsPerMeter;
-   DWORD        bV5ClrUsed;
-   DWORD        bV5ClrImportant;
-
-   DWORD        bV5RedMask;
-   DWORD        bV5GreenMask;
-   DWORD        bV5BlueMask;
-   DWORD        bV5AlphaMask;
-   DWORD        bV5CSType;
-   CIEXYZTRIPLE bV5Endpoints;
-   DWORD        bV5GammaRed;
-   DWORD        bV5GammaGreen;
-   DWORD        bV5GammaBlue;
-   DWORD        bV5Intent;
-   DWORD        bV5ProfileData;
-   DWORD        bV5ProfileSize;
-   DWORD        bV5Reserved;
- } BITMAPV5HEADER, *LPBITMAPV5HEADER, *PBITMAPV5HEADER;
- */
-
 IM_HIDE
 ImResult
 bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
@@ -200,21 +122,13 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
   hasPalette = bpp < 8;
   dst_ncomp  = 3;
   
-  if (bpp <= 8) {
-    src_ncomp = 1;
-  } else if (bpp == 24) {
-    src_ncomp = 3;
-  } else if (bpp == 32) {
-    src_ncomp = 4;
-  } else {
-    goto err;
-  }
+  if      (bpp <= 8)  { src_ncomp = 1; }
+  else if (bpp == 24) { src_ncomp = 3; }
+  else if (bpp == 32) { src_ncomp = 4; }
+  else                { goto err;      }
 
-  if (compr == IM_BMP_COMPR_BITFIELDS) {
-    palette += 12;
-  } else if (compr == IM_BMP_COMPR_ALPHABITFIELDS) {
-    palette += 16;
-  }
+  if      (compr == IM_BMP_COMPR_BITFIELDS)      { palette += 12; }
+  else if (compr == IM_BMP_COMPR_ALPHABITFIELDS) { palette += 16; }
 
   src_rem   = width * src_ncomp % 4;
   src_pad   = src_rem == 0 ? 0 : 4 - src_rem;
@@ -232,11 +146,8 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
   im->height           = height;
   im->row_pad_last     = dst_pad;
 
-  if (dst_ncomp == 3) {
-    im->format = IM_FORMAT_RGB;
-  } else if (dst_ncomp == 4) {
-    im->format = IM_FORMAT_RGBA;
-  }
+  if      (dst_ncomp == 3) { im->format = IM_FORMAT_RGB;  }
+  else if (dst_ncomp == 4) { im->format = IM_FORMAT_RGBA; }
 
   /* TODO: -
    DEST Image configuration but may change in the future by options,
