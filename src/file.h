@@ -19,13 +19,6 @@
 
 #include "common.h"
 
-typedef struct ImFileResult {
-  void    *raw;
-  size_t   size;
-  ImResult ret;
-  bool     mmap;
-} ImFileResult;
-
 ImFileResult
 im_readfile(const char * __restrict file);
 

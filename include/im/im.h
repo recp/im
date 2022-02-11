@@ -102,6 +102,14 @@ typedef enum ImFileFormatType {
   IM_FILEFORMATTYPE_BMP_OS2_Pointer
 } ImFileFormatType;
 
+typedef struct ImFileResult {
+  void    *raw;
+  size_t   size;
+  ImResult ret;
+  bool     mmap;
+  bool     mustfree;
+} ImFileResult;
+
 typedef struct ImImageData {
   void *data;
   
@@ -111,6 +119,7 @@ typedef struct ImImageData {
 } ImImageData;
 
 typedef struct ImImage {
+  ImFileResult     file;
   ImImageData      data;
   size_t           len;
   uint32_t         width;
@@ -141,6 +150,10 @@ im_load_hex(const char * __restrict hexdata);
 IM_EXPORT
 ImImage*
 im_load_base64(const char * __restrict base64data);
+
+IM_EXPORT
+ImResult
+im_free(ImImage * __restrict im);
 
 #ifdef __cplusplus
 }

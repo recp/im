@@ -182,3 +182,16 @@ err:
   *dest = NULL;
   return IM_ERR;
 }
+
+IM_EXPORT
+ImResult
+im_free(ImImage * __restrict im) {
+  if (im->file.mmap) {
+    im_unmap(im->file.raw, im->file.size);
+  } else if (im->file.mustfree) {
+    free(im->file.raw);
+  }
+
+  free(im);
+  return IM_OK;
+}
