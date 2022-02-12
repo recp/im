@@ -141,7 +141,6 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
   dst_rowst = dst_pad + width * dst_ncomp;
 
   imlen                = (width * dst_ncomp + dst_pad) * height;
-  im->data.data        = im_init_data(im, imlen);
   im->format           = IM_FORMAT_RGB;
   im->len              = imlen;
   im->width            = width;
@@ -159,9 +158,16 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
   im->bytesPerPixel    = dst_ncomp;
   im->bitsPerComponent = 8;
   im->bitsPerPixel     = dst_ncomp * 8;
-
-  pd                   = im->data.data;
   p                    = (char *)fres.raw + dataoff;
+  
+  /* short path */
+  if (dst_pad == 0 && src_pad == 0 && (bpp == 24 || bpp == 32)) {
+    im->data.data = p;
+    goto ok;
+  }
+
+  im->data.data        = im_init_data(im, imlen);
+  pd                   = im->data.data;
   palette              = p_back + hsz;
 
   if (bpp == 8) {
@@ -175,22 +181,20 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
       }
     }
   } else if (bpp == 24) {
-    if (dst_pad == 0 && src_pad == 0) {
-      im_memcpy(pd, p, dst_rowst * height);
-    } else {
-      for (i = 0; i < height; i++) {
-        im_memcpy(pd, p, dst_rowst);
-        p  += dst_rowst;
-        pd += dst_rowst;
-      }
+    for (i = 0; i < height; i++) {
+      im_memcpy(pd, p, dst_rowst);
+      p  += dst_rowst;
+      pd += dst_rowst;
     }
   }
 
+ok:
   *dest = im;
+  im->file = fres;
   
-  if (fres.mmap) {
-    im_unmap(fres.raw, fres.size);
-  }
+//  if (fres.mmap) {
+//    im_unmap(fres.raw, fres.size);
+//  }
 
   return IM_OK;
 err:

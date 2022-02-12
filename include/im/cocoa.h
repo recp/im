@@ -97,19 +97,18 @@ im_cgimage(ImImage *im, bool copydata) {
 #endif
 
   bitmapInfo = kCGBitmapByteOrderDefault | im->alphaInfo;
-  
-  imageRef = CGImageCreate(width,                       /* width              */
-                           height,                      /* height             */
-                           bitsPerComponent,            /* bits per component */
-                           im->bitsPerPixel,            /* bits per pixel     */
-                           bytesPerRow,                 /* bytesPerRow        */
-                           colorSpace,                  /* colorspace         */
-                           bitmapInfo,                  /* bitmap info        */
-                           provider,                    /* CGDataProviderRef  */
-                           NULL,                        /* decode             */
-                           false,                       /* should interpolate */
-                           kCGRenderingIntentDefault    /* intent             */
-                           );
+  imageRef   = CGImageCreate(width,                    /* width              */
+                             height,                   /* height             */
+                             bitsPerComponent,         /* bits per component */
+                             im->bitsPerPixel,         /* bits per pixel     */
+                             bytesPerRow,              /* bytesPerRow        */
+                             colorSpace,               /* colorspace         */
+                             bitmapInfo,               /* bitmap info        */
+                             provider,                 /* CGDataProviderRef  */
+                             NULL,                     /* decode             */
+                             false,                    /* should interpolate */
+                             kCGRenderingIntentDefault /* intent             */
+                             );
 
   CGDataProviderRelease(provider);
   CGColorSpaceRelease(colorSpace);
