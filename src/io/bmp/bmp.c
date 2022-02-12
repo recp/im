@@ -46,14 +46,13 @@ IM_HIDE
 ImResult
 bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
   ImImage            *im;
-  char               *p, *p_back, *end, *pd, *palette;
+  char               *p, *p_back, *pd, *plt;
   size_t              imlen;
   ImFileResult        fres;
   ImByte              bpp, c;
   uint32_t            dataoff, hsz, imsz, width, min_bytes, height, hres, vres, compr,
                       i, j, idx, idx_a, idx_b, src_ncomp, dst_ncomp, pltst,
                       src_pad, dst_rem, dst_pad, src_rowst, dst_rowst, bitoff;
-  bool                hasPalette;
 
   im   = NULL;
   fres = im_readfile(path);
@@ -65,7 +64,6 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
   /* decode, this process will be optimized after decoding is done */
   im  = calloc(1, sizeof(*im));
   p   = fres.raw;
-  end = p + fres.size;
   
   /*
    Magic number types:
@@ -113,24 +111,19 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
   bpp   = im_get_u16_endian(p, true);  p += 2;
 
   compr = im_get_u32_endian(p, true);  p += 4;
-  imsz  = im_get_u32_endian(p, true);  p += 4;
-  hres  = im_get_i32_endian(p, true);  p += 4;
-  vres  = im_get_i32_endian(p, true);  p += 4;
+  /* imsz  = im_get_u32_endian(p, true); */ p += 4;
+  im->hres  = im_get_i32_endian(p, true);  p += 4;
+  im->vres  = im_get_i32_endian(p, true); /* p += 4; */
 
-  p    += 4; /* color used: uint32 */
-  p    += 4; /* color important: uint32 */
+  /* p    += 4; */ /* color used: uint32 */
+  /* p    += 4; */ /* color important: uint32 */
 
-  palette    = p = p_back + hsz;
-  hasPalette = bpp < 8;
   dst_ncomp  = bpp != 1 ? 3 : 1;
 
   if      (bpp <= 8)  { src_ncomp = 1; }
   else if (bpp == 24) { src_ncomp = 3; }
   else if (bpp == 32) { src_ncomp = 4; }
   else                { goto err;      }
-
-  if      (compr == IM_BMP_COMPR_BITFIELDS)      { palette += 12; }
-  else if (compr == IM_BMP_COMPR_ALPHABITFIELDS) { palette += 16; }
 
   /* minimum bytes to contsruct one row */
   min_bytes = ceilf(width * src_ncomp * im_minf((float)bpp / 8.0f, 8));
@@ -142,7 +135,7 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
   src_rowst = min_bytes + src_pad;
 
   dst_rem   = width * dst_ncomp % im->row_pad_last;
-  dst_pad   = 0;//dst_rem == 0 ? 0 : im->row_pad_last - dst_rem;
+  dst_pad   = dst_rem == 0 ? 0 : im->row_pad_last - dst_rem;
   dst_rowst = dst_pad + width * dst_ncomp;
 
   imlen                = (width * dst_ncomp + dst_pad) * height;
@@ -172,18 +165,21 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
     goto ok;
   }
 
-  im->data.data        = im_init_data(im, imlen);
-  pd                   = im->data.data;
-  palette              = p_back + hsz;
+  im->data.data    = im_init_data(im, imlen);
+  pd               = im->data.data;
+  plt              = p_back + hsz;
+
+  if      (compr == IM_BMP_COMPR_BITFIELDS)      { plt += 12; }
+  else if (compr == IM_BMP_COMPR_ALPHABITFIELDS) { plt += 16; }
 
   if (bpp == 8) {
     for (i = 0; i < height; i++) {
       for (j = 0; j < width; j++) {
         idx = ((uint8_t)p[i * src_rowst + j]) * pltst;
  
-        pd[i * dst_rowst + j * dst_ncomp + 0] = palette[idx + 0];
-        pd[i * dst_rowst + j * dst_ncomp + 1] = palette[idx + 1];
-        pd[i * dst_rowst + j * dst_ncomp + 2] = palette[idx + 2];
+        pd[i * dst_rowst + j * dst_ncomp + 0] = plt[idx + 0];
+        pd[i * dst_rowst + j * dst_ncomp + 1] = plt[idx + 1];
+        pd[i * dst_rowst + j * dst_ncomp + 2] = plt[idx + 2];
       }
     }
   } else if (bpp == 24) {
@@ -201,22 +197,22 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
         idx_a = (idx >> 4) * pltst;
         idx_b = (idx & 0xf) * pltst;
 
-        pd[i * dst_rowst + (j * 2 + 0) * dst_ncomp + 0] = palette[idx_a + 0];
-        pd[i * dst_rowst + (j * 2 + 0) * dst_ncomp + 1] = palette[idx_a + 1];
-        pd[i * dst_rowst + (j * 2 + 0) * dst_ncomp + 2] = palette[idx_a + 2];
+        pd[i * dst_rowst + (j * 2 + 0) * dst_ncomp + 0] = plt[idx_a + 0];
+        pd[i * dst_rowst + (j * 2 + 0) * dst_ncomp + 1] = plt[idx_a + 1];
+        pd[i * dst_rowst + (j * 2 + 0) * dst_ncomp + 2] = plt[idx_a + 2];
 
-        pd[i * dst_rowst + (j * 2 + 1) * dst_ncomp + 0] = palette[idx_b + 0];
-        pd[i * dst_rowst + (j * 2 + 1) * dst_ncomp + 1] = palette[idx_b + 1];
-        pd[i * dst_rowst + (j * 2 + 1) * dst_ncomp + 2] = palette[idx_b + 2];
+        pd[i * dst_rowst + (j * 2 + 1) * dst_ncomp + 0] = plt[idx_b + 0];
+        pd[i * dst_rowst + (j * 2 + 1) * dst_ncomp + 1] = plt[idx_b + 1];
+        pd[i * dst_rowst + (j * 2 + 1) * dst_ncomp + 2] = plt[idx_b + 2];
       }
 
       if (width & 1) {
         idx   = ((uint8_t)p[i * src_rowst + j]);
         idx_a = (idx >> 4) * pltst;
 
-        pd[i * dst_rowst + j * 2 * dst_ncomp + 0] = palette[idx_a + 0];
-        pd[i * dst_rowst + j * 2 * dst_ncomp + 1] = palette[idx_a + 1];
-        pd[i * dst_rowst + j * 2 * dst_ncomp + 2] = palette[idx_a + 2];
+        pd[i * dst_rowst + j * 2 * dst_ncomp + 0] = plt[idx_a + 0];
+        pd[i * dst_rowst + j * 2 * dst_ncomp + 1] = plt[idx_a + 1];
+        pd[i * dst_rowst + j * 2 * dst_ncomp + 2] = plt[idx_a + 2];
       }
     }
   } else if (bpp == 1) {
