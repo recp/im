@@ -52,7 +52,7 @@ typedef enum ImFormat {
   IM_FORMAT_CMYK       = 8,
   IM_FORMAT_YCbCr      = 9,
 
-  IM_FORMAT_MONOCHROME = IM_FORMAT_BLACKWHITE
+  IM_FORMAT_MONOCHROME = IM_FORMAT_GRAY
 
   /* TODO: */
 } ImFormat;
@@ -131,6 +131,11 @@ typedef struct ImImage {
   ImAlphaInfo      alphaInfo;
   ImFileFormatType fileFormatType;
   uint32_t         row_pad_last;
+  
+  /* Monochrome color table (between 0-255),
+     Default: BLACK and WHITE
+   */
+  ImByte           monochrome_colors[2];
 } ImImage;
 
 IM_EXPORT

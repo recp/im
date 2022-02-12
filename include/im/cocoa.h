@@ -41,7 +41,7 @@ im_cgimage(ImImage *im, bool copydata) {
   CGImageRef        imageRef;
   CGBitmapInfo      bitmapInfo;
   size_t            width, height, bytesPerRow;
-  int               elemSize, bitsPerComponent;
+  uint32_t          ncomp, bitsPerComponent, rem, pad, rowst;
   
   if (!im)
     return NULL;
@@ -50,15 +50,11 @@ im_cgimage(ImImage *im, bool copydata) {
   
   switch (im->format) {
     case IM_FORMAT_RGB:
-    case IM_FORMAT_YCbCr:
-      elemSize = 3;
-      break;
+    case IM_FORMAT_YCbCr:      ncomp = 3; break;
     case IM_FORMAT_RGBA:
-    case IM_FORMAT_CMYK:
-      elemSize = 4;
-      break;
-    case IM_FORMAT_GRAY:       elemSize = 1; break;
-    case IM_FORMAT_BLACKWHITE: elemSize = 1; break; /* TODO: ? */
+    case IM_FORMAT_CMYK:       ncomp = 4; break;
+    case IM_FORMAT_GRAY:
+    case IM_FORMAT_BLACKWHITE: ncomp = 1; break; /* TODO: ? */
     default:
       return NULL;
   }
@@ -71,7 +67,7 @@ im_cgimage(ImImage *im, bool copydata) {
   
   width       = im->width;
   height      = im->height;
-  bytesPerRow = elemSize * width + im->row_pad_last;
+  bytesPerRow = (uint32_t)(ncomp * width + im->row_pad_last);
   
   if (!copydata) {
     data = [NSData dataWithBytesNoCopy: im->data.data length: bytesPerRow * height];
@@ -79,7 +75,7 @@ im_cgimage(ImImage *im, bool copydata) {
     data = [NSData dataWithBytes:       im->data.data length: bytesPerRow * height];
   }
 
-  if (elemSize == 1) {
+  if (ncomp == 1) {
     /* CGColorSpaceCreateWithName(kCGColorSpaceLinearGray) */
     colorSpace = CGColorSpaceCreateDeviceGray();
   } else {

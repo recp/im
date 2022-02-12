@@ -49,10 +49,10 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
   char               *p, *p_back, *end, *pd, *palette;
   size_t              imlen;
   ImFileResult        fres;
-  ImByte              bpp;
-  uint32_t            dataoff, hsz, imsz, width, byteWidth, height, hres, vres, compr,
+  ImByte              bpp, c;
+  uint32_t            dataoff, hsz, imsz, width, min_bytes, height, hres, vres, compr,
                       i, j, idx, idx_a, idx_b, src_ncomp, dst_ncomp, pltst,
-                      src_pad, dst_rem, dst_pad, src_rowst, dst_rowst;
+                      src_pad, dst_rem, dst_pad, src_rowst, dst_rowst, bitoff;
   bool                hasPalette;
 
   im   = NULL;
@@ -122,7 +122,7 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
 
   palette    = p = p_back + hsz;
   hasPalette = bpp < 8;
-  dst_ncomp  = 3;
+  dst_ncomp  = bpp != 1 ? 3 : 1;
 
   if      (bpp <= 8)  { src_ncomp = 1; }
   else if (bpp == 24) { src_ncomp = 3; }
@@ -132,13 +132,17 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
   if      (compr == IM_BMP_COMPR_BITFIELDS)      { palette += 12; }
   else if (compr == IM_BMP_COMPR_ALPHABITFIELDS) { palette += 16; }
 
-  byteWidth  = width * im_minf((float)bpp / 8.0f, 8);
-  src_rowst  = (byteWidth + 4 - (byteWidth & 3)) * src_ncomp;
-  src_pad    = src_rowst & 3;
-  src_rowst += src_pad;
+  /* minimum bytes to contsruct one row */
+  min_bytes = ceilf(width * src_ncomp * im_minf((float)bpp / 8.0f, 8));
+
+  /* pad to power of 4 */
+  src_pad   = min_bytes & 3;
+  
+  /* padded one row in bytes */
+  src_rowst = min_bytes + src_pad;
 
   dst_rem   = width * dst_ncomp % im->row_pad_last;
-  dst_pad   = dst_rem == 0 ? 0 : im->row_pad_last - dst_rem;
+  dst_pad   = 0;//dst_rem == 0 ? 0 : im->row_pad_last - dst_rem;
   dst_rowst = dst_pad + width * dst_ncomp;
 
   imlen                = (width * dst_ncomp + dst_pad) * height;
@@ -148,8 +152,9 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
   im->height           = height;
   im->row_pad_last     = dst_pad;
 
-  if      (dst_ncomp == 3) { im->format = IM_FORMAT_RGB;  }
-  else if (dst_ncomp == 4) { im->format = IM_FORMAT_RGBA; }
+  if      (dst_ncomp == 3) { im->format = IM_FORMAT_RGB;        }
+  else if (dst_ncomp == 4) { im->format = IM_FORMAT_RGBA;       }
+  else if (dst_ncomp == 1) { im->format = IM_FORMAT_MONOCHROME; }
 
   /* TODO: -
    DEST Image configuration but may change in the future by options,
@@ -188,14 +193,14 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
       pd += dst_rowst;
     }
   } else if (bpp == 4) {
-    byteWidth = byteWidth - (width & 1);
+    min_bytes = min_bytes - (width & 1);
 
     for (i = 0; i < height; i++) {
-      for (j = 0; j <= byteWidth; j++) {
+      for (j = 0; j <= min_bytes; j++) {
         idx   = ((uint8_t)p[i * src_rowst + j]) ;
         idx_a = (idx >> 4) * pltst;
         idx_b = (idx & 0xf) * pltst;
-      
+
         pd[i * dst_rowst + (j * 2 + 0) * dst_ncomp + 0] = palette[idx_a + 0];
         pd[i * dst_rowst + (j * 2 + 0) * dst_ncomp + 1] = palette[idx_a + 1];
         pd[i * dst_rowst + (j * 2 + 0) * dst_ncomp + 2] = palette[idx_a + 2];
@@ -204,14 +209,37 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
         pd[i * dst_rowst + (j * 2 + 1) * dst_ncomp + 1] = palette[idx_b + 1];
         pd[i * dst_rowst + (j * 2 + 1) * dst_ncomp + 2] = palette[idx_b + 2];
       }
-      
+
       if (width & 1) {
         idx   = ((uint8_t)p[i * src_rowst + j]);
         idx_a = (idx >> 4) * pltst;
-        
+
         pd[i * dst_rowst + j * 2 * dst_ncomp + 0] = palette[idx_a + 0];
         pd[i * dst_rowst + j * 2 * dst_ncomp + 1] = palette[idx_a + 1];
         pd[i * dst_rowst + j * 2 * dst_ncomp + 2] = palette[idx_a + 2];
+      }
+    }
+  } else if (bpp == 1) {
+    c      = *p;
+    bitoff = 0;
+
+    for (i = 0; i < height; i++) {
+      for (j = 0; j < width; j++) {
+        pd[i * dst_rowst + j * dst_ncomp] = (c >> 7) * 255;
+        c   <<= 1;
+
+        if (++bitoff > 7) {
+          bitoff = 0;
+          if (src_pad > 0 && j == width - 1) {
+            p += src_pad;
+          }
+          c = *++p;
+        }
+      }
+
+      if (bitoff != 0) {
+        c      = *++p;
+        bitoff = 0;
       }
     }
   }
