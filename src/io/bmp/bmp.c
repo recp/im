@@ -50,8 +50,8 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
   size_t              imlen;
   ImFileResult        fres;
   ImByte              bpp;
-  uint32_t            dataoff, hsz, imsz, width, height, hres, vres, compr,
-                      i, j, idx, src_ncomp, dst_ncomp, pltst,
+  uint32_t            dataoff, hsz, imsz, width, byteWidth, height, hres, vres, compr,
+                      i, j, idx, idx_a, idx_b, src_ncomp, dst_ncomp, pltst,
                       src_pad, dst_rem, dst_pad, src_rowst, dst_rowst;
   bool                hasPalette;
 
@@ -132,7 +132,8 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
   if      (compr == IM_BMP_COMPR_BITFIELDS)      { palette += 12; }
   else if (compr == IM_BMP_COMPR_ALPHABITFIELDS) { palette += 16; }
 
-  src_rowst  = width * src_ncomp;
+  byteWidth  = width * im_minf((float)bpp / 8.0f, 8);
+  src_rowst  = (byteWidth + 4 - (byteWidth & 3)) * src_ncomp;
   src_pad    = src_rowst & 3;
   src_rowst += src_pad;
 
@@ -185,6 +186,33 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
       im_memcpy(pd, p, dst_rowst);
       p  += dst_rowst;
       pd += dst_rowst;
+    }
+  } else if (bpp == 4) {
+    byteWidth = byteWidth - (width & 1);
+
+    for (i = 0; i < height; i++) {
+      for (j = 0; j <= byteWidth; j++) {
+        idx   = ((uint8_t)p[i * src_rowst + j]) ;
+        idx_a = (idx >> 4) * pltst;
+        idx_b = (idx & 0xf) * pltst;
+      
+        pd[i * dst_rowst + (j * 2 + 0) * dst_ncomp + 0] = palette[idx_a + 0];
+        pd[i * dst_rowst + (j * 2 + 0) * dst_ncomp + 1] = palette[idx_a + 1];
+        pd[i * dst_rowst + (j * 2 + 0) * dst_ncomp + 2] = palette[idx_a + 2];
+
+        pd[i * dst_rowst + (j * 2 + 1) * dst_ncomp + 0] = palette[idx_b + 0];
+        pd[i * dst_rowst + (j * 2 + 1) * dst_ncomp + 1] = palette[idx_b + 1];
+        pd[i * dst_rowst + (j * 2 + 1) * dst_ncomp + 2] = palette[idx_b + 2];
+      }
+      
+      if (width & 1) {
+        idx   = ((uint8_t)p[i * src_rowst + j]);
+        idx_a = (idx >> 4) * pltst;
+        
+        pd[i * dst_rowst + j * 2 * dst_ncomp + 0] = palette[idx_a + 0];
+        pd[i * dst_rowst + j * 2 * dst_ncomp + 1] = palette[idx_a + 1];
+        pd[i * dst_rowst + j * 2 * dst_ncomp + 2] = palette[idx_a + 2];
+      }
     }
   }
 
