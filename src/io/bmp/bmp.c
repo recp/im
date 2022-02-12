@@ -118,17 +118,18 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
   /* p    += 4; */ /* color used: uint32 */
   /* p    += 4; */ /* color important: uint32 */
 
-  if      (bpp == 1)                           { src_ncomp = 1; dst_ncomp = 1; }
-  else if (bpp == 24 || (bpp > 1 && bpp <= 8)) { src_ncomp = 3; dst_ncomp = 3; }
-  else if (bpp == 32)                          { src_ncomp = 4; dst_ncomp = 4; }
-  else                                         { goto err;                     }
+  if      (bpp == 1)            { src_ncomp = 1; dst_ncomp = 1; }
+  else if (bpp > 1 && bpp <= 8) { src_ncomp = 1; dst_ncomp = 3; }
+  else if (bpp == 24)           { src_ncomp = 3; dst_ncomp = 3; }
+  else if (bpp == 32)           { src_ncomp = 4; dst_ncomp = 4; }
+  else                          { goto err;                     }
 
   /* minimum bytes to contsruct one row */
   min_bytes = ceilf(width * src_ncomp * im_minf((float)bpp / 8.0f, 8));
 
   /* pad to power of 4 */
-  src_pad   = min_bytes & 3;
-  
+  src_pad   = 4 - min_bytes & 3;
+
   /* padded one row in bytes */
   src_rowst = min_bytes + src_pad;
 
@@ -193,7 +194,7 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
     for (i = 0; i < height; i++) {
       for (j = 0; j < width; j++) {
         pd[i * dst_rowst + j * dst_ncomp] = (c >> 7) * 255;
-        c   <<= 1;
+        c <<= 1;
 
         if (++bitoff > 7) {
           bitoff = 0;
