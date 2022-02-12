@@ -118,12 +118,10 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
   /* p    += 4; */ /* color used: uint32 */
   /* p    += 4; */ /* color important: uint32 */
 
-  dst_ncomp  = bpp != 1 ? 3 : 1;
-
-  if      (bpp <= 8)  { src_ncomp = 1; }
-  else if (bpp == 24) { src_ncomp = 3; }
-  else if (bpp == 32) { src_ncomp = 4; }
-  else                { goto err;      }
+  if      (bpp == 1)                           { src_ncomp = 1; dst_ncomp = 1; }
+  else if (bpp == 24 || (bpp > 1 && bpp <= 8)) { src_ncomp = 3; dst_ncomp = 3; }
+  else if (bpp == 32)                          { src_ncomp = 4; dst_ncomp = 4; }
+  else                                         { goto err;                     }
 
   /* minimum bytes to contsruct one row */
   min_bytes = ceilf(width * src_ncomp * im_minf((float)bpp / 8.0f, 8));
@@ -188,33 +186,6 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
         pd[i * dst_rowst + j * dst_ncomp + 2] = plt[idx + 2];
       }
     }
-  } else if (bpp == 4) {
-    min_bytes = min_bytes - (width & 1);
-
-    for (i = 0; i < height; i++) {
-      for (j = 0; j <= min_bytes; j++) {
-        idx   = ((uint8_t)p[i * src_rowst + j]) ;
-        idx_a = (idx >> 4) * pltst;
-        idx_b = (idx & 0xf) * pltst;
-
-        pd[i * dst_rowst + (j * 2 + 0) * dst_ncomp + 0] = plt[idx_a + 0];
-        pd[i * dst_rowst + (j * 2 + 0) * dst_ncomp + 1] = plt[idx_a + 1];
-        pd[i * dst_rowst + (j * 2 + 0) * dst_ncomp + 2] = plt[idx_a + 2];
-
-        pd[i * dst_rowst + (j * 2 + 1) * dst_ncomp + 0] = plt[idx_b + 0];
-        pd[i * dst_rowst + (j * 2 + 1) * dst_ncomp + 1] = plt[idx_b + 1];
-        pd[i * dst_rowst + (j * 2 + 1) * dst_ncomp + 2] = plt[idx_b + 2];
-      }
-
-      if (width & 1) {
-        idx   = ((uint8_t)p[i * src_rowst + j]);
-        idx_a = (idx >> 4) * pltst;
-
-        pd[i * dst_rowst + j * 2 * dst_ncomp + 0] = plt[idx_a + 0];
-        pd[i * dst_rowst + j * 2 * dst_ncomp + 1] = plt[idx_a + 1];
-        pd[i * dst_rowst + j * 2 * dst_ncomp + 2] = plt[idx_a + 2];
-      }
-    }
   } else if (bpp == 1) {
     c      = *p;
     bitoff = 0;
@@ -225,6 +196,33 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
         c   <<= 1;
 
         if (++bitoff > 7) {
+          bitoff = 0;
+          if (src_pad > 0 && j == width - 1) {
+            p += src_pad;
+          }
+          c = *++p;
+        }
+      }
+
+      if (bitoff != 0) {
+        c      = *++p;
+        bitoff = 0;
+      }
+    }
+  } else if (bpp < 8) {
+    c      = *p;
+    bitoff = 0;
+    
+    for (i = 0; i < height; i++) {
+      for (j = 0; j < width; j++) {
+        idx = (c >> (8 - bpp)) * pltst;
+        c <<= bpp;
+
+        pd[i * dst_rowst + j * dst_ncomp + 0] = plt[idx + 0];
+        pd[i * dst_rowst + j * dst_ncomp + 1] = plt[idx + 1];
+        pd[i * dst_rowst + j * dst_ncomp + 2] = plt[idx + 2];
+        
+        if ((bitoff += bpp) > 7) {
           bitoff = 0;
           if (src_pad > 0 && j == width - 1) {
             p += src_pad;
