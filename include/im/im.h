@@ -52,7 +52,7 @@ typedef enum ImFormat {
   IM_FORMAT_CMYK       = 8,
   IM_FORMAT_YCbCr      = 9,
 
-  IM_FORMAT_MONOCHROME = IM_FORMAT_GRAY
+  IM_FORMAT_MONOCHROME = IM_FORMAT_BLACKWHITE
 
   /* TODO: */
 } ImFormat;
