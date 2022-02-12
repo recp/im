@@ -172,7 +172,13 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
   if      (compr == IM_BMP_COMPR_BITFIELDS)      { plt += 12; }
   else if (compr == IM_BMP_COMPR_ALPHABITFIELDS) { plt += 16; }
 
-  if (bpp == 8) {
+  if (bpp == 24) {
+    for (i = 0; i < height; i++) {
+      im_memcpy(pd, p, dst_rowst);
+      p  += dst_rowst;
+      pd += dst_rowst;
+    }
+  } else if (bpp == 8) {
     for (i = 0; i < height; i++) {
       for (j = 0; j < width; j++) {
         idx = ((uint8_t)p[i * src_rowst + j]) * pltst;
@@ -181,12 +187,6 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
         pd[i * dst_rowst + j * dst_ncomp + 1] = plt[idx + 1];
         pd[i * dst_rowst + j * dst_ncomp + 2] = plt[idx + 2];
       }
-    }
-  } else if (bpp == 24) {
-    for (i = 0; i < height; i++) {
-      im_memcpy(pd, p, dst_rowst);
-      p  += dst_rowst;
-      pd += dst_rowst;
     }
   } else if (bpp == 4) {
     min_bytes = min_bytes - (width & 1);
