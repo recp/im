@@ -25,6 +25,8 @@
  [1] http://www.edm2.com/0107/os2bmp.html
  [2] http://netghost.narod.ru/gff/graphics/summary/os2bmp.htm
  [3] http://www.redwoodsoft.com/~dru/museum/gfx/gff/sample/code/os2bmp/os2_code.txt
+ [4] https://gibberlings3.github.io/iesdp/file_formats/ie_formats/bmp.htm
+ [5] http://www.martinreddy.net/gfx/2d/BMP.txt
  */
 
 typedef enum im_bmp_compression_method_t {
@@ -50,7 +52,7 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
   ImByte              bpp;
   uint32_t            dataoff, hsz, imsz, width, height, hres, vres, compr,
                       i, j, idx, src_ncomp, dst_ncomp, pltst,
-                      src_rem, src_pad, dst_rem, dst_pad, src_rowst, dst_rowst;
+                      src_pad, dst_rem, dst_pad, src_rowst, dst_rowst;
   bool                hasPalette;
 
   im   = NULL;
@@ -121,7 +123,7 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
   palette    = p = p_back + hsz;
   hasPalette = bpp < 8;
   dst_ncomp  = 3;
-  
+
   if      (bpp <= 8)  { src_ncomp = 1; }
   else if (bpp == 24) { src_ncomp = 3; }
   else if (bpp == 32) { src_ncomp = 4; }
@@ -130,9 +132,9 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
   if      (compr == IM_BMP_COMPR_BITFIELDS)      { palette += 12; }
   else if (compr == IM_BMP_COMPR_ALPHABITFIELDS) { palette += 16; }
 
-  src_rem   = width * src_ncomp % 4;
-  src_pad   = src_rem == 0 ? 0 : 4 - src_rem;
-  src_rowst = src_pad + width * src_ncomp;
+  src_rowst  = width * src_ncomp;
+  src_pad    = src_rowst & 3;
+  src_rowst += src_pad;
 
   dst_rem   = width * dst_ncomp % im->row_pad_last;
   dst_pad   = dst_rem == 0 ? 0 : im->row_pad_last - dst_rem;
