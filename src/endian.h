@@ -16,7 +16,6 @@
 
 #ifndef endian_h
 #define endian_h
-
 #ifdef __cplusplus
 extern "C" {
 #endif
