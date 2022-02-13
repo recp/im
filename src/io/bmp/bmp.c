@@ -157,7 +157,7 @@ re_comp:
   /* padded one row in bytes */
   src_rowst = min_bytes + src_pad;
 
-  dst_rem   = width * dst_ncomp % im->row_pad_last;
+  dst_rem   = im->row_pad_last == 0 ? 0 : width * dst_ncomp % im->row_pad_last;
   dst_pad   = dst_rem == 0 ? 0 : im->row_pad_last - dst_rem;
   dst_rowst = dst_pad + width * dst_ncomp;
 
