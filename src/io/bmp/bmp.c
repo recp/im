@@ -54,7 +54,7 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
                       i, j, idx, src_ncomp, dst_ncomp, pltst,
                       src_pad, dst_rem, dst_pad, src_rowst, dst_rowst, bitoff,
                       rmask, gmask, bmask, amask, rshift, gshift, bshift,
-                      ashift, rcount, gcount, bcount, acount;
+                      ashift, rcount, gcount, bcount, acount, px;
   float               pe_r, pe_g, pe_b, pe_a;
 
   im   = NULL;
@@ -246,8 +246,6 @@ re_comp:
       pd += dst_rowst;
     }
   } else if (bpp == 16) {
-    uint32_t px;
-
     if (compr != IM_BMP_COMPR_ALPHABITFIELDS) {
       for (i = 0; i < height; i++) {
         for (j = 0; j < width; j++) {
@@ -271,6 +269,28 @@ re_comp:
       }
     }
   } else if (bpp == 32) {
+    if (compr != IM_BMP_COMPR_ALPHABITFIELDS) {
+      for (i = 0; i < height; i++) {
+        for (j = 0; j < width; j++) {
+          px = im_get_u32_endian(p + i * src_rowst + j * 4, true);
+          
+          pd[i * dst_rowst + j * dst_ncomp + 2] = ((px & bmask) >> bshift) * pe_b;
+          pd[i * dst_rowst + j * dst_ncomp + 1] = ((px & gmask) >> gshift) * pe_g;
+          pd[i * dst_rowst + j * dst_ncomp + 0] = ((px & rmask) >> rshift) * pe_r;
+        }
+      }
+    } else {
+      for (i = 0; i < height; i++) {
+        for (j = 0; j < width; j++) {
+          px = im_get_u32_endian(p + i * src_rowst + j * 4, true);
+          
+          pd[i * dst_rowst + j * dst_ncomp + 2] = ((px & bmask) >> bshift) * pe_b;
+          pd[i * dst_rowst + j * dst_ncomp + 1] = ((px & gmask) >> gshift) * pe_g;
+          pd[i * dst_rowst + j * dst_ncomp + 0] = ((px & rmask) >> rshift) * pe_r;
+          pd[i * dst_rowst + j * dst_ncomp + 3] = ((px & amask) >> ashift) * pe_a;
+        }
+      }
+    }
   } else if (bpp == 8) {
     for (i = 0; i < height; i++) {
       for (j = 0; j < width; j++) {
