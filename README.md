@@ -14,6 +14,7 @@ Companion Libaries:
 TODO
 -----
 - [ ] GPU support
+- [x] Cocoa and Win32 helpers
 - [ ] JPEG (In Progress)
 - [ ] PNG (In Progress)
 - [ ] JPEG 2000
@@ -33,6 +34,7 @@ TODO
   - [ ] CMYKRLE4
   - [ ] JPEG
   - [ ] PNG
+  - [ ] ICC Color profile
 - [ ] PSD
 - [ ] TGA
 - [ ] HDR
