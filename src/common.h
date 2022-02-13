@@ -21,6 +21,7 @@
 #include "../include/im/im.h"
 
 #include "endian.h"
+#include "bitwise.h"
 #include "thread/thread.h"
 #include "mem/mmap.h"
 #include "arch/intrin.h"
