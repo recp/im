@@ -14,12 +14,27 @@ Companion Libaries:
 TODO
 -----
 - [ ] GPU support
+- [x] Cocoa and Win32 helpers
 - [ ] JPEG (In Progress)
 - [ ] PNG (In Progress)
 - [ ] JPEG 2000
 - [ ] TIFF
 - [ ] GIF
-- [ ] BMP
+- [x] BMP
+  - [x] 1bpp, 2bpp, 3bpp, 4bpp, 5bpp, 6bpp, 7bpp, 8bpp, 16bpp, 24bpp, 32bpp (2,3,5,6,7 may not be official)
+  - [ ] 64bpp?
+  - [x] BITFIELDS, ALPHABITFIELDS. 
+  - [x] Promote BITFIELDS to ALPHABITFIELDS if alpha mask is not zero
+  - [x] RGB
+  - [x] Monochrome
+  - [ ] RLE8 
+  - [ ] RLE4
+  - [ ] CMYK
+  - [ ] CMYKRLE8
+  - [ ] CMYKRLE4
+  - [ ] JPEG
+  - [ ] PNG
+  - [ ] ICC Color profile
 - [ ] PSD
 - [ ] TGA
 - [ ] HDR
