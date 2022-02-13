@@ -106,7 +106,8 @@ IM_EXPORT
 ImResult
 im_load(ImImage         ** __restrict dest,
         const char       * __restrict url,
-        im_option_base_t * options[]) {
+        im_option_base_t *            options[],
+        ImOpenIntent                  openIntent) {
   floader_t  *floader;
   const char *localurl;
   int         file_type;

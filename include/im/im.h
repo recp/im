@@ -118,6 +118,13 @@ typedef struct ImImageData {
   void *reserved0;
 } ImImageData;
 
+typedef enum ImOpenIntent {
+  IM_OPEN_INTENT_READONLY,
+  IM_OPEN_INTENT_READONLY_SIZE,
+  IM_OPEN_INTENT_READONLY_HEADER,
+  IM_OPEN_INTENT_READWRITE
+} ImOpenIntent;
+
 typedef struct ImImage {
   ImFileResult     file;
   ImImageData      data;
@@ -148,7 +155,8 @@ IM_EXPORT
 ImResult
 im_load(ImImage         ** __restrict dest,
         const char       * __restrict url,
-        im_option_base_t * options[]);
+        im_option_base_t *            options[],
+        ImOpenIntent                  openIntent);
 
 IM_EXPORT
 ImImage*
