@@ -42,15 +42,18 @@ typedef enum ImFormat {
 
   /* RGB layout */
   IM_FORMAT_RGB        = 3,
-  IM_FORMAT_RGBA       = 4,
+  IM_FORMAT_RGB0       = 4,
+  IM_FORMAT_RGBA       = 5,
+  IM_FORMAT_ARGB       = 6,
   
   /* BGR layout */
-  IM_FORMAT_BGR        = 5,
-  IM_FORMAT_BGR0       = 6,
-  IM_FORMAT_BGRA       = 7,
+  IM_FORMAT_BGR        = 7,
+  IM_FORMAT_BGR0       = 8,
+  IM_FORMAT_BGRA       = 9,
+  IM_FORMAT_ABGR       = 10,
   
-  IM_FORMAT_CMYK       = 8,
-  IM_FORMAT_YCbCr      = 9,
+  IM_FORMAT_CMYK       = 11,
+  IM_FORMAT_YCbCr      = 12,
 
   IM_FORMAT_MONOCHROME = IM_FORMAT_GRAY
 
