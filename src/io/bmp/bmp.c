@@ -39,7 +39,10 @@ typedef enum im_bmp_compression_method_t {
   IM_BMP_COMPR_ALPHABITFIELDS = 6,  /* RGBA bit field masks           | only Windows CE 5.0 with .NET 4.0 or later */
   IM_BMP_COMPR_CMYK           = 11, /* none                           | only Windows Metafile CMYK[4] */
   IM_BMP_COMPR_CMYKRLE8       = 12, /* RLE-8                          | only Windows Metafile CMYK */
-  IM_BMP_COMPR_CMYKRLE4       = 13  /* RLE-4                          | only Windows Metafile CMYK */
+  IM_BMP_COMPR_CMYKRLE4       = 13, /* RLE-4                          | only Windows Metafile CMYK */
+  
+  IM_BMP_COMPR_HUFFMAN1D      = 3,
+  IM_BMP_COMPR_RLE24          = 4
 } im_bmp_compression_method_t;
 
 IM_HIDE
@@ -101,7 +104,10 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
     width  = im_get_u16_endian(p, true);  p += 2;
     height = im_get_u16_endian(p, true);  p += 2;
     pltst  = 3;
-  } else if (hsz == 16 || hsz == 64) { /* BITMAPINFOHEADER2, OS22XBITMAPHEADER */
+  }
+  /* OS/2 2.x: any multiple of 4 between 16 and 64, inclusive, or 42 or 46 -> OS22x */
+  /* BITMAPINFOHEADER2, OS22XBITMAPHEADER */
+  else if ((hsz >= 16) && (hsz <= 64) && (!(hsz & 3) || (hsz == 42) || (hsz == 46))) {
     width  = im_get_u32_endian(p, true);  p += 4;
     height = im_get_u32_endian(p, true);  p += 4;
   } else { /* BITMAPINFOHEADER <= ... <= BITMAPV5HEADER */
