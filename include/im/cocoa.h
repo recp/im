@@ -41,7 +41,7 @@ im_cgimage(ImImage *im, bool copydata) {
   CGImageRef        imageRef;
   CGBitmapInfo      bitmapInfo;
   size_t            width, height, bytesPerRow;
-  uint32_t          ncomp, bitsPerComponent, rem, pad, rowst;
+  uint32_t          ncomp, bitsPerComponent;
   
   if (!im)
     return NULL;
