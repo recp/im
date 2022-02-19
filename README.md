@@ -28,7 +28,7 @@ TODO
   - [x] RGB
   - [x] Monochrome
   - [ ] RLE8 
-  - [ ] RLE4
+  - [x] RLE4
   - [ ] CMYK
   - [ ] CMYKRLE8
   - [ ] CMYKRLE4
