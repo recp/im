@@ -129,25 +129,26 @@ typedef enum ImOpenIntent {
 } ImOpenIntent;
 
 typedef struct ImImage {
-  ImFileResult     file;
-  ImImageData      data;
-  size_t           len;
-  uint32_t         width;
-  uint32_t         height;
-  uint32_t         bytesPerPixel;
-  uint32_t         bitsPerPixel;
-  uint32_t         bitsPerComponent;
-  uint32_t         hres;
-  uint32_t         vres;
-  ImFormat         format;
-  ImAlphaInfo      alphaInfo;
-  ImFileFormatType fileFormatType;
-  uint32_t         row_pad_last;
+  ImFileResult      file;
+  ImImageData       data;
+  size_t            len;
+  uint32_t          width;
+  uint32_t          height;
+  uint32_t          bytesPerPixel;
+  uint32_t          bitsPerPixel;
+  uint32_t          bitsPerComponent;
+  uint32_t          hres;
+  uint32_t          vres;
+  ImFormat          format;
+  ImOrientationType ori;
+  ImAlphaInfo       alphaInfo;
+  ImFileFormatType  fileFormatType;
+  uint32_t          row_pad_last;
   
   /* Monochrome color table (between 0-255),
      Default: BLACK and WHITE
    */
-  ImByte           monochrome_colors[2];
+  ImByte            monochrome_colors[2];
 } ImImage;
 
 IM_EXPORT

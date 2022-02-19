@@ -115,12 +115,18 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
   }
   /* OS/2 2.x: any multiple of 4 between 16 and 64, inclusive, or 42 or 46 -> OS22x */
   /* BITMAPINFOHEADER2, OS22XBITMAPHEADER */
-  else if ((hsz >= 16) && (hsz <= 64) && (!(hsz & 3) || (hsz == 42) || (hsz == 46))) {
+  else if ((hsz >= 16) && (hsz <= 64) && (!(hsz & 3) || (hsz == 42) || (hsz == 46)) && hsz != 40) {
     width  = im_get_u32_endian(p, true);  p += 4;
     height = im_get_u32_endian(p, true);  p += 4;
   } else { /* BITMAPINFOHEADER <= ... <= BITMAPV5HEADER */
-    width  = im_get_i32_endian(p, true);  p += 4;
-    height = im_get_i32_endian(p, true);  p += 4;
+    int32_t width_i32, height_i32;
+    
+    width  = abs(width_i32  = im_get_i32_endian(p, true));  p += 4;
+    height = abs(height_i32 = im_get_i32_endian(p, true));  p += 4;
+    
+    if (height < 0) {
+      im->ori = IM_ORIENTATION_UP;
+    }
   }
 
   /* ignore planes field: uint16 */
