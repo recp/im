@@ -45,14 +45,23 @@ typedef enum im_bmp_compression_method_t {
   IM_BMP_COMPR_RLE24          = 4
 } im_bmp_compression_method_t;
 
+IM_INLINE
+ImByte *
+im_setpx3_8(ImByte * __restrict dst, char * __restrict plt) {
+  dst[0] = plt[2];
+  dst[1] = plt[1];
+  dst[2] = plt[0];
+  return dst + 3;
+}
+
 IM_HIDE
 ImResult
 bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
   ImImage            *im;
-  char               *p, *p_back, *pd, *plt, *bfi;
+  char               *p, *p_end, *p_back, *plt, *bfi;
   size_t              imlen;
   ImFileResult        fres;
-  ImByte              bpp, c;
+  ImByte              bpp, c, *pd;
   uint32_t            dataoff, hsz, width, min_bytes, height, compr,
                       i, j, idx, src_ncomp, dst_ncomp, pltst,
                       src_pad, dst_rem, dst_pad, src_rowst, dst_rowst, bitoff,
@@ -86,9 +95,8 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
     goto err;
   }
 
-  p += 2;
+  p      += 2;
   im->fileFormatType = IM_FILEFORMATTYPE_BMP_Windows;
-  im->row_pad_last   = 4;
 
   p      += 4; /* file size: uint32 */
   p      += 4; /* reserved 4 bytes (unused) */
@@ -154,6 +162,12 @@ re_comp:
   if      (compr == IM_BMP_COMPR_BITFIELDS)      { plt += 12; }
   else if (compr == IM_BMP_COMPR_ALPHABITFIELDS) { plt += 16; }
   
+  if (compr != IM_BMP_COMPR_RLE4
+      && compr != IM_BMP_COMPR_RLE8
+      && compr != IM_BMP_COMPR_RLE24) {
+    im->row_pad_last = 4;
+  }
+
   /* minimum bytes to contsruct one row */
   min_bytes = ceilf(width * src_ncomp * im_minf((float)bpp / 8.0f, 8));
 
@@ -187,7 +201,8 @@ re_comp:
   im->bitsPerComponent = 8;
   im->bitsPerPixel     = dst_ncomp * 8;
   p                    = (char *)fres.raw + dataoff;
-  
+  p_end                = (char *)fres.raw + fres.size - 1;
+
   /* short path */
   if (dst_pad == 0 && src_pad == 0 && (bpp == 24 || bpp == 32)) {
     im->data.data = p;
@@ -229,7 +244,7 @@ re_comp:
       gshift = im_bitw_ctz(gmask);
       bshift = im_bitw_ctz(bmask);
       ashift = im_bitw_ctz(amask);
-      
+
       rcount = 32 - im_bitw_clz(rmask) - rshift;
       gcount = 32 - im_bitw_clz(gmask) - gshift;
       bcount = 32 - im_bitw_clz(bmask) - bshift;
@@ -242,12 +257,12 @@ re_comp:
     pe_a = (float)255.0f/(pow(2, acount) - 1);
   }
 
-  im->data.data    = im_init_data(im, imlen);
-  pd               = im->data.data;
+  im->data.data = im_init_data(im, imlen);
+  pd            = im->data.data;
 
   if (bpp == 24) {
     for (i = 0; i < height; i++) {
-      im_memcpy(pd, p, dst_rowst);
+      im_memcpy((char *)pd, p, dst_rowst);
       p  += dst_rowst;
       pd += dst_rowst;
     }
@@ -328,6 +343,92 @@ re_comp:
       if (bitoff != 0) {
         c      = *++p;
         bitoff = 0;
+      }
+    }
+  } else if (bpp == 4 && compr == IM_BMP_COMPR_RLE4) {
+    c      = *p;
+    bitoff = 0;
+    i      = 0;
+
+    uint32_t px, py;
+
+    ImByte cnt, code, idx_a, idx_b, dx, dy;
+
+    px = py = 0;
+    p  = (char *)fres.raw + dataoff;
+
+    while (p < p_end) {
+      cnt  = *p++;
+      code = *p++;
+
+      if (!cnt) {
+        /* TODO: . */
+        if (code == 0x00) {
+          while(py) {
+            pd = im_setpx3_8(pd, plt);
+            if (++py >= width) {
+              px++;
+              py = 0;
+              break;
+            }
+          }
+        } else if (code == 0x01) {
+          uint32_t cc = im_max_i32(width * height - (px * width + py), 0);
+          for (i = 0; i < cc; i++) {
+            pd = im_setpx3_8(pd, plt);
+          }
+          goto ok;
+        } else if (code == 0x02) {
+          dy = *p++;
+          dx = *p++;
+
+          uint32_t px_off;
+
+          px_off = width * dx + dy;
+
+          for (i = 0; i < px_off; i++) {
+            pd = im_setpx3_8(pd, plt);
+
+            if (++py >= width) {
+              px++;
+              py = 0;
+            }
+          }
+        } else {
+          for (i = 0; i < code; i++) {
+            if (!(i & 1)) {
+              c = *p++;
+            }
+
+            idx = (c >> 4) * pltst;
+            c <<= 4;
+
+            pd = im_setpx3_8(pd, plt + idx);
+            if (++py >= width) {
+              px++;
+              py = 0;
+              break;
+            }
+          }
+ 
+          p += (code - i + 1) / 2 + ((code - i + 1) / 2) & 1;
+          p += (((code + 1) / 2) & 1);
+        }
+      } else {
+        /* Encoded mode */
+        idx_a = code >> 4;
+        idx_b = code & 0xf;
+
+        for (int32_t k = 0; k < cnt; k++) {
+          idx = ((uint32_t)((k & 1) ? idx_b : idx_a)) * pltst;
+          pd  = im_setpx3_8(pd, plt + idx);
+
+          if (++py >= width) {
+            px++;
+            py = 0;
+            break;
+          }
+        }
       }
     }
   } else if (bpp < 8) {
