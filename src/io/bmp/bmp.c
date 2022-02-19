@@ -428,6 +428,83 @@ re_comp:
         }
       }
     }
+  } else if (bpp <= 8 && compr == IM_BMP_COMPR_RLE8) {
+    ImByte cnt, code, dx, dy;
+
+    dst_x = dst_y = 0;
+    p     = (char *)fres.raw + dataoff;
+
+    while (p < p_end) {
+      cnt  = *p++;
+      code = *p++;
+      
+      if (!cnt) {
+        /* TODO: . */
+        switch (code) {
+          case 0x00: {
+            while(dst_y) {
+              pd = im_setpx3_8(pd, plt);
+              if (++dst_y >= width) {
+                dst_x++;
+                dst_y = 0;
+                break;
+              }
+            }
+            break;
+          }
+          case 0x01: {
+            dst_rem = im_max_i32(width * height - (dst_x * width + dst_y), 0);
+            for (i = 0; i < dst_rem; i++) {
+              pd = im_setpx3_8(pd, plt);
+            }
+            goto ok;
+          }
+          case 0x02: {
+            dy = *p++;
+            dx = *p++;
+            
+            dst_rem = width * dx + dy;
+            
+            for (i = 0; i < dst_rem; i++) {
+              pd = im_setpx3_8(pd, plt);
+              
+              if (++dst_y >= width) {
+                dst_x++;
+                dst_y = 0;
+              }
+            }
+          }
+          default: {
+            /* Absolute mode */
+            for (i = 0; i < code; i++) {
+              idx = ((ImByte)*p++) * pltst;
+              pd  = im_setpx3_8(pd, plt + idx);
+              
+              if (++dst_y >= width) {
+                dst_x++;
+                dst_y = 0;
+                break;
+              }
+            }
+            
+            p += (code - i) + (code - i + 1) & 1;
+            p += code & 1;
+          }
+        }
+      } else {
+        /* Encoded mode */
+        for (i = 0; i < cnt; i++) {
+          idx = code * pltst;
+          pd  = im_setpx3_8(pd, plt + idx);
+          
+          if (++dst_y >= width) {
+            dst_x++;
+            dst_y = 0;
+            break;
+          }
+        }
+      }
+    }
   } else if (bpp < 8) {
     c      = *p;
     bitoff = 0;

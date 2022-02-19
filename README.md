@@ -27,7 +27,7 @@ TODO
   - [x] Promote BITFIELDS to ALPHABITFIELDS if alpha mask is not zero
   - [x] RGB
   - [x] Monochrome
-  - [ ] RLE8 
+  - [x] RLE8 
   - [x] RLE4
   - [ ] CMYK
   - [ ] CMYKRLE8
