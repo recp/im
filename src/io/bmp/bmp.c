@@ -390,6 +390,7 @@ re_comp:
                 dst_y = 0;
               }
             }
+            break;
           }
           default: {
             for (i = 0, c = 0; i < code; i++) {
@@ -409,6 +410,7 @@ re_comp:
 
             p += (code - i + 1) / 2 + ((code - i + 1) / 2) & 1;
             p += (((code + 1) / 2) & 1);
+            break;
           }
         }
       } else {
@@ -473,6 +475,7 @@ re_comp:
                 dst_y = 0;
               }
             }
+            break;
           }
           default: {
             /* Absolute mode */
@@ -489,6 +492,7 @@ re_comp:
             
             p += (code - i) + (code - i + 1) & 1;
             p += code & 1;
+            break;
           }
         }
       } else {
