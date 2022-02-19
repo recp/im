@@ -27,7 +27,17 @@ typedef enum im_option_type_t {
   IM_OPTION_SUPPORTED_FORMATS      = 1,
   IM_OPTION_SUPPORTED_ORIENTATIONS = 2,
   IM_OPTION_SUPPORTED_COMPRESSIONS = 3,
-  IM_OPTION_USE_MMAP_FOR_WINDOWS   = 4
+  IM_OPTION_USE_MMAP_FOR_WINDOWS   = 4,
+  
+  
+  /*
+   from bmpsuite:
+   Some viewers make undefined pixels transparent, others make them black,
+   and others assign them palette color 0 (purple, in this case).
+   
+   STATUS: TODO.
+   */
+  IM_OPTION_BMP_SKIPPED_MODE,
 } im_option_type_t;
 
 typedef struct im_option_base_t {
