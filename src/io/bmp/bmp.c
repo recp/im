@@ -124,7 +124,7 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
     width  = abs(width_i32  = im_get_i32_endian(p, true));  p += 4;
     height = abs(height_i32 = im_get_i32_endian(p, true));  p += 4;
     
-    if (height < 0) {
+    if (height_i32 < 0) {
       im->ori = IM_ORIENTATION_UP;
     }
   }
