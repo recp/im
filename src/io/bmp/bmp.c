@@ -312,16 +312,6 @@ re_comp:
         }
       }
     }
-  } else if (bpp == 8) {
-    for (i = 0; i < height; i++) {
-      for (j = 0; j < width; j++) {
-        idx = ((uint8_t)p[i * src_rowst + j]) * pltst;
- 
-        pd[i * dst_rowst + j * dst_ncomp + 0] = plt[idx + 0];
-        pd[i * dst_rowst + j * dst_ncomp + 1] = plt[idx + 1];
-        pd[i * dst_rowst + j * dst_ncomp + 2] = plt[idx + 2];
-      }
-    }
   } else if (bpp == 1) {
     c      = *p;
     bitoff = 0;
@@ -490,7 +480,7 @@ re_comp:
               }
             }
             
-            p += (code - i) + (code - i + 1) & 1;
+            p += (code - i) + (code - i) & 1;
             p += code & 1;
             break;
           }
@@ -507,6 +497,16 @@ re_comp:
             break;
           }
         }
+      }
+    }
+  } else if (bpp == 8) {
+    for (i = 0; i < height; i++) {
+      for (j = 0; j < width; j++) {
+        idx = ((uint8_t)p[i * src_rowst + j]) * pltst;
+        
+        pd[i * dst_rowst + j * dst_ncomp + 0] = plt[idx + 0];
+        pd[i * dst_rowst + j * dst_ncomp + 1] = plt[idx + 1];
+        pd[i * dst_rowst + j * dst_ncomp + 2] = plt[idx + 2];
       }
     }
   } else if (bpp < 8) {
