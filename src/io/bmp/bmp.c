@@ -345,7 +345,7 @@ re_comp:
         bitoff = 0;
       }
     }
-  } else if (bpp == 4 && compr == IM_BMP_COMPR_RLE4) {
+  } else if (bpp <= 4 && compr == IM_BMP_COMPR_RLE4) {
     ImByte cnt, code, idx_a, idx_b, dx, dy;
 
     dst_x = dst_y = 0;
