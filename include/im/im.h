@@ -77,8 +77,8 @@ typedef enum ImCompressionType {
 } ImCompressionType;
 
 typedef enum ImOrientationType {
-  IM_ORIENTATION_UP   = 0,
-  IM_ORIENTATION_DOWN = 1
+  IM_ORIENTATION_UP   = 0 << 0,
+  IM_ORIENTATION_DOWN = 1 << 1
 } ImOrientationType;
 
 /* same as CGImageAlphaInfo */

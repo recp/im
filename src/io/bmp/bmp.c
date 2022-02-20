@@ -120,11 +120,11 @@ bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
     width  = im_get_u32_endian(p, true);  p += 4;
     height = im_get_u32_endian(p, true);  p += 4;
   } else { /* BITMAPINFOHEADER <= ... <= BITMAPV5HEADER */
-    int32_t width_i32, height_i32;
-    
-    width  = abs(width_i32  = im_get_i32_endian(p, true));  p += 4;
+    int32_t /* width_i32, */ height_i32;
+
+    width  = abs(im_get_i32_endian(p, true));  p += 4;
     height = abs(height_i32 = im_get_i32_endian(p, true));  p += 4;
-    
+
     if (height_i32 < 0) {
       im->ori = IM_ORIENTATION_UP;
     }
