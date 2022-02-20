@@ -30,6 +30,9 @@ extern "C" {
 #  include <UIKit/UIKit.h>
 #endif
 
+#import <CoreGraphics/CoreGraphics.h>
+#import <CoreImage/CoreImage.h>
+
 /*
  https://docs.opencv.org/master/d3/def/tutorial_image_manipulation.html
  */
@@ -98,7 +101,15 @@ im_cgimage(ImImage *im, bool copydata) {
   provider = CGDataProviderCreateWithCFData(data);
 #endif
 
-  bitmapInfo = kCGBitmapByteOrderDefault | im->alphaInfo;
+  switch (im->format) {
+    case IM_FORMAT_BGRA:
+      bitmapInfo = kCGBitmapByteOrder32Little | kCGImageAlphaFirst;
+      break;
+    default:
+      bitmapInfo = kCGBitmapByteOrderDefault | im->alphaInfo;
+      break;
+  }
+
   imageRef   = CGImageCreate(width,                    /* width              */
                              height,                   /* height             */
                              bitsPerComponent,         /* bits per component */
