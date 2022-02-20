@@ -145,7 +145,7 @@ im_load(ImImage         ** __restrict dest,
       ++file_ext;
       floader_len = IM_ARRAY_LEN(floaders);
       for (i = 0; i < floader_len; i++) {
-        if (strcmp(file_ext, floaders[i].fext) == 0) {
+        if (strcasecmp(file_ext, floaders[i].fext) == 0) {
           floader = &floaders[i];
           break;
         }
