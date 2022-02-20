@@ -35,6 +35,9 @@ TODO
   - [ ] JPEG
   - [ ] PNG
   - [ ] ICC Color profile
+  - [ ] HUFFMAN1D
+  - [ ] RLE24
+  - [ ] Option to specify behavior of skipped pixels 
 - [ ] PSD
 - [ ] TGA
 - [ ] HDR
