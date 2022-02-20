@@ -50,8 +50,14 @@ im_cgimage(ImImage *im, bool copydata) {
   
   switch (im->format) {
     case IM_FORMAT_RGB:
+    case IM_FORMAT_BGR:
     case IM_FORMAT_YCbCr:      ncomp = 3; break;
     case IM_FORMAT_RGBA:
+    case IM_FORMAT_ARGB:
+    case IM_FORMAT_RGB0:
+    case IM_FORMAT_BGRA:
+    case IM_FORMAT_ABGR:
+    case IM_FORMAT_BGR0:
     case IM_FORMAT_CMYK:       ncomp = 4; break;
     case IM_FORMAT_GRAY:
     case IM_FORMAT_BLACKWHITE: ncomp = 1; break; /* TODO: ? */
