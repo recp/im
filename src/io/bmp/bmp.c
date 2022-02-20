@@ -49,9 +49,9 @@ typedef enum im_bmp_compression_method_t {
 IM_INLINE
 ImByte *
 im_setpx3_8(ImByte * __restrict dst, char * __restrict plt) {
-  dst[0] = plt[2];
+  dst[0] = plt[0];
   dst[1] = plt[1];
-  dst[2] = plt[0];
+  dst[2] = plt[2];
   return dst + 3;
 }
 
@@ -189,14 +189,14 @@ re_comp:
   dst_rowst = dst_pad + width * dst_ncomp;
 
   imlen                = (width * dst_ncomp + dst_pad) * height;
-  im->format           = IM_FORMAT_RGB;
+  im->format           = IM_FORMAT_BGR;
   im->len              = imlen;
   im->width            = width;
   im->height           = height;
   im->row_pad_last     = dst_pad;
 
-  if      (dst_ncomp == 3) { im->format = IM_FORMAT_RGB;                                       }
-  else if (dst_ncomp == 4) { im->format = IM_FORMAT_RGBA;       im->alphaInfo = IM_ALPHA_LAST; }
+  if      (dst_ncomp == 3) { im->format = IM_FORMAT_BGR;                                       }
+  else if (dst_ncomp == 4) { im->format = IM_FORMAT_BGRA;       im->alphaInfo = IM_ALPHA_LAST; }
   else if (dst_ncomp == 1) { im->format = IM_FORMAT_MONOCHROME;                                }
 
   /* TODO: -
@@ -211,7 +211,7 @@ re_comp:
   p_end                = (char *)fres.raw + fres.size - 1;
 
   /* short path */
-  if (dst_pad == 0 && src_pad == 0 && (bpp == 24 || bpp == 32)) {
+  if (dst_pad == 0 && src_pad == 0 && (bpp == 8 || bpp == 24 || bpp == 32)) {
     im->data.data = p;
     goto ok;
   }
@@ -279,9 +279,9 @@ re_comp:
         for (j = 0; j < width; j++) {
           px = im_get_u16_endian(p + i * src_rowst + j * 2, true);
           
-          pd[i * dst_rowst + j * dst_ncomp + 2] = ((px & bmask) >> bshift) * pe_b;
+          pd[i * dst_rowst + j * dst_ncomp + 0] = ((px & bmask) >> bshift) * pe_b;
           pd[i * dst_rowst + j * dst_ncomp + 1] = ((px & gmask) >> gshift) * pe_g;
-          pd[i * dst_rowst + j * dst_ncomp + 0] = ((px & rmask) >> rshift) * pe_r;
+          pd[i * dst_rowst + j * dst_ncomp + 2] = ((px & rmask) >> rshift) * pe_r;
         }
       }
     } else {
@@ -289,9 +289,9 @@ re_comp:
         for (j = 0; j < width; j++) {
           px = im_get_u16_endian(p + i * src_rowst + j * 2, true);
           
-          pd[i * dst_rowst + j * dst_ncomp + 2] = ((px & bmask) >> bshift) * pe_b;
+          pd[i * dst_rowst + j * dst_ncomp + 0] = ((px & bmask) >> bshift) * pe_b;
           pd[i * dst_rowst + j * dst_ncomp + 1] = ((px & gmask) >> gshift) * pe_g;
-          pd[i * dst_rowst + j * dst_ncomp + 0] = ((px & rmask) >> rshift) * pe_r;
+          pd[i * dst_rowst + j * dst_ncomp + 2] = ((px & rmask) >> rshift) * pe_r;
           pd[i * dst_rowst + j * dst_ncomp + 3] = ((px & amask) >> ashift) * pe_a;
         }
       }
@@ -303,9 +303,9 @@ re_comp:
           for (j = 0; j < width; j++) {
             px = im_get_u32_endian(p + i * src_rowst + j * 4, true);
             
-            pd[i * dst_rowst + j * dst_ncomp + 2] = ((px & bmask) >> bshift) * pe_b;
+            pd[i * dst_rowst + j * dst_ncomp + 0] = ((px & bmask) >> bshift) * pe_b;
             pd[i * dst_rowst + j * dst_ncomp + 1] = ((px & gmask) >> gshift) * pe_g;
-            pd[i * dst_rowst + j * dst_ncomp + 0] = ((px & rmask) >> rshift) * pe_r;
+            pd[i * dst_rowst + j * dst_ncomp + 2] = ((px & rmask) >> rshift) * pe_r;
             pd[i * dst_rowst + j * dst_ncomp + 3] = ((px & amask) >> ashift) * pe_a;
           }
         }
@@ -315,9 +315,9 @@ re_comp:
           for (j = 0; j < width; j++) {
             px = im_get_u32_endian(p + i * src_rowst + j * 4, true);
             
-            pd[i * dst_rowst + j * dst_ncomp + 2] = ((px & bmask) >> bshift) * pe_b;
+            pd[i * dst_rowst + j * dst_ncomp + 0] = ((px & bmask) >> bshift) * pe_b;
             pd[i * dst_rowst + j * dst_ncomp + 1] = ((px & gmask) >> gshift) * pe_g;
-            pd[i * dst_rowst + j * dst_ncomp + 0] = ((px & rmask) >> rshift) * pe_r;
+            pd[i * dst_rowst + j * dst_ncomp + 2] = ((px & rmask) >> rshift) * pe_r;
           }
         }
         break;
