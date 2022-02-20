@@ -162,10 +162,15 @@ re_comp:
   im->height           = height;
   im->row_pad_last     = dst_pad;
   
-  if      (dst_ncomp == 3) { im->format = IM_FORMAT_BGR;                                       }
-  else if (dst_ncomp == 4) { im->format = IM_FORMAT_BGRA;       im->alphaInfo = IM_ALPHA_LAST; }
-  else if (dst_ncomp == 1) { im->format = IM_FORMAT_MONOCHROME;                                }
-  
+  if (compr != IM_BMP_COMPR_CMYK && compr != IM_BMP_COMPR_CMYKRLE8 && compr != IM_BMP_COMPR_CMYKRLE4) {
+    if      (dst_ncomp == 3) { im->format = IM_FORMAT_BGR;                                       }
+    else if (dst_ncomp == 4) { im->format = IM_FORMAT_BGRA;       im->alphaInfo = IM_ALPHA_LAST; }
+    else if (dst_ncomp == 1) { im->format = IM_FORMAT_MONOCHROME;                                }
+  } else {
+    dst_ncomp  = 4;
+    im->format = IM_FORMAT_CMYK;
+  }
+
   /* TODO: -
    DEST Image configuration but may change in the future by options,
    e.g bit per pixel

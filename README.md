@@ -29,9 +29,9 @@ TODO
   - [x] Monochrome
   - [x] RLE8 
   - [x] RLE4
-  - [ ] CMYK
-  - [ ] CMYKRLE8
-  - [ ] CMYKRLE4
+  - [x] CMYK
+  - [x] CMYKRLE8
+  - [x] CMYKRLE4
   - [ ] JPEG
   - [ ] PNG
   - [ ] ICC Color profile
