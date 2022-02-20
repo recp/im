@@ -27,6 +27,7 @@
  [3] http://www.redwoodsoft.com/~dru/museum/gfx/gff/sample/code/os2bmp/os2_code.txt
  [4] https://gibberlings3.github.io/iesdp/file_formats/ie_formats/bmp.htm
  [5] http://www.martinreddy.net/gfx/2d/BMP.txt
+ [6] https://www.fileformat.info/format/bmp/egff.htm
  */
 
 typedef enum im_bmp_compression_method_t {
