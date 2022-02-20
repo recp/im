@@ -156,9 +156,9 @@ re_comp:
 
   } else if (bpp == 32) {
 
-    if (compr == IM_BMP_COMPR_BITFIELDS || compr == 0) { src_ncomp = 1; dst_ncomp = 3; }
+    if (compr == IM_BMP_COMPR_BITFIELDS)               { src_ncomp = 1; dst_ncomp = 3; }
     else if (compr == IM_BMP_COMPR_ALPHABITFIELDS)     { src_ncomp = 1; dst_ncomp = 4; }
-    else                                               { goto err;                     }
+    else                                               { src_ncomp = 4; dst_ncomp = 4; }
 
   } else {
     goto err;
@@ -297,27 +297,37 @@ re_comp:
       }
     }
   } else if (bpp == 32) {
-    if (compr != IM_BMP_COMPR_ALPHABITFIELDS) {
-      for (i = 0; i < height; i++) {
-        for (j = 0; j < width; j++) {
-          px = im_get_u32_endian(p + i * src_rowst + j * 4, true);
-          
-          pd[i * dst_rowst + j * dst_ncomp + 2] = ((px & bmask) >> bshift) * pe_b;
-          pd[i * dst_rowst + j * dst_ncomp + 1] = ((px & gmask) >> gshift) * pe_g;
-          pd[i * dst_rowst + j * dst_ncomp + 0] = ((px & rmask) >> rshift) * pe_r;
+    switch (compr) {
+      case IM_BMP_COMPR_BITFIELDS:
+        for (i = 0; i < height; i++) {
+          for (j = 0; j < width; j++) {
+            px = im_get_u32_endian(p + i * src_rowst + j * 4, true);
+            
+            pd[i * dst_rowst + j * dst_ncomp + 2] = ((px & bmask) >> bshift) * pe_b;
+            pd[i * dst_rowst + j * dst_ncomp + 1] = ((px & gmask) >> gshift) * pe_g;
+            pd[i * dst_rowst + j * dst_ncomp + 0] = ((px & rmask) >> rshift) * pe_r;
+            pd[i * dst_rowst + j * dst_ncomp + 3] = ((px & amask) >> ashift) * pe_a;
+          }
         }
-      }
-    } else {
-      for (i = 0; i < height; i++) {
-        for (j = 0; j < width; j++) {
-          px = im_get_u32_endian(p + i * src_rowst + j * 4, true);
-          
-          pd[i * dst_rowst + j * dst_ncomp + 2] = ((px & bmask) >> bshift) * pe_b;
-          pd[i * dst_rowst + j * dst_ncomp + 1] = ((px & gmask) >> gshift) * pe_g;
-          pd[i * dst_rowst + j * dst_ncomp + 0] = ((px & rmask) >> rshift) * pe_r;
-          pd[i * dst_rowst + j * dst_ncomp + 3] = ((px & amask) >> ashift) * pe_a;
+        break;
+      case IM_BMP_COMPR_ALPHABITFIELDS:
+        for (i = 0; i < height; i++) {
+          for (j = 0; j < width; j++) {
+            px = im_get_u32_endian(p + i * src_rowst + j * 4, true);
+            
+            pd[i * dst_rowst + j * dst_ncomp + 2] = ((px & bmask) >> bshift) * pe_b;
+            pd[i * dst_rowst + j * dst_ncomp + 1] = ((px & gmask) >> gshift) * pe_g;
+            pd[i * dst_rowst + j * dst_ncomp + 0] = ((px & rmask) >> rshift) * pe_r;
+          }
         }
-      }
+        break;
+      default:
+        for (i = 0; i < height; i++) {
+          im_memcpy((char *)pd, p, dst_rowst);
+          p  += dst_rowst;
+          pd += dst_rowst;
+        }
+        break;
     }
   } else if (bpp == 1) {
     c      = *p;
