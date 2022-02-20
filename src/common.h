@@ -23,7 +23,7 @@
 #include "endian.h"
 #include "bitwise.h"
 #include "thread/thread.h"
-#include "mem/mmap.h"
+#include "mm/mmap.h"
 #include "arch/intrin.h"
 
 #include <string.h>

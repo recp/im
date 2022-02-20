@@ -18,7 +18,6 @@
 #include "../../file.h"
 #include "../../endian.h"
 
-
 /*
  References:
  [0] https://en.wikipedia.org/wiki/BMP_file_format
