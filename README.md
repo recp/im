@@ -38,6 +38,7 @@ TODO
   - [ ] HUFFMAN1D
   - [ ] RLE24
   - [ ] Option to specify behavior of skipped pixels 
+  - [x] DIB file
 - [ ] PSD
 - [ ] TGA
 - [ ] HDR

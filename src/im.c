@@ -37,6 +37,7 @@
 #include "io/ppm/pfm.h"
 #include "io/ppm/pam.h"
 #include "io/bmp/bmp.h"
+#include "io/bmp/dib.h"
 
 #include "file.h"
 
@@ -128,7 +129,8 @@ im_load(ImImage         ** __restrict dest,
     {"pam",  pam_dec},
 //    {"jpeg", jpg_dec},
 //    {"jpg",  jpg_dec},
-    {"bmp",  bmp_dec}
+    {"bmp",  bmp_dec},
+    {"dib",  dib_dec}
   };
 
   floader = NULL;
