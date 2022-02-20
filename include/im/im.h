@@ -128,6 +128,12 @@ typedef enum ImOpenIntent {
   IM_OPEN_INTENT_READWRITE
 } ImOpenIntent;
 
+typedef enum ImByteOrder {
+  IM_BYTEORDER_HOST          = 0, /* default */
+  IM_BYTEORDER_LITTLE_ENDIAN = 1,
+  IM_BYTEORDER_BIG_EDIAN     = 2
+} ImByteOrder;
+
 typedef struct ImImage {
   ImFileResult      file;
   ImImageData       data;
@@ -143,6 +149,7 @@ typedef struct ImImage {
   ImOrientationType ori;
   ImAlphaInfo       alphaInfo;
   ImFileFormatType  fileFormatType;
+  ImByteOrder       byteOrder;
   uint32_t          row_pad_last;
   
   /* Monochrome color table (between 0-255),
