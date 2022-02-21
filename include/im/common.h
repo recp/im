@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef common_h
-#define common_h
+#ifndef im_common_h
+#define im_common_h
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -89,4 +89,4 @@ typedef enum ImResult {
 #ifdef __cplusplus
 }
 #endif
-#endif /* common_h */
+#endif /* im_common_h */
