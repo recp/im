@@ -21,7 +21,9 @@
 
 IM_HIDE
 ImResult
-dib_dec(ImImage ** __restrict dest, const char * __restrict path);
+dib_dec(ImImage         ** __restrict dest,
+        const char       * __restrict path,
+        im_open_config_t * __restrict open_config);
 
 IM_HIDE
 ImResult

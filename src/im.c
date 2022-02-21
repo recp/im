@@ -52,7 +52,7 @@
 
 typedef struct floader_t {
   const char * fext;
-  ImResult (*floader_fn)(ImImage ** __restrict, const char * __restrict);
+  ImResult (*floader_fn)(ImImage ** __restrict, const char * __restrict, im_open_config_t * __restrict open_config);
 } floader_t;
 
 IM_EXPORT
@@ -120,7 +120,11 @@ im_load(ImImage         ** __restrict dest,
   localurl = url;
   if (!localurl)
     return IM_EBADF;
+  
+  im_open_config_t open_conf = {0};
+  open_conf.openIntent = openIntent;
 
+  
   floader_t floaders[] = {
     {"pbm",  pbm_dec},
     {"pgm",  pgm_dec},
@@ -176,7 +180,7 @@ im_load(ImImage         ** __restrict dest,
   }
 
   if (floader)
-    _err_no = floader->floader_fn(dest, localurl);
+    _err_no = floader->floader_fn(dest, localurl, &open_conf);
   else
     goto err;
 

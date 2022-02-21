@@ -150,6 +150,7 @@ typedef struct ImImage {
   ImAlphaInfo       alphaInfo;
   ImFileFormatType  fileFormatType;
   ImByteOrder       byteOrder;
+  ImOpenIntent      openIntent;
   uint32_t          row_pad_last;
   
   /* Monochrome color table (between 0-255),

@@ -32,14 +32,16 @@
 
 IM_HIDE
 ImResult
-bmp_dec(ImImage ** __restrict dest, const char * __restrict path) {
+bmp_dec(ImImage         ** __restrict dest,
+        const char       * __restrict path,
+        im_open_config_t * __restrict open_config) {
   ImImage            *im;
   char               *p;
   uint32_t            dataoff;
   ImFileResult        fres;
 
   im   = NULL;
-  fres = im_readfile(path);
+  fres = im_readfile(path, open_config->openIntent != IM_OPEN_INTENT_READWRITE);
   
   if (fres.ret != IM_OK) {
     goto err;
@@ -103,13 +105,15 @@ err:
 
 IM_HIDE
 ImResult
-dib_dec(ImImage ** __restrict dest, const char * __restrict path) {
+dib_dec(ImImage         ** __restrict dest,
+        const char       * __restrict path,
+        im_open_config_t * __restrict open_config) {
   ImImage     *im;
   char        *p;
   ImFileResult fres;
 
   im   = NULL;
-  fres = im_readfile(path);
+  fres = im_readfile(path, path != NULL);
   
   if (fres.ret != IM_OK) {
     goto err;

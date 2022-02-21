@@ -26,6 +26,8 @@
 
 IM_HIDE
 ImResult
-pbm_dec(ImImage ** __restrict im, const char * __restrict path);
+pbm_dec(ImImage          ** __restrict im,
+        const char       *  __restrict path,
+        im_open_config_t *  __restrict open_config);
 
 #endif /* pbm_h */

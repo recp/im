@@ -34,13 +34,15 @@ ppm_dec_bin(ImImage * __restrict im, char * __restrict p, const char * __restric
 
 IM_HIDE
 ImResult
-ppm_dec(ImImage ** __restrict dest, const char * __restrict path) {
+ppm_dec(ImImage         ** __restrict dest,
+        const char       * __restrict path,
+        im_open_config_t * __restrict open_config) {
   ImImage      *im;
   char         *p, *end;
   ImFileResult  fres;
   
   im   = NULL;
-  fres = im_readfile(path);
+  fres = im_readfile(path, open_config->openIntent != IM_OPEN_INTENT_READWRITE);
 
   if (fres.ret != IM_OK) {
     goto err;

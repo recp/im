@@ -20,6 +20,6 @@
 #include "common.h"
 
 ImFileResult
-im_readfile(const char * __restrict file);
+im_readfile(const char * __restrict file, bool readonly);
 
 #endif /* file_h */

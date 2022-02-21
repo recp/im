@@ -76,7 +76,7 @@ im_on_worker(void *argv) {
   ImFileResult  fres;
   
   arg  = argv;
-  fres = im_readfile(arg->path);
+  fres = im_readfile(arg->path, im->openIntent != IM_OPEN_INTENT_READWRITE);
   
   if (fres.ret != IM_OK) {
     goto err;

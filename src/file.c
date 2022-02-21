@@ -20,9 +20,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <fcntl.h>
+#include <stdio.h>
+#include <unistd.h>
 
 ImFileResult
-im_readfile(const char * __restrict file) {
+im_readfile(const char * __restrict file, bool readonly) {
   FILE        *infile;
   size_t       blksize;
   size_t       fsize;
@@ -51,7 +54,8 @@ im_readfile(const char * __restrict file) {
   res.size       = fcontents_size;
   
   /* TODO: use madvise() ? */
-  if (fcontents_size > 1024 * 16 /* > 16K */
+  if (readonly
+      && fcontents_size > 1024 * 16 /* > 16K */
       && (res.raw = im_mmap_rdonly(infile_no, fsize))) {
     res.mmap = true;
     res.ret  = IM_OK;

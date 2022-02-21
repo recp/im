@@ -26,6 +26,8 @@
 
 IM_HIDE
 ImResult
-pam_dec(ImImage ** __restrict im, const char * __restrict path);
+pam_dec(ImImage         ** __restrict dest,
+        const char       * __restrict path,
+        im_open_config_t * __restrict open_config);
 
 #endif /* pam_h */

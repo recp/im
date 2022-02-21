@@ -99,6 +99,8 @@
 
 IM_HIDE
 ImResult
-bmp_dec(ImImage ** __restrict dest, const char * __restrict path);
+bmp_dec(ImImage         ** __restrict dest,
+        const char       * __restrict path,
+        im_open_config_t * __restrict open_config);
 
 #endif /* sc_bmp_h */

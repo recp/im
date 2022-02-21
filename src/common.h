@@ -49,6 +49,10 @@
 #define IM_ARRAY_SPACE_CHECK   (c == ' ' || c == '\t' || c == '\f' || c == '\v')
 #define IM_ARRAY_NLINE_CHECK   (c == '\n' || c == '\r')
 
+typedef struct im_open_config_t {
+  ImOpenIntent openIntent;
+} im_open_config_t;
+
 typedef struct ImQuantTbl {
   IM_ALIGN(16) uint16_t qt[64]; /* zig-zag order */
   bool                  valid;

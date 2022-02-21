@@ -29,6 +29,8 @@
 
 IM_HIDE
 ImResult
-pfm_dec(ImImage ** __restrict dest, const char * __restrict path);
+pfm_dec(ImImage         ** __restrict dest,
+        const char       * __restrict path,
+        im_open_config_t * __restrict open_config);
 
 #endif /* pfm_h */

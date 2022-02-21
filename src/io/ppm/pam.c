@@ -27,7 +27,9 @@
 
 IM_HIDE
 ImResult
-pam_dec(ImImage ** __restrict dest, const char * __restrict path) {
+pam_dec(ImImage         ** __restrict dest,
+        const char       * __restrict path,
+        im_open_config_t * __restrict open_config) {
   ImImage        *im;
   char           *p, *end;
   im_pam_header_t header;
@@ -38,7 +40,7 @@ pam_dec(ImImage ** __restrict dest, const char * __restrict path) {
   float           pe;
 
   im   = NULL;
-  fres = im_readfile(path);
+  fres = im_readfile(path, open_config->openIntent != IM_OPEN_INTENT_READWRITE);
 
   if (fres.ret != IM_OK) {
     goto err;

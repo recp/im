@@ -41,13 +41,15 @@ pfm_dec_rgba(ImImage * __restrict im, char * __restrict p, const char * __restri
 
 IM_HIDE
 ImResult
-pfm_dec(ImImage ** __restrict dest, const char * __restrict path) {
+pfm_dec(ImImage         ** __restrict dest,
+        const char       * __restrict path,
+        im_open_config_t * __restrict open_config) {
   ImImage      *im;
   char         *p, *end;
   ImFileResult  fres;
   
   im   = NULL;
-  fres = im_readfile(path);
+  fres = im_readfile(path, open_config->openIntent != IM_OPEN_INTENT_READWRITE);
   
   if (fres.ret != IM_OK) {
     goto err;
