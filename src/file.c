@@ -62,12 +62,13 @@ im_readfile(const char * __restrict file, bool readonly) {
     return res;
   }
 
-#ifndef IM_WINAPI
-  blksize = infile_st.st_blksize;
-#else
-  blksize = 512;
-#endif
+//#ifndef IM_WINAPI
+//  blksize = infile_st.st_blksize;
+//#else
+//  blksize = 512;
+//#endif
 
+  blksize = fcontents_size;
   res.raw = malloc(fcontents_size + 1);
 
 #if DEBUG
