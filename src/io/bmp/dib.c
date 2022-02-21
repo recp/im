@@ -71,10 +71,11 @@ dib_dec_mem(ImImage * __restrict im,
   float               pe_r, pe_g, pe_b, pe_a;
   
   /* DIP header */
-  hsz     = im_get_u32_endian(p, true);  p += 4;
+  hsz     = im_get_u32_endian(p, true);
   pltst   = 4;
   plt     = p + hsz;
-  
+  p       += 4;
+
   if (!p_data)
     p_data = p + hsz;
 
