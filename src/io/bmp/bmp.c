@@ -81,7 +81,6 @@ bmp_dec(ImImage         ** __restrict dest,
     goto err;
   }
 
-ok:
   *dest = im;
   im->file = fres;
   
@@ -130,14 +129,13 @@ dib_dec(ImImage         ** __restrict dest,
     goto err;
   }
 
-ok:
   *dest = im;
   im->file = fres;
   
   //  if (fres.mmap) {
   //    im_unmap(fres.raw, fres.size);
   //  }
-  
+ 
   return IM_OK;
 err:
   if (fres.mmap) {

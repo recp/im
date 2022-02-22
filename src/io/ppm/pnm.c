@@ -45,7 +45,7 @@ pnm_dec_header(ImImage                 * __restrict im,
                const char              * __restrict end,
                bool                                 includeMaxVal) {
   im_pnm_header_t header;
-  size_t          imlen;
+  uint32_t        imlen;
   char           *p;
   uint32_t        width, height, maxval, bytesPerPixel;
 
@@ -102,7 +102,7 @@ pfm_dec_header(ImImage                 * __restrict im,
                char       * __restrict * __restrict start,
                const char              * __restrict end) {
   im_pfm_header_t header;
-  size_t          imlen;
+  uint32_t        imlen;
   char           *p;
   uint32_t        width, height, bytesPerPixel;
 
@@ -155,7 +155,7 @@ pam_dec_header(ImImage                 * __restrict im,
                char       * __restrict * __restrict start,
                const char              * __restrict end) {
   im_pam_header_t header;
-  size_t          imlen;
+  uint32_t        imlen;
   char           *p, c;
   uint32_t        width, height, depth, maxval, bytesPerPixel;
   bool            foundENDHDR;

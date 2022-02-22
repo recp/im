@@ -122,9 +122,9 @@ pfm_dec_rgb(ImImage * __restrict im, char * __restrict p, const char * __restric
       G = im_get_f32_endian(p, true);  p += 4;
       B = im_get_f32_endian(p, true);  p += 4;
       
-      pd[i++] = im_clampf_zo(R) * maxRef;
-      pd[i++] = im_clampf_zo(G) * maxRef;
-      pd[i++] = im_clampf_zo(B) * maxRef;
+      pd[i++] = (ImByte)(im_clampf_zo(R) * maxRef);
+      pd[i++] = (ImByte)(im_clampf_zo(G) * maxRef);
+      pd[i++] = (ImByte)(im_clampf_zo(B) * maxRef);
     } while (--count > 0);
   } else {
     do {
@@ -132,9 +132,9 @@ pfm_dec_rgb(ImImage * __restrict im, char * __restrict p, const char * __restric
       G = im_get_f32_endian(p, false);  p += 4;
       B = im_get_f32_endian(p, false);  p += 4;
 
-      pd[i++] = im_clampf_zo(R) * maxRef;
-      pd[i++] = im_clampf_zo(G) * maxRef;
-      pd[i++] = im_clampf_zo(B) * maxRef;
+      pd[i++] = (ImByte)(im_clampf_zo(R) * maxRef);
+      pd[i++] = (ImByte)(im_clampf_zo(G) * maxRef);
+      pd[i++] = (ImByte)(im_clampf_zo(B) * maxRef);
     } while (--count > 0);
   }
 
@@ -162,13 +162,13 @@ pfm_dec_mono(ImImage * __restrict im, char * __restrict p, const char * __restri
     do {
       R       = im_get_f32_endian(p, true);
       p      += 4;
-      pd[i++] = im_clampf_zo(R) * maxRef;
+      pd[i++] = (ImByte)(im_clampf_zo(R) * maxRef);
     } while (--count > 0);
   } else {
     do {
       R       = im_get_f32_endian(p, false);
       p      += 4;
-      pd[i++] = im_clampf_zo(R) * maxRef;
+      pd[i++] = (ImByte)(im_clampf_zo(R) * maxRef);
     } while (--count > 0);
   }
 
@@ -200,10 +200,10 @@ pfm_dec_rgba(ImImage * __restrict im, char * __restrict p, const char * __restri
       B = im_get_f32_endian(p, true);  p += 4;
       A = im_get_f32_endian(p, true);  p += 4;
       
-      pd[i++] = im_clampf_zo(R) * maxRef;
-      pd[i++] = im_clampf_zo(G) * maxRef;
-      pd[i++] = im_clampf_zo(B) * maxRef;
-      pd[i++] = im_clampf_zo(A) * maxRef;
+      pd[i++] = (ImByte)(im_clampf_zo(R) * maxRef);
+      pd[i++] = (ImByte)(im_clampf_zo(G) * maxRef);
+      pd[i++] = (ImByte)(im_clampf_zo(B) * maxRef);
+      pd[i++] = (ImByte)(im_clampf_zo(A) * maxRef);
     } while (--count > 0);
   } else {
     do {
@@ -212,10 +212,10 @@ pfm_dec_rgba(ImImage * __restrict im, char * __restrict p, const char * __restri
       B = im_get_f32_endian(p, false);  p += 4;
       A = im_get_f32_endian(p, false);  p += 4;
       
-      pd[i++] = im_clampf_zo(R) * maxRef;
-      pd[i++] = im_clampf_zo(G) * maxRef;
-      pd[i++] = im_clampf_zo(B) * maxRef;
-      pd[i++] = im_clampf_zo(A) * maxRef;
+      pd[i++] = (ImByte)(im_clampf_zo(R) * maxRef);
+      pd[i++] = (ImByte)(im_clampf_zo(G) * maxRef);
+      pd[i++] = (ImByte)(im_clampf_zo(B) * maxRef);
+      pd[i++] = (ImByte)(im_clampf_zo(A) * maxRef);
     } while (--count > 0);
   }
   

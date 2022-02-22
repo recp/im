@@ -61,7 +61,7 @@ dib_dec_mem(ImImage * __restrict im,
             char    * __restrict p_data,
             char    * __restrict p_eof) {
   char               *p_end, *plt, *bfi;
-  size_t              imlen;
+  uint32_t            imlen;
   ImByte              bpp, c, *pd;
   uint32_t            hsz, width, min_bytes, height, compr,
   i, j, idx, src_ncomp, dst_ncomp, pltst,
@@ -102,7 +102,7 @@ dib_dec_mem(ImImage * __restrict im,
   
   /* ignore planes field: uint16 */
   p    += 2;
-  bpp   = im_get_u16_endian(p, true);  p += 2;
+  bpp   = (ImByte)im_get_u16_endian(p, true);  p += 2;
   
   compr = im_get_u32_endian(p, true);  p += 4;
   /* imsz  = im_get_u32_endian(p, true); */ p += 4;
@@ -144,7 +144,7 @@ re_comp:
   }
   
   /* minimum bytes to contsruct one row */
-  min_bytes = ceilf(width * src_ncomp * im_minf((float)bpp / 8.0f, 8));
+  min_bytes = (uint32_t)ceilf(width * src_ncomp * im_minf((float)bpp / 8.0f, 8));
   
   /* pad to power of 4 */
   src_pad   = 4 - min_bytes & 3;
@@ -232,10 +232,10 @@ re_comp:
       acount = 32 - im_bitw_clz(amask) - ashift;
     }
     
-    pe_r = (float)255.0f/(pow(2, rcount) - 1);
-    pe_g = (float)255.0f/(pow(2, gcount) - 1);
-    pe_b = (float)255.0f/(pow(2, bcount) - 1);
-    pe_a = (float)255.0f/(pow(2, acount) - 1);
+    pe_r = (float)255.0f/(powf(2.0f, (float)rcount) - 1.0f);
+    pe_g = (float)255.0f/(powf(2.0f, (float)gcount) - 1.0f);
+    pe_b = (float)255.0f/(powf(2.0f, (float)bcount) - 1.0f);
+    pe_a = (float)255.0f/(powf(2.0f, (float)acount) - 1.0f);
   }
   
   im->data.data = im_init_data(im, imlen);
@@ -253,9 +253,9 @@ re_comp:
         for (j = 0; j < width; j++) {
           px = im_get_u16_endian(p + i * src_rowst + j * 2, true);
           
-          pd[i * dst_rowst + j * dst_ncomp + 0] = ((px & bmask) >> bshift) * pe_b;
-          pd[i * dst_rowst + j * dst_ncomp + 1] = ((px & gmask) >> gshift) * pe_g;
-          pd[i * dst_rowst + j * dst_ncomp + 2] = ((px & rmask) >> rshift) * pe_r;
+          pd[i * dst_rowst + j * dst_ncomp + 0] = (ImByte)(((px & bmask) >> bshift) * pe_b);
+          pd[i * dst_rowst + j * dst_ncomp + 1] = (ImByte)(((px & gmask) >> gshift) * pe_g);
+          pd[i * dst_rowst + j * dst_ncomp + 2] = (ImByte)(((px & rmask) >> rshift) * pe_r);
         }
       }
     } else {
@@ -263,10 +263,10 @@ re_comp:
         for (j = 0; j < width; j++) {
           px = im_get_u16_endian(p + i * src_rowst + j * 2, true);
           
-          pd[i * dst_rowst + j * dst_ncomp + 0] = ((px & bmask) >> bshift) * pe_b;
-          pd[i * dst_rowst + j * dst_ncomp + 1] = ((px & gmask) >> gshift) * pe_g;
-          pd[i * dst_rowst + j * dst_ncomp + 2] = ((px & rmask) >> rshift) * pe_r;
-          pd[i * dst_rowst + j * dst_ncomp + 3] = ((px & amask) >> ashift) * pe_a;
+          pd[i * dst_rowst + j * dst_ncomp + 0] = (ImByte)(((px & bmask) >> bshift) * pe_b);
+          pd[i * dst_rowst + j * dst_ncomp + 1] = (ImByte)(((px & gmask) >> gshift) * pe_g);
+          pd[i * dst_rowst + j * dst_ncomp + 2] = (ImByte)(((px & rmask) >> rshift) * pe_r);
+          pd[i * dst_rowst + j * dst_ncomp + 3] = (ImByte)(((px & amask) >> ashift) * pe_a);
         }
       }
     }
@@ -277,10 +277,10 @@ re_comp:
           for (j = 0; j < width; j++) {
             px = im_get_u32_endian(p + i * src_rowst + j * 4, true);
             
-            pd[i * dst_rowst + j * dst_ncomp + 0] = ((px & bmask) >> bshift) * pe_b;
-            pd[i * dst_rowst + j * dst_ncomp + 1] = ((px & gmask) >> gshift) * pe_g;
-            pd[i * dst_rowst + j * dst_ncomp + 2] = ((px & rmask) >> rshift) * pe_r;
-            pd[i * dst_rowst + j * dst_ncomp + 3] = ((px & amask) >> ashift) * pe_a;
+            pd[i * dst_rowst + j * dst_ncomp + 0] = (ImByte)(((px & bmask) >> bshift) * pe_b);
+            pd[i * dst_rowst + j * dst_ncomp + 1] = (ImByte)(((px & gmask) >> gshift) * pe_g);
+            pd[i * dst_rowst + j * dst_ncomp + 2] = (ImByte)(((px & rmask) >> rshift) * pe_r);
+            pd[i * dst_rowst + j * dst_ncomp + 3] = (ImByte)(((px & amask) >> ashift) * pe_a);
           }
         }
         break;
@@ -289,9 +289,9 @@ re_comp:
           for (j = 0; j < width; j++) {
             px = im_get_u32_endian(p + i * src_rowst + j * 4, true);
             
-            pd[i * dst_rowst + j * dst_ncomp + 0] = ((px & bmask) >> bshift) * pe_b;
-            pd[i * dst_rowst + j * dst_ncomp + 1] = ((px & gmask) >> gshift) * pe_g;
-            pd[i * dst_rowst + j * dst_ncomp + 2] = ((px & rmask) >> rshift) * pe_r;
+            pd[i * dst_rowst + j * dst_ncomp + 0] = (ImByte)(((px & bmask) >> bshift) * pe_b);
+            pd[i * dst_rowst + j * dst_ncomp + 1] = (ImByte)(((px & gmask) >> gshift) * pe_g);
+            pd[i * dst_rowst + j * dst_ncomp + 2] = (ImByte)(((px & rmask) >> rshift) * pe_r);
           }
         }
         break;

@@ -57,7 +57,7 @@ typedef struct floader_t {
 
 IM_EXPORT
 void*
-im_init_data(ImImage * __restrict im, size_t size) {
+im_init_data(ImImage * __restrict im, uint32_t size) {
 #ifdef IM_WINAPI
   /* TODO: disable mapping with option */
   /* https://docs.microsoft.com/en-us/windows/win32/memory/creating-named-shared-memory */
@@ -68,7 +68,7 @@ im_init_data(ImImage * __restrict im, size_t size) {
                                NULL,                 /* default security                       */
                                PAGE_READWRITE,       /* read/write access                      */
                                0,                    /* maximum object size (high-order DWORD) */
-                               size,                 /* maximum object size (low-order DWORD)  */
+                               (DWORD)size,          /* maximum object size (low-order DWORD)  */
                                NULL);                /* name of mapping object                 */
 
   if (hMapFile == NULL) {

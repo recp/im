@@ -161,7 +161,7 @@ typedef struct ImImage {
 
 IM_EXPORT
 void*
-im_init_data(ImImage * __restrict im, size_t size);
+im_init_data(ImImage * __restrict im, uint32_t size);
 
 IM_EXPORT
 ImResult

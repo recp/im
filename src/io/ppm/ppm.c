@@ -111,9 +111,9 @@ ppm_dec_bin(ImImage * __restrict im, char * __restrict p, const char * __restric
       im_memcpy(pd, p, count * 3);
     } else {
       do {
-        pd[0]  = im_min_i32(p[0] * pe, maxRef);
-        pd[1]  = im_min_i32(p[1] * pe, maxRef);
-        pd[2]  = im_min_i32(p[2] * pe, maxRef);
+        pd[0]  = im_min_i32((uint32_t)(p[0] * pe), maxRef);
+        pd[1]  = im_min_i32((uint32_t)(p[1] * pe), maxRef);
+        pd[2]  = im_min_i32((uint32_t)(p[2] * pe), maxRef);
 
         pd    += 3;
         p     += 3;
@@ -125,9 +125,9 @@ ppm_dec_bin(ImImage * __restrict im, char * __restrict p, const char * __restric
       memcpy(&G, p, 2);  p += 2;
       memcpy(&B, p, 2);  p += 2;
 
-      pd[i++] = im_min_i32(R * pe, maxRef);
-      pd[i++] = im_min_i32(G * pe, maxRef);
-      pd[i++] = im_min_i32(B * pe, maxRef);
+      pd[i++] = im_min_i32((uint32_t)(R * pe), maxRef);
+      pd[i++] = im_min_i32((uint32_t)(G * pe), maxRef);
+      pd[i++] = im_min_i32((uint32_t)(B * pe), maxRef);
     } while (--count > 0);
   }
 
@@ -157,9 +157,9 @@ ppm_dec_ascii(ImImage * __restrict im, char * __restrict p, const char * __restr
     G = im_getu32_skipspaces(&p, end);
     B = im_getu32_skipspaces(&p, end);
 
-    pd[i++] = im_min_i32(R * pe, maxRef);
-    pd[i++] = im_min_i32(G * pe, maxRef);
-    pd[i++] = im_min_i32(B * pe, maxRef);
+    pd[i++] = im_min_i32((uint32_t)(R * pe), maxRef);
+    pd[i++] = im_min_i32((uint32_t)(G * pe), maxRef);
+    pd[i++] = im_min_i32((uint32_t)(B * pe), maxRef);
   } while (p && p[0] != '\0' && *++p != '\0' && (--count) > 0);
   
   /* ensure that unhandled pixels are black. */
