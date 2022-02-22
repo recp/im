@@ -184,7 +184,8 @@ re_comp:
   p_end                = p_eof;
   
   /* short path */
-  if (dst_pad == 0 && src_pad == 0 && (bpp == 8 || bpp == 24 || bpp == 32)) {
+  if ((compr == IM_BMP_COMPR_RGB || compr == IM_BMP_COMPR_CMYK)
+      && dst_pad == 0 && src_pad == 0 && (bpp == 8 || bpp == 24 || bpp == 32)) {
     im->data.data = p;
     goto ok;
   }
@@ -240,7 +241,7 @@ re_comp:
   im->data.data = im_init_data(im, imlen);
   pd            = im->data.data;
   
-  if (bpp == 24) {
+  if (bpp == 24 && compr != IM_BMP_COMPR_RLE24) {
     for (i = 0; i < height; i++) {
       im_memcpy((char *)pd, p, dst_rowst);
       p  += dst_rowst;
@@ -487,6 +488,96 @@ re_comp:
             break;
           }
         }
+      }
+    }
+  } else if (bpp == 24 && compr == IM_BMP_COMPR_RLE24) {
+    ImByte cnt, code, dx, dy;
+    
+    dst_x = dst_y = 0;
+    p     = p_data;
+    
+    while (p < p_end) {
+      cnt  = *p++;
+      code = *p++;
+      
+      if (!cnt) {
+        /* TODO: . */
+        switch (code) {
+          case 0x00: {
+            while(dst_y) {
+              *pd++ = 0;
+              *pd++ = 0;
+              *pd++ = 0;
+              if (++dst_y >= width) {
+                dst_x++;
+                dst_y = 0;
+                break;
+              }
+            }
+            break;
+          }
+          case 0x01: {
+            dst_rem = im_max_i32(width * height - (dst_x * width + dst_y), 0);
+            for (i = 0; i < dst_rem; i++) {
+              *pd++ = 0;
+              *pd++ = 0;
+              *pd++ = 0;
+            }
+            goto ok;
+          }
+          case 0x02: {
+            dy = *p++;
+            dx = *p++;
+            
+            dst_rem = width * dx + dy;
+            
+            for (i = 0; i < dst_rem; i++) {
+              *pd++ = 0;
+              *pd++ = 0;
+              *pd++ = 0;
+
+              if (++dst_y >= width) {
+                dst_x++;
+                dst_y = 0;
+              }
+            }
+            break;
+          }
+          default: {
+            /* Absolute mode */
+            for (i = 0; i < code; i++) {
+              *pd++ = *p++;
+              *pd++ = *p++;
+              *pd++ = *p++;
+
+              if (++dst_y >= width) {
+                dst_x++;
+                dst_y = 0;
+                break;
+              }
+            }
+            
+            p += (code - i) + (code - i) & 1;
+            p += code & 1;
+            break;
+          }
+        }
+      } else {
+        /* Encoded mode */
+
+        for (i = 0; i < cnt; i++) {
+          *pd++ = code;
+          *pd++ = p[0];
+          *pd++ = p[1];
+
+          if (++dst_y >= width) {
+            dst_x++;
+            dst_y = 0;
+            break;
+          }
+        }
+        
+        p += 2;
       }
     }
   } else if (bpp == 8) {

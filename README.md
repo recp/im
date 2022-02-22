@@ -36,7 +36,7 @@ TODO
   - [ ] PNG
   - [ ] ICC Color profile
   - [ ] HUFFMAN1D
-  - [ ] RLE24
+  - [x] RLE24
   - [ ] Option to specify behavior of skipped pixels 
   - [x] DIB file
 - [ ] PSD
