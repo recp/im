@@ -163,6 +163,7 @@
     <ClInclude Include="..\src\endian.h" />
     <ClInclude Include="..\src\file.h" />
     <ClInclude Include="..\src\io\bmp\bmp.h" />
+    <ClInclude Include="..\src\io\bmp\dib.h" />
     <ClInclude Include="..\src\io\common.h" />
     <ClInclude Include="..\src\io\ppm\common.h" />
     <ClInclude Include="..\src\io\ppm\pam.h" />
@@ -171,7 +172,8 @@
     <ClInclude Include="..\src\io\ppm\pgm.h" />
     <ClInclude Include="..\src\io\ppm\pnm.h" />
     <ClInclude Include="..\src\io\ppm\ppm.h" />
-    <ClInclude Include="..\src\mem\mmap.h" />
+    <ClInclude Include="..\src\mm\mmap.h" />
+    <ClInclude Include="..\src\pp\pp.h" />
     <ClInclude Include="..\src\sampler.h" />
     <ClInclude Include="..\src\str.h" />
     <ClInclude Include="..\src\thread\common.h" />
@@ -183,13 +185,15 @@
     <ClCompile Include="..\src\file.c" />
     <ClCompile Include="..\src\im.c" />
     <ClCompile Include="..\src\io\bmp\bmp.c" />
+    <ClCompile Include="..\src\io\bmp\dib.c" />
     <ClCompile Include="..\src\io\ppm\pam.c" />
     <ClCompile Include="..\src\io\ppm\pbm.c" />
     <ClCompile Include="..\src\io\ppm\pfm.c" />
     <ClCompile Include="..\src\io\ppm\pgm.c" />
     <ClCompile Include="..\src\io\ppm\pnm.c" />
     <ClCompile Include="..\src\io\ppm\ppm.c" />
-    <ClCompile Include="..\src\mem\mmap.c" />
+    <ClCompile Include="..\src\mm\mmap.c" />
+    <ClCompile Include="..\src\pp\pp.c" />
     <ClCompile Include="..\src\win\dllmain.c" />
     <ClCompile Include="..\src\win\thread.c" />
   </ItemGroup>

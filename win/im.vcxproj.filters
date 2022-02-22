@@ -45,14 +45,35 @@
     <Filter Include="src\io\webp">
       <UniqueIdentifier>{cd418647-ea02-45a9-8739-5f2b62662641}</UniqueIdentifier>
     </Filter>
-    <Filter Include="src\mem">
-      <UniqueIdentifier>{1c65d706-6335-4fa7-86f8-1df446c2b3b0}</UniqueIdentifier>
-    </Filter>
     <Filter Include="src\win">
       <UniqueIdentifier>{2b3e17c5-df98-4402-ab56-dabf3e3466fd}</UniqueIdentifier>
     </Filter>
     <Filter Include="src\thread">
       <UniqueIdentifier>{efa567b0-53a9-4c26-93b6-8d21ea891263}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\pp">
+      <UniqueIdentifier>{21a5409b-8306-49a5-a120-42a20ce4f677}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\cs">
+      <UniqueIdentifier>{9fd7e1bb-01f8-443c-9d95-db56bdb4d866}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\mm">
+      <UniqueIdentifier>{1c65d706-6335-4fa7-86f8-1df446c2b3b0}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\io\ico">
+      <UniqueIdentifier>{78d295d2-4584-46a8-b307-d531fdf8dfbe}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\io\cur">
+      <UniqueIdentifier>{2654c9b1-4afd-4091-a695-a6941a75c673}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\io\pic">
+      <UniqueIdentifier>{76abfad7-c97d-47d5-a360-ff6871d4d264}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\io\avif">
+      <UniqueIdentifier>{4d62de48-8a6f-4a23-817c-ff1600fa1cff}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\io\dds">
+      <UniqueIdentifier>{15ede1d5-83c8-475f-9f1e-e51d3bea0390}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -95,9 +116,6 @@
     <ClInclude Include="..\src\io\common.h">
       <Filter>src\io</Filter>
     </ClInclude>
-    <ClInclude Include="..\src\mem\mmap.h">
-      <Filter>src\mem</Filter>
-    </ClInclude>
     <ClInclude Include="..\src\win\thread.h">
       <Filter>src\win</Filter>
     </ClInclude>
@@ -131,6 +149,15 @@
     <ClInclude Include="..\include\im\options.h">
       <Filter>include\im</Filter>
     </ClInclude>
+    <ClInclude Include="..\src\io\bmp\dib.h">
+      <Filter>src\io\bmp</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\pp\pp.h">
+      <Filter>src\pp</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\mm\mmap.h">
+      <Filter>src\mm</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\src\io\ppm\pam.c">
@@ -154,9 +181,6 @@
     <ClCompile Include="..\src\io\bmp\bmp.c">
       <Filter>src\io\bmp</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\mem\mmap.c">
-      <Filter>src\mem</Filter>
-    </ClCompile>
     <ClCompile Include="..\src\win\thread.c">
       <Filter>src\win</Filter>
     </ClCompile>
@@ -171,6 +195,15 @@
     </ClCompile>
     <ClCompile Include="..\src\win\dllmain.c">
       <Filter>src\win</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\io\bmp\dib.c">
+      <Filter>src\io\bmp</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\pp\pp.c">
+      <Filter>src\pp</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\mm\mmap.c">
+      <Filter>src\mm</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

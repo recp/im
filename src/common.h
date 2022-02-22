@@ -40,6 +40,15 @@
 #  define IM_CONSTRUCTOR
 #endif
 
+#ifdef IM_WINAPI
+/*
+#  define WIN32_LEAN_AND_MEAN
+#  include <windows.h>
+*/
+#  define strncasecmp _strnicmp
+#  define strcasecmp  _stricmp
+#endif
+
 #define IM__UNUSED(X) (void)X
 
 #define IM_ARRAY_SEP_CHECK (c == ' ' || c == '\n' || c == '\t' \

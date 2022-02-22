@@ -22,7 +22,6 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <stdio.h>
-#include <unistd.h>
 
 ImFileResult
 im_readfile(const char * __restrict file, bool readonly) {
