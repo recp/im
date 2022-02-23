@@ -32,10 +32,11 @@ TODO
   - [x] CMYK
   - [x] CMYKRLE8
   - [x] CMYKRLE4
-  - [ ] JPEG
-  - [ ] PNG
+  - [ ] JPEG (wait to finish JPEG codec)
+  - [ ] PNG (wait to finish PNG codec)
   - [ ] ICC Color profile
   - [ ] HUFFMAN1D
+  - [ ] Halftoning
   - [x] RLE24
   - [ ] Option to specify behavior of skipped pixels 
   - [x] DIB file
