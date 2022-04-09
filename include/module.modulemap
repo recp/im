@@ -1,0 +1,6 @@
+module im {
+    header "im/im.h"
+    header "im/cocoa.h"
+    
+    export *
+}
