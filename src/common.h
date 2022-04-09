@@ -285,7 +285,7 @@ im_clampf_zo(float a) {
 
 IM_INLINE
 int16_t
-im_get_i16_endian(const char * __restrict p, bool isLittleEndian) {
+im_get_i16_endian(void * __restrict p, bool isLittleEndian) {
   uint16_t buf;
   memcpy_endian16(isLittleEndian, buf, p);
   return *(int16_t *)(void *)&buf;
@@ -293,7 +293,7 @@ im_get_i16_endian(const char * __restrict p, bool isLittleEndian) {
 
 IM_INLINE
 uint16_t
-im_get_u16_endian(const char * __restrict p, bool isLittleEndian) {
+im_get_u16_endian(void * __restrict p, bool isLittleEndian) {
   uint16_t buf;
   memcpy_endian16(isLittleEndian, buf, p);
   return *(uint16_t *)(void *)&buf;
@@ -301,7 +301,7 @@ im_get_u16_endian(const char * __restrict p, bool isLittleEndian) {
 
 IM_INLINE
 int32_t
-im_get_i32_endian(const char * __restrict p, bool isLittleEndian) {
+im_get_i32_endian(void * __restrict p, bool isLittleEndian) {
   uint32_t buf;
   memcpy_endian32(isLittleEndian, buf, p);
   return *(int32_t *)(void *)&buf;
@@ -309,7 +309,7 @@ im_get_i32_endian(const char * __restrict p, bool isLittleEndian) {
 
 IM_INLINE
 uint32_t
-im_get_u32_endian(const char * __restrict p, bool isLittleEndian) {
+im_get_u32_endian(void * __restrict p, bool isLittleEndian) {
   uint32_t buf;
   memcpy_endian32(isLittleEndian, buf, p);
   return *(uint32_t *)(void *)&buf;
@@ -317,7 +317,7 @@ im_get_u32_endian(const char * __restrict p, bool isLittleEndian) {
 
 IM_INLINE
 float
-im_get_f32_endian(const char * __restrict p, bool isLittleEndian) {
+im_get_f32_endian(void * __restrict p, bool isLittleEndian) {
   uint32_t buf;
   memcpy_endian32(isLittleEndian, buf, p);
   return *(float *)(void *)&buf;
@@ -325,7 +325,7 @@ im_get_f32_endian(const char * __restrict p, bool isLittleEndian) {
 
 IM_INLINE
 double
-im_get_f64_endian(const char * __restrict p, bool isLittleEndian) {
+im_get_f64_endian(void * __restrict p, bool isLittleEndian) {
   uint64_t buf;
   memcpy_endian64(isLittleEndian, buf, p);
   return *(double *)(void *)&buf;

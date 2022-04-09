@@ -158,6 +158,9 @@
     <ClInclude Include="..\src\mm\mmap.h">
       <Filter>src\mm</Filter>
     </ClInclude>
+    <ClInclude Include="..\src\io\png\png.h">
+      <Filter>src\io\png</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\src\io\ppm\pam.c">
@@ -204,6 +207,9 @@
     </ClCompile>
     <ClCompile Include="..\src\mm\mmap.c">
       <Filter>src\mm</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\io\png\png.c">
+      <Filter>src\io\png</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

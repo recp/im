@@ -165,6 +165,7 @@
     <ClInclude Include="..\src\io\bmp\bmp.h" />
     <ClInclude Include="..\src\io\bmp\dib.h" />
     <ClInclude Include="..\src\io\common.h" />
+    <ClInclude Include="..\src\io\png\png.h" />
     <ClInclude Include="..\src\io\ppm\common.h" />
     <ClInclude Include="..\src\io\ppm\pam.h" />
     <ClInclude Include="..\src\io\ppm\pbm.h" />
@@ -186,6 +187,7 @@
     <ClCompile Include="..\src\im.c" />
     <ClCompile Include="..\src\io\bmp\bmp.c" />
     <ClCompile Include="..\src\io\bmp\dib.c" />
+    <ClCompile Include="..\src\io\png\png.c" />
     <ClCompile Include="..\src\io\ppm\pam.c" />
     <ClCompile Include="..\src\io\ppm\pbm.c" />
     <ClCompile Include="..\src\io\ppm\pfm.c" />

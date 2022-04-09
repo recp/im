@@ -14,15 +14,26 @@
  * limitations under the License.
  */
 
-#ifndef sc_png_h
-#define sc_png_h
+#include "common.h"
+#include "../include/im/options.h"
 
-#include "../common.h"
+im_option_rowpadding_t im__opt_pad = {
+  .base = {
+    .type = IM_OPTION_ROW_PAD_LAST
+  },
+  .pad = 0
+};
 
-IM_HIDE
-ImResult
-png_dec(ImImage         ** __restrict dest,
-        const char       * __restrict path,
-        im_open_config_t * __restrict open_config);
+im_option_base_t* options[] =
+{
+  &im__opt_pad,                    /* 0:  _ROW_PAD_LAST                */
+  0,                               /* 1:  _SUPPORTED_FORMATS           */
+  false,                           /* 2:  _SUPPORTED_ORIENTATIONS      */
+  false,                           /* 3:  _SUPPORTED_COMPRESSIONS      */
 
-#endif /* sc_png_h */
+#ifndef _MSC_VER
+  true                             /* 4: _USE_MMAP_FOR_WINDOWS         */
+#else
+  false
+#endif
+};
