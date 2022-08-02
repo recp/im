@@ -27,9 +27,10 @@ png_dec(ImImage         ** __restrict dest,
         const char       * __restrict path,
         im_open_config_t * __restrict open_config) {
   ImImage            *im;
-  ImByte             *p, *p_chk, bitdepth, color, compr, filter, interlace;
-  uint32_t            dataoff, chk_len, chk_type;
+  ImByte             *p, *p_chk, bitdepth, color, compr, filter, interlace, i;
+  uint32_t            dataoff, chk_len, chk_type, pal_len;
   ImFileResult        fres;
+  ImByte              pal[1024], pal_img_n;
   bool                is_cgbi;
   
 //  Bit depth  1 byte
@@ -38,7 +39,6 @@ png_dec(ImImage         ** __restrict dest,
 //  Filter method  1 byte
 //  Interlace method  1 byte
 
-  
   im   = NULL;
   fres = im_readfile(path, open_config->openIntent != IM_OPEN_INTENT_READWRITE);
   
@@ -67,7 +67,8 @@ png_dec(ImImage         ** __restrict dest,
   p += 8;
 
   im->fileFormatType = IM_FILEFORMATTYPE_PNG;
-  
+  pal_img_n          = 0;
+
   for (;;) {
     chk_len  = im_get_u32_endian(p, false); p += 4;
     chk_type = im_get_u32_endian(p, false); p += 4;
@@ -88,16 +89,34 @@ png_dec(ImImage         ** __restrict dest,
         break;
       }
       case IM_PNG_TYPE('P','L','T','E'): {
+        if (chk_len > 256 * 3)
+          goto err; /* invalid PLTE corrupt PNG */
+
+        pal_len = chk_len / 3;
+        if (pal_len * 3 != chk_len)
+          goto err; /* invalid PLTE corrupt PNG */
+
+        for (i = 0; i < pal_len; ++i) {
+          pal[i * 4 + 0] = *p++;
+          pal[i * 4 + 1] = *p++;
+          pal[i * 4 + 2] = *p++;
+          pal[i * 4 + 3] = 255;
+        }
+        break;
+      }
+      case IM_PNG_TYPE('t','R','N','S'): {
+        printf("\nTRNS not implemented yet\n");
         break;
       }
       case IM_PNG_TYPE('I','D','A','T'): {
+        printf("idat -- p: %p\n", p);
         break;
       }
       case IM_PNG_TYPE('I','E','N','D'): {
         goto nx;
       }
     }
-    
+
     p = p_chk + chk_len + 4; /* 4: CRC */
   }
 
