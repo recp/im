@@ -66,6 +66,10 @@ png_dec(ImImage         ** __restrict dest,
 
   p += 8;
 
+  im->file           = fres;
+  im->openIntent     = IM_OPEN_INTENT_READONLY;
+  im->byteOrder      = IM_BYTEORDER_HOST; /* convert to host */
+  im->ori            = IM_ORIENTATION_UP;
   im->fileFormatType = IM_FILEFORMATTYPE_PNG;
   pal_img_n          = 0;
 
@@ -86,6 +90,54 @@ png_dec(ImImage         ** __restrict dest,
         compr      = *p++;
         filter     = *p++;
         interlace  = *p;
+        
+        im->bitsPerComponent = bitdepth;
+        
+        /*
+         Color    Allowed    Interpretation
+         Type    Bit Depths
+         ----------------------------------------------------------------------
+         0       1,2,4,8,16  Each pixel is a grayscale sample.
+         2       8,16        Each pixel is an R,G,B triple.
+         3       1,2,4,8     Each pixel is a palette index; a PLTE chunk must appear.
+         4       8,16        Each pixel is a grayscale sample, followed by an alpha sample.
+         6       8,16        Each pixel is an R,G,B triple, followed by an alpha sample.
+         */
+        
+        switch (color) {
+          case 0:
+            im->bitsPerPixel  = im->bitsPerComponent;
+            im->bytesPerPixel = im->bitsPerComponent == 16 ? 2 : 1;
+            im->format        = IM_FORMAT_GRAY;
+            im->alphaInfo     = IM_ALPHA_NONE;
+            break;
+          case 2:
+            im->bitsPerPixel  = im->bitsPerComponent * 3;
+            im->bytesPerPixel = (im->bitsPerComponent == 16 ? 2 : 1) * 3;
+            im->format        = IM_FORMAT_RGB;
+            im->alphaInfo     = IM_ALPHA_NONE;
+            break;
+          case 3:
+            im->bitsPerPixel  = im->bitsPerComponent * 4; /* TODO: check plt to get color type */
+            im->bytesPerPixel = (im->bitsPerComponent == 16 ? 2 : 1) * 4;
+            im->format        = IM_FORMAT_RGB;
+            im->alphaInfo     = IM_ALPHA_NONE;
+            break;
+          case 4:
+            im->bitsPerPixel  = im->bitsPerComponent * 2;
+            im->bytesPerPixel = (im->bitsPerComponent == 16 ? 2 : 1) * 2;
+            im->format        = IM_FORMAT_GRAY_ALPHA;
+            im->alphaInfo     = IM_ALPHA_LAST;
+            break;
+          case 6:
+            im->bitsPerPixel  = im->bitsPerComponent * 4;
+            im->bytesPerPixel = (im->bitsPerComponent == 16 ? 2 : 1) * 4;
+            im->format        = IM_FORMAT_RGBA;
+            im->alphaInfo     = IM_ALPHA_LAST;
+            break;
+          default:
+            break;
+        }
         break;
       }
       case IM_PNG_TYPE('P','L','T','E'): {
