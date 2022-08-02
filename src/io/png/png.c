@@ -17,6 +17,7 @@
 #include "png.h"
 #include "../../file.h"
 #include "../../endian.h"
+#include "../../zz/miniz/miniz.h"
 
 #define IM_PNG_TYPE(a,b,c,d)  (((unsigned)(a) << 24) + ((unsigned)(b) << 16)  \
                              + ((unsigned)(c) << 8)  + (unsigned)(d))
@@ -160,6 +161,9 @@ png_dec(ImImage         ** __restrict dest,
       }
       case IM_PNG_TYPE('I','D','A','T'): {
         printf("idat -- p: %p\n", p);
+        memcpy(im->data.data, p, chk_len);
+        
+        mz_uncompress(im->data.data, &im->len, p, chk_len);
         break;
       }
       case IM_PNG_TYPE('I','E','N','D'): {
