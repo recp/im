@@ -32,12 +32,6 @@ png_dec(ImImage         ** __restrict dest,
   ImFileResult        fres;
   ImByte              pal[1024], pal_img_n;
   bool                is_cgbi;
-  
-//  Bit depth  1 byte
-//  Colour type  1 byte
-//  Compression method  1 byte
-//  Filter method  1 byte
-//  Interlace method  1 byte
 
   im   = NULL;
   fres = im_readfile(path, open_config->openIntent != IM_OPEN_INTENT_READWRITE);
@@ -182,11 +176,11 @@ nx:
   
   *dest = im;
   im->file = fres;
-  
-  //  if (fres.mmap) {
-  //    im_unmap(fres.raw, fres.size);
-  //  }
-  
+
+  if (fres.mmap) {
+    im_unmap(fres.raw, fres.size);
+  }
+
   return IM_OK;
 err:
   if (fres.mmap) {
