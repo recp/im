@@ -133,6 +133,35 @@ im_cgimage(ImImage *im, bool copydata) {
 
 /* AppKit */
 
+@interface NSImage(ImImage)
+- (instancetype)initWithImImage:(NSString *)path copydata:(BOOL)copydata;
+- (instancetype)initWithImImage:(NSString *)path;
+@end
+
+@implementation NSImage(ImImage)
+
+- (instancetype)initWithImImage:(NSString *)path copydata:(BOOL)copydata {
+  ImImage   *im;
+  CGImageRef cgImage;
+  
+  im_load(&im,
+          [path cStringUsingEncoding: NSUTF8StringEncoding],
+          NULL,
+          IM_OPEN_INTENT_READONLY);
+
+  if (!(cgImage = im_cgimage(im, copydata)))
+    return nil;
+  
+  return [self initWithCGImage: cgImage
+                          size: CGSizeMake(im->width, im->height)];
+}
+
+- (instancetype)initWithImImage:(NSString *)path {
+  return [self initWithImImage: path copydata: NO];
+}
+
+@end
+
 NSImage*
 im_nsimage(ImImage * __restrict im, bool copydata) {
   CGImageRef cgImage;
