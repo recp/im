@@ -132,6 +132,10 @@ png_dec(ImImage         ** __restrict dest,
           default:
             goto err;  /* invalid color type */
         }
+        
+        /* TODO: */
+        im->len       = (im->bytesPerPixel + im->row_pad_last) * im->width * im->height;
+        im->data.data = malloc(im->len);
         break;
       }
       case IM_PNG_TYPE('P','L','T','E'): {
