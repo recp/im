@@ -136,7 +136,7 @@ png_dec(ImImage         ** __restrict dest,
             im->alphaInfo     = IM_ALPHA_LAST;
             break;
           default:
-            break;
+            goto err;  /* invalid color type */
         }
         break;
       }
