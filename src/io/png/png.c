@@ -51,7 +51,7 @@ png_dec(ImImage         ** __restrict dest,
   ImImage            *im;
   ImByte             *p, *p_chk, *row, *p_row, bitdepth, color, compr, interlace;
   im_png_filter_t     filter;
-  uint32_t            dataoff, chk_len, chk_type, pal_len, i, j, width, height, src_bpr;
+  uint32_t            dataoff, chk_len, chk_type, pal_len, i, j, width, height, src_bpr, bpp;
   ImFileResult        fres;
   ImByte              pal[1024], pal_img_n;
   bool                is_cgbi;
@@ -88,7 +88,7 @@ png_dec(ImImage         ** __restrict dest,
   im->byteOrder      = IM_BYTEORDER_HOST; /* convert to host */
   im->ori            = IM_ORIENTATION_UP;
   im->fileFormatType = IM_FILEFORMATTYPE_PNG;
-  pal_img_n          = height = width = 0;
+  pal_img_n          = height = width = bpp = 0;
 
   for (;;) {
     chk_len  = im_get_u32_endian(p, false); p += 4;
@@ -124,31 +124,31 @@ png_dec(ImImage         ** __restrict dest,
         switch (color) {
           case 0:
             im->bitsPerPixel  = im->bitsPerComponent;
-            im->bytesPerPixel = im->bitsPerComponent == 16 ? 2 : 1;
+            im->bytesPerPixel = bpp = im->bitsPerComponent == 16 ? 2 : 1;
             im->format        = IM_FORMAT_GRAY;
             im->alphaInfo     = IM_ALPHA_NONE;
             break;
           case 2:
             im->bitsPerPixel  = im->bitsPerComponent * 3;
-            im->bytesPerPixel = (im->bitsPerComponent == 16 ? 2 : 1) * 3;
+            im->bytesPerPixel = bpp = (im->bitsPerComponent == 16 ? 2 : 1) * 3;
             im->format        = IM_FORMAT_RGB;
             im->alphaInfo     = IM_ALPHA_NONE;
             break;
           case 3:
             im->bitsPerPixel  = im->bitsPerComponent * 4; /* TODO: check plt to get color type */
-            im->bytesPerPixel = (im->bitsPerComponent == 16 ? 2 : 1) * 4;
+            im->bytesPerPixel = bpp = (im->bitsPerComponent == 16 ? 2 : 1) * 4;
             im->format        = IM_FORMAT_RGB;
             im->alphaInfo     = IM_ALPHA_NONE;
             break;
           case 4:
             im->bitsPerPixel  = im->bitsPerComponent * 2;
-            im->bytesPerPixel = (im->bitsPerComponent == 16 ? 2 : 1) * 2;
+            im->bytesPerPixel = bpp = (im->bitsPerComponent == 16 ? 2 : 1) * 2;
             im->format        = IM_FORMAT_GRAY_ALPHA;
             im->alphaInfo     = IM_ALPHA_LAST;
             break;
           case 6:
             im->bitsPerPixel  = im->bitsPerComponent * 4;
-            im->bytesPerPixel = (im->bitsPerComponent == 16 ? 2 : 1) * 4;
+            im->bytesPerPixel = bpp = (im->bitsPerComponent == 16 ? 2 : 1) * 4;
             im->format        = IM_FORMAT_RGBA;
             im->alphaInfo     = IM_ALPHA_LAST;
             break;
@@ -157,7 +157,7 @@ png_dec(ImImage         ** __restrict dest,
         }
         
         /* TODO: */
-        im->len       = (im->bytesPerPixel + im->row_pad_last) * (width + 1) * height;
+        im->len       = (bpp + im->row_pad_last) * (width + 1) * height;
         im->data.data = malloc(im->len);
         break;
       }
@@ -197,7 +197,7 @@ png_dec(ImImage         ** __restrict dest,
 
 nx:
 
-  src_bpr = im->bytesPerPixel * width;
+  src_bpr = bpp * width;
   row = p = im->data.data;
 
   /*undo filter */
@@ -207,9 +207,10 @@ nx:
         memmove(row - i, row + 1, src_bpr);
         break;
       case IM_PNG_FILTER_SUB:
-        p[0] = row[1];
-        for (j = 1; j < width; j++) {
-          p[j] = row[j + 1] + p[j - 1];
+        /* TODO: optimize to get rid of memcpy */
+        memcpy(p, row + 1, bpp);
+        for (j = bpp; j < src_bpr; j++) {
+          p[j] = row[j + 1] + p[j - bpp];
         }
         break;
       default:
