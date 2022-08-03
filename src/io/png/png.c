@@ -123,32 +123,32 @@ png_dec(ImImage         ** __restrict dest,
         
         switch (color) {
           case 0:
-            im->bitsPerPixel  = im->bitsPerComponent;
-            im->bytesPerPixel = bpp = im->bitsPerComponent == 16 ? 2 : 1;
+            im->bitsPerPixel  = bitdepth;
+            im->bytesPerPixel = bpp = bitdepth == 16 ? 2 : 1;
             im->format        = IM_FORMAT_GRAY;
             im->alphaInfo     = IM_ALPHA_NONE;
             break;
           case 2:
-            im->bitsPerPixel  = im->bitsPerComponent * 3;
-            im->bytesPerPixel = bpp = (im->bitsPerComponent == 16 ? 2 : 1) * 3;
+            im->bitsPerPixel  = bitdepth * 3;
+            im->bytesPerPixel = bpp = (bitdepth == 16 ? 2 : 1) * 3;
             im->format        = IM_FORMAT_RGB;
             im->alphaInfo     = IM_ALPHA_NONE;
             break;
           case 3:
-            im->bitsPerPixel  = im->bitsPerComponent * 4; /* TODO: check plt to get color type */
-            im->bytesPerPixel = bpp = (im->bitsPerComponent == 16 ? 2 : 1) * 4;
+            im->bitsPerPixel  = bitdepth * 4; /* TODO: check plt to get color type */
+            im->bytesPerPixel = bpp = (bitdepth == 16 ? 2 : 1) * 4;
             im->format        = IM_FORMAT_RGB;
             im->alphaInfo     = IM_ALPHA_NONE;
             break;
           case 4:
-            im->bitsPerPixel  = im->bitsPerComponent * 2;
-            im->bytesPerPixel = bpp = (im->bitsPerComponent == 16 ? 2 : 1) * 2;
+            im->bitsPerPixel  = bitdepth * 2;
+            im->bytesPerPixel = bpp = (bitdepth == 16 ? 2 : 1) * 2;
             im->format        = IM_FORMAT_GRAY_ALPHA;
             im->alphaInfo     = IM_ALPHA_LAST;
             break;
           case 6:
-            im->bitsPerPixel  = im->bitsPerComponent * 4;
-            im->bytesPerPixel = bpp = (im->bitsPerComponent == 16 ? 2 : 1) * 4;
+            im->bitsPerPixel  = bitdepth * 4;
+            im->bytesPerPixel = bpp = (bitdepth == 16 ? 2 : 1) * 4;
             im->format        = IM_FORMAT_RGBA;
             im->alphaInfo     = IM_ALPHA_LAST;
             break;
