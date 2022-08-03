@@ -371,4 +371,42 @@ im_memcpy(char * __restrict dst, const char * __restrict src, size_t size) {
   memcpy(dst, src, size);
 }
 
+IM_INLINE
+void
+im_pixcpy(void * __restrict dst, const void * __restrict src, uint8_t bpp) {
+  /*
+   int32_t m, c, i;
+   
+   m     = size % 16;
+   size -= m;
+   c     = size / 16;
+   
+   for (i = 0; i < c; i+=2) {
+   _mm_storeu_si128(&dst[i*16],       _mm_loadu_si128((__m128i *)&src[i*16]));
+   _mm_storeu_si128(&dst[(i + 1)*16], _mm_loadu_si128((__m128i *)&src[(i + 1)*16]));
+   }
+   
+   //      int n = (count + 7) / 8;      // n is now 3.  (The "while" is going
+   //      //              to be run three times.)
+   //
+   //      switch (count % 8) {          // The remainder is 4 (20 modulo 8) so
+   //          // jump to the case 4
+   //
+   //        case 0:
+   //          do {
+   //            *pd++ = *p++;
+   //          case 7:      *pd++ = *p++;
+   //          case 6:      *pd++ = *p++;
+   //          case 5:      *pd++ = *p++;
+   //          case 4:      *pd++ = *p++;
+   //          case 3:      *pd++ = *p++;
+   //          case 2:      *pd++ = *p++;
+   //          case 1:      *pd++ = *p++;
+   //          } while (--n > 0);
+   //      }
+   */
+  
+  memcpy(dst, src, bpp);
+}
+
 #endif /* src_common_h */

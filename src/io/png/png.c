@@ -214,8 +214,7 @@ nx:
         memmove(row - i, row + 1, src_bpr);
         break;
       case IM_PNG_FILTER_SUB:
-        /* TODO: optimize to get rid of memcpy */
-        memcpy(p, row + 1, bpp);
+        im_pixcpy(p, row + 1, bpp);
         for (j = bpp; j < src_bpr; j++) {
           p[j] = row[j + 1] + p[j - bpp];
         }
