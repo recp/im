@@ -201,7 +201,7 @@ nx:
   row = p = im->data.data;
   pri = p;
   i   = 0;
-  
+
   /*undo filter */
 
   switch ((int)*row) {
@@ -214,16 +214,21 @@ nx:
         p[j] = row[j + 1] + (p[j - bpp] >> 1);
       }
       goto nx_row;
+    case IM_PNG_FILTER_PAETH:
+      im_pixcpy(p, row + 1, bpp);
+      for (j = bpp; j < src_bpr; j++) {
+        p[j] = row[j + 1] + paeth(p[j - bpp], 0, 0);
+      }
+      goto nx_row;
     default: break;
   }
 
-  for (; i < height; ) {
+  for (; i < height;) {
     switch ((int)*row) {
       case IM_PNG_FILTER_NONE:
         memmove(row - i, row + 1, src_bpr);
         break;
       case IM_PNG_FILTER_SUB:
-      sub:
         im_pixcpy(p, row + 1, bpp);
         for (j = bpp; j < src_bpr; j++) {
           p[j] = row[j + 1] + p[j - bpp];
@@ -244,7 +249,13 @@ nx:
         }
         break;
       case IM_PNG_FILTER_PAETH:
+        for (j = 0; j < bpp; j++) {
+          p[j] = row[j + 1] + paeth(0, pri[j], 0);
+        }
 
+        for (j = bpp; j < src_bpr; j++) {
+          p[j] = row[j + 1] + paeth(p[j - bpp], pri[j], pri[j - bpp]);
+        }
         break;
       default:
         goto err; /* unknown or unimplemented filter */
