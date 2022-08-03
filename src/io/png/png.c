@@ -49,7 +49,7 @@ png_dec(ImImage         ** __restrict dest,
         const char       * __restrict path,
         im_open_config_t * __restrict open_config) {
   ImImage            *im;
-  ImByte             *p, *p_chk, *row, *p_row, bitdepth, color, compr, interlace;
+  ImByte             *p, *p_chk, *row, *pri, bitdepth, color, compr, interlace;
   im_png_filter_t     filter;
   uint32_t            dataoff, chk_len, chk_type, pal_len, i, j, width, height, src_bpr, bpp;
   ImFileResult        fres;
@@ -199,9 +199,16 @@ nx:
 
   src_bpr = bpp * width;
   row = p = im->data.data;
+  pri = p;
+  i   = 0;
+
+  if ((int)*row == IM_PNG_FILTER_UP) {
+    memmove(p, row + 1, src_bpr);
+    goto nx_row;
+  }
 
   /*undo filter */
-  for (i = 0; i < height; i++) {
+  for (; i < height; i++) {
     switch ((int)*row) {
       case IM_PNG_FILTER_NONE:
         memmove(row - i, row + 1, src_bpr);
@@ -213,12 +220,19 @@ nx:
           p[j] = row[j + 1] + p[j - bpp];
         }
         break;
+      case IM_PNG_FILTER_UP:
+        for (j = 0; j < src_bpr; j++) {
+          p[j] = row[j + 1] + pri[j];
+        }
+        break;
       default:
         assert(true);
         break;
     }
 
+  nx_row:
     row += src_bpr + 1;
+    pri  = p;
     p   += src_bpr;
   }
 
