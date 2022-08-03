@@ -201,19 +201,29 @@ nx:
   row = p = im->data.data;
   pri = p;
   i   = 0;
+  
+  /*undo filter */
 
-  if ((int)*row == IM_PNG_FILTER_UP) {
-    memmove(p, row + 1, src_bpr);
-    goto nx_row;
+  switch ((int)*row) {
+    case IM_PNG_FILTER_UP:
+      memmove(p, row + 1, src_bpr);
+      goto nx_row;
+    case IM_PNG_FILTER_AVG:
+      im_pixcpy(p, row + 1, bpp);
+      for (j = bpp; j < src_bpr; j++) {
+        p[j] = row[j + 1] + (p[j - bpp] >> 1);
+      }
+      goto nx_row;
+    default: break;
   }
 
-  /*undo filter */
-  for (; i < height; i++) {
+  for (; i < height; ) {
     switch ((int)*row) {
       case IM_PNG_FILTER_NONE:
         memmove(row - i, row + 1, src_bpr);
         break;
       case IM_PNG_FILTER_SUB:
+      sub:
         im_pixcpy(p, row + 1, bpp);
         for (j = bpp; j < src_bpr; j++) {
           p[j] = row[j + 1] + p[j - bpp];
@@ -224,15 +234,27 @@ nx:
           p[j] = row[j + 1] + pri[j];
         }
         break;
-      default:
-        assert(true);
+      case IM_PNG_FILTER_AVG:
+        for (j = 0; j < bpp; j++) {
+          p[j] = row[j + 1] + ((pri[j]) >> 1);
+        }
+
+        for (j = bpp; j < src_bpr; j++) {
+          p[j] = row[j + 1] + ((p[j - bpp] + pri[j]) >> 1);
+        }
         break;
+      case IM_PNG_FILTER_PAETH:
+
+        break;
+      default:
+        goto err; /* unknown or unimplemented filter */
     }
 
   nx_row:
     row += src_bpr + 1;
     pri  = p;
     p   += src_bpr;
+    i++;
   }
 
   *dest = im;
