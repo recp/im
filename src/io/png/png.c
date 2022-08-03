@@ -51,7 +51,7 @@ png_dec(ImImage         ** __restrict dest,
   ImImage            *im;
   ImByte             *p, *p_chk, *row, *pri, bitdepth, color, compr, interlace;
   im_png_filter_t     filter;
-  uint32_t            dataoff, chk_len, chk_type, pal_len, i, j, width, height, src_bpr, bpp;
+  uint32_t            dataoff, chk_len, chk_type, pal_len, i, j, width, height, src_bpr, bpp, bpc;
   ImFileResult        fres;
   ImByte              pal[1024], pal_img_n;
   bool                is_cgbi;
@@ -100,14 +100,15 @@ png_dec(ImImage         ** __restrict dest,
         is_cgbi = true;
         break;
       case IM_PNG_TYPE('I','H','D','R'): {
-        im->width  = width  = im_get_u32_endian(p, false); p += 4;
-        im->height = height = im_get_u32_endian(p, false); p += 4;
-        bitdepth   = *p++;
-        color      = *p++;
-        compr      = *p++;
-        filter     = *p++;
-        interlace  = *p;
-        
+        im->width            = width  = im_get_u32_endian(p, false); p += 4;
+        im->height           = height = im_get_u32_endian(p, false); p += 4;
+        bitdepth             = *p++;
+        color                = *p++;
+        compr                = *p++;
+        filter               = *p++;
+        interlace            = *p;
+
+        bpc                  = bitdepth == 16 ? 2 : 1;
         im->bitsPerComponent = bitdepth;
         
         /*
@@ -124,31 +125,31 @@ png_dec(ImImage         ** __restrict dest,
         switch (color) {
           case 0:
             im->bitsPerPixel  = bitdepth;
-            im->bytesPerPixel = bpp = bitdepth == 16 ? 2 : 1;
+            im->bytesPerPixel = bpp = bpc;
             im->format        = IM_FORMAT_GRAY;
             im->alphaInfo     = IM_ALPHA_NONE;
             break;
           case 2:
             im->bitsPerPixel  = bitdepth * 3;
-            im->bytesPerPixel = bpp = (bitdepth == 16 ? 2 : 1) * 3;
+            im->bytesPerPixel = bpp = bpc * 3;
             im->format        = IM_FORMAT_RGB;
             im->alphaInfo     = IM_ALPHA_NONE;
             break;
           case 3:
             im->bitsPerPixel  = bitdepth * 4; /* TODO: check plt to get color type */
-            im->bytesPerPixel = bpp = (bitdepth == 16 ? 2 : 1) * 4;
+            im->bytesPerPixel = bpp = bpc * 4;
             im->format        = IM_FORMAT_RGB;
             im->alphaInfo     = IM_ALPHA_NONE;
             break;
           case 4:
             im->bitsPerPixel  = bitdepth * 2;
-            im->bytesPerPixel = bpp = (bitdepth == 16 ? 2 : 1) * 2;
+            im->bytesPerPixel = bpp = bpc * 2;
             im->format        = IM_FORMAT_GRAY_ALPHA;
             im->alphaInfo     = IM_ALPHA_LAST;
             break;
           case 6:
             im->bitsPerPixel  = bitdepth * 4;
-            im->bytesPerPixel = bpp = (bitdepth == 16 ? 2 : 1) * 4;
+            im->bytesPerPixel = bpp = bpc * 4;
             im->format        = IM_FORMAT_RGBA;
             im->alphaInfo     = IM_ALPHA_LAST;
             break;
