@@ -22,14 +22,23 @@
 #define IM_PNG_TYPE(a,b,c,d)  (((unsigned)(a) << 24) + ((unsigned)(b) << 16)  \
                              + ((unsigned)(c) << 8)  + (unsigned)(d))
 
+typedef enum im_png_filter_t {
+  IM_PNG_FILTER_NONE  = 0,
+  IM_PNG_FILTER_SUB   = 1,
+  IM_PNG_FILTER_UP    = 2,
+  IM_PNG_FILTER_AVG   = 3,
+  IM_PNG_FILTER_PAETH = 4
+} im_png_filter_t;
+
 IM_HIDE
 ImResult
 png_dec(ImImage         ** __restrict dest,
         const char       * __restrict path,
         im_open_config_t * __restrict open_config) {
   ImImage            *im;
-  ImByte             *p, *p_chk, bitdepth, color, compr, filter, interlace, i;
-  uint32_t            dataoff, chk_len, chk_type, pal_len;
+  ImByte             *p, *p_chk, *row, *p_row, bitdepth, color, compr, interlace;
+  im_png_filter_t     filter;
+  uint32_t            dataoff, chk_len, chk_type, pal_len, i, j, height, src_bpr;
   ImFileResult        fres;
   ImByte              pal[1024], pal_img_n;
   bool                is_cgbi;
@@ -62,11 +71,11 @@ png_dec(ImImage         ** __restrict dest,
   p += 8;
 
   im->file           = fres;
-  im->openIntent     = IM_OPEN_INTENT_READONLY;
+  im->openIntent     = open_config->openIntent;
   im->byteOrder      = IM_BYTEORDER_HOST; /* convert to host */
   im->ori            = IM_ORIENTATION_UP;
   im->fileFormatType = IM_FILEFORMATTYPE_PNG;
-  pal_img_n          = 0;
+  pal_img_n          = height = 0;
 
   for (;;) {
     chk_len  = im_get_u32_endian(p, false); p += 4;
@@ -79,7 +88,7 @@ png_dec(ImImage         ** __restrict dest,
         break;
       case IM_PNG_TYPE('I','H','D','R'): {
         im->width  = im_get_u32_endian(p, false); p += 4;
-        im->height = im_get_u32_endian(p, false); p += 4;
+        im->height = height = im_get_u32_endian(p, false); p += 4;
         bitdepth   = *p++;
         color      = *p++;
         compr      = *p++;
@@ -135,7 +144,7 @@ png_dec(ImImage         ** __restrict dest,
         }
         
         /* TODO: */
-        im->len       = (im->bytesPerPixel + im->row_pad_last) * im->width * im->height;
+        im->len       = (im->bytesPerPixel + im->row_pad_last) * (im->width + 1) * height;
         im->data.data = malloc(im->len);
         break;
       }
@@ -161,8 +170,7 @@ png_dec(ImImage         ** __restrict dest,
       }
       case IM_PNG_TYPE('I','D','A','T'): {
         printf("idat -- p: %p\n", p);
-        memcpy(im->data.data, p, chk_len);
-        
+
         mz_uncompress(im->data.data, &im->len, p, chk_len);
         break;
       }
@@ -175,13 +183,23 @@ png_dec(ImImage         ** __restrict dest,
   }
 
 nx:
-//  if (dib_dec_mem(im,
-//                  p,
-//                  (char *)fres.raw + dataoff,
-//                  (char *)fres.raw + fres.size - 1) != IM_OK) {
-//    goto err;
-//  }
-  
+
+  src_bpr = im->bytesPerPixel * im->width;
+  row = p = im->data.data;
+
+  /*undo filter */
+  for (i = 0; i < height; i++) {
+    switch ((int)*p) {
+      case 0:
+        memmove(p - i, p + 1, src_bpr);
+        p += src_bpr + 1;
+        break;
+      default:
+        assert(true);
+        break;
+    }
+  }
+
   *dest = im;
   im->file = fres;
 
