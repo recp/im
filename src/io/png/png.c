@@ -30,6 +30,19 @@ typedef enum im_png_filter_t {
   IM_PNG_FILTER_PAETH = 4
 } im_png_filter_t;
 
+IM_INLINE int paeth(int a, int b, int c) {
+  int p, pa, pb, pc;
+
+  p  = a + b - c;
+  pa = abs(p - a);
+  pb = abs(p - b);
+  pc = abs(p - c);
+
+  if (pa <= pb && pa <= pc) return a;
+  else if (pb <= pc)        return b;
+  else                      return c;
+}
+
 IM_HIDE
 ImResult
 png_dec(ImImage         ** __restrict dest,
@@ -38,7 +51,7 @@ png_dec(ImImage         ** __restrict dest,
   ImImage            *im;
   ImByte             *p, *p_chk, *row, *p_row, bitdepth, color, compr, interlace;
   im_png_filter_t     filter;
-  uint32_t            dataoff, chk_len, chk_type, pal_len, i, j, height, src_bpr;
+  uint32_t            dataoff, chk_len, chk_type, pal_len, i, j, width, height, src_bpr;
   ImFileResult        fres;
   ImByte              pal[1024], pal_img_n;
   bool                is_cgbi;
@@ -75,7 +88,7 @@ png_dec(ImImage         ** __restrict dest,
   im->byteOrder      = IM_BYTEORDER_HOST; /* convert to host */
   im->ori            = IM_ORIENTATION_UP;
   im->fileFormatType = IM_FILEFORMATTYPE_PNG;
-  pal_img_n          = height = 0;
+  pal_img_n          = height = width = 0;
 
   for (;;) {
     chk_len  = im_get_u32_endian(p, false); p += 4;
@@ -87,7 +100,7 @@ png_dec(ImImage         ** __restrict dest,
         is_cgbi = true;
         break;
       case IM_PNG_TYPE('I','H','D','R'): {
-        im->width  = im_get_u32_endian(p, false); p += 4;
+        im->width  = width  = im_get_u32_endian(p, false); p += 4;
         im->height = height = im_get_u32_endian(p, false); p += 4;
         bitdepth   = *p++;
         color      = *p++;
@@ -144,7 +157,7 @@ png_dec(ImImage         ** __restrict dest,
         }
         
         /* TODO: */
-        im->len       = (im->bytesPerPixel + im->row_pad_last) * (im->width + 1) * height;
+        im->len       = (im->bytesPerPixel + im->row_pad_last) * (width + 1) * height;
         im->data.data = malloc(im->len);
         break;
       }
@@ -184,20 +197,28 @@ png_dec(ImImage         ** __restrict dest,
 
 nx:
 
-  src_bpr = im->bytesPerPixel * im->width;
+  src_bpr = im->bytesPerPixel * width;
   row = p = im->data.data;
 
   /*undo filter */
   for (i = 0; i < height; i++) {
-    switch ((int)*p) {
-      case 0:
-        memmove(p - i, p + 1, src_bpr);
-        p += src_bpr + 1;
+    switch ((int)*row) {
+      case IM_PNG_FILTER_NONE:
+        memmove(row - i, row + 1, src_bpr);
+        break;
+      case IM_PNG_FILTER_SUB:
+        p[0] = row[1];
+        for (j = 1; j < width; j++) {
+          p[j] = row[j + 1] + p[j - 1];
+        }
         break;
       default:
         assert(true);
         break;
     }
+
+    row += src_bpr + 1;
+    p   += src_bpr;
   }
 
   *dest = im;
