@@ -63,6 +63,7 @@ im_cgimage(ImImage *im, bool copydata) {
     case IM_FORMAT_BGR0:
     case IM_FORMAT_CMYK:       ncomp = 4; break;
     case IM_FORMAT_GRAY:
+    case IM_FORMAT_GRAY_ALPHA:
     case IM_FORMAT_BLACKWHITE: ncomp = 1; break; /* TODO: ? */
     default:
       return NULL;
