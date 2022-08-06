@@ -59,7 +59,10 @@
 #define IM_ARRAY_NLINE_CHECK   (c == '\n' || c == '\r')
 
 typedef struct im_open_config_t {
-  ImOpenIntent openIntent;
+  ImOpenIntent      openIntent;
+  ImByteOrder       byteOrder;
+  uint32_t          rowPadding;
+  im_option_base_t **options;
 } im_open_config_t;
 
 typedef struct ImQuantTbl {

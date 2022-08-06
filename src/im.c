@@ -110,10 +110,11 @@ im_load(ImImage         ** __restrict dest,
         const char       * __restrict url,
         im_option_base_t *            options[],
         ImOpenIntent                  openIntent) {
-  floader_t  *floader;
-  const char *localurl;
-  int         file_type;
-  int         _err_no;
+  im_option_base_t *opt;
+  floader_t        *floader;
+  const char       *localurl;
+  int               file_type;
+  int               _err_no, i;
 
   file_type = IM_FILE_TYPE_AUTO;
 
@@ -123,8 +124,26 @@ im_load(ImImage         ** __restrict dest,
     return IM_EBADF;
   
   im_open_config_t open_conf = {0};
+  
+  /*defaults  */
   open_conf.openIntent = openIntent;
+  open_conf.byteOrder  = IM_BYTEORDER_ANY;
+  open_conf.rowPadding = 0;
+  
+  /* override defaults */
+  open_conf.options    = options;
 
+  i = 0;
+  if (options && (opt = options[i])) {
+    do {
+      switch (opt->type) {
+        case IM_OPTION_ROW_PAD_LAST:   open_conf.rowPadding = ((im_option_rowpadding_t *)opt)->pad;     break;
+        case IM_OPTION_BYTE_ORDER:     open_conf.byteOrder = ((im_option_byteorder_t *)opt)->order;     break;
+        default:
+          break;
+      }
+    } while ((opt = options[++i]));
+  }
   
   floader_t floaders[] = {
     

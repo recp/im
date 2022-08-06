@@ -53,15 +53,19 @@ png_dec(ImImage         ** __restrict dest,
         im_open_config_t * __restrict open_config) {
   ImImage            *im;
   ImByte             *p, *p_chk, *row, *pri, bitdepth, color, compr, interlace;
+  size_t              len;
   im_png_filter_t     filter;
-  uint32_t            dataoff, chk_len, chk_type, pal_len, i, j, width, height, src_bpr, bpp, bpc;
+  uint32_t            dataoff, chk_len, chk_type, pal_len, i, j, width, height, src_bpr, bpp, bpc, zippedlen;
+  uint16_t           *p16;
   ImFileResult        fres;
   ImByte              pal[1024], pal_img_n;
   bool                is_cgbi;
 
-  im   = NULL;
-  fres = im_readfile(path, open_config->openIntent != IM_OPEN_INTENT_READWRITE);
-  
+  im     = NULL;
+  row    = NULL;
+  zipped = NULL;
+  fres   = im_readfile(path, open_config->openIntent != IM_OPEN_INTENT_READWRITE);
+
   if (fres.ret != IM_OK) {
     goto err;
   }
@@ -88,10 +92,10 @@ png_dec(ImImage         ** __restrict dest,
 
   im->file           = fres;
   im->openIntent     = open_config->openIntent;
-  im->byteOrder      = IM_BYTEORDER_HOST; /* convert to host */
+  im->byteOrder      = open_config->byteOrder;
   im->ori            = IM_ORIENTATION_UP;
   im->fileFormatType = IM_FILEFORMATTYPE_PNG;
-  pal_img_n          = height = width = bpp = 0;
+  pal_img_n          = height = width = bpp = bpc = zippedlen = 0;
 
   for (;;) {
     chk_len  = im_get_u32_endian(p, false); p += 4;
@@ -270,6 +274,27 @@ nx:
     pri  = p;
     p   += src_bpr;
     i++;
+  }
+
+  switch (open_config->byteOrder) {
+    case IM_BYTEORDER_LITTLE_ENDIAN:
+      if (bpc == 2) {
+        for (p16 = im->data.data, i = 0; i < (len >> 1); i++) {
+          p16[i] = bswapu16(p16[i]);
+        }
+      }
+      break;
+    case IM_BYTEORDER_HOST:
+#if __BYTE_ORDER__ != __ORDER_BIG_ENDIAN__
+      if (bpc == 2) {
+        for (p16 = im->data.data, i = 0; i < (len >> 1); i++) {
+          p16[i] = bswapu16(p16[i]);
+        }
+      }
+#endif
+      break;
+    default: /* _ANY, _BIG_ENDIAN == noop */
+      break;
   }
 
   *dest = im;

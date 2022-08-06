@@ -129,12 +129,6 @@ typedef enum ImOpenIntent {
   IM_OPEN_INTENT_READWRITE
 } ImOpenIntent;
 
-typedef enum ImByteOrder {
-  IM_BYTEORDER_HOST          = 0, /* default */
-  IM_BYTEORDER_LITTLE_ENDIAN = 1,
-  IM_BYTEORDER_BIG_EDIAN     = 2
-} ImByteOrder;
-
 typedef struct ImImage {
   ImFileResult      file;
   ImImageData       data;

@@ -22,14 +22,21 @@ extern "C" {
 
 #include "common.h"
 
+typedef enum ImByteOrder {
+  IM_BYTEORDER_HOST          = 0, /* default */
+  IM_BYTEORDER_LITTLE_ENDIAN = 1,
+  IM_BYTEORDER_BIG_EDIAN     = 2,
+  IM_BYTEORDER_ANY           = 3
+} ImByteOrder;
+
 typedef enum im_option_type_t {
   IM_OPTION_ROW_PAD_LAST           = 0,
   IM_OPTION_SUPPORTED_FORMATS      = 1,
   IM_OPTION_SUPPORTED_ORIENTATIONS = 2,
   IM_OPTION_SUPPORTED_COMPRESSIONS = 3,
   IM_OPTION_USE_MMAP_FOR_WINDOWS   = 4,
-  
-  
+  IM_OPTION_BYTE_ORDER             = 5, /* any */
+
   /*
    from bmpsuite:
    Some viewers make undefined pixels transparent, others make them black,
@@ -51,6 +58,11 @@ typedef struct im_option_rowpadding_t {
   uint32_t         pad;
 } im_option_rowpadding_t;
 
+typedef struct im_option_byteorder_t {
+  im_option_base_t base;
+  ImByteOrder      order;
+} im_option_byteorder_t;
+
 IM_INLINE
 im_option_rowpadding_t
 im_option_row_padding(uint32_t last) {
@@ -60,6 +72,17 @@ im_option_row_padding(uint32_t last) {
   pad.pad       = last;
 
   return pad;
+}
+
+IM_INLINE
+im_option_byteorder_t
+im_option_row_byteorder(ImByteOrder order) {
+  im_option_byteorder_t op;
+  
+  op.base.type = IM_OPTION_BYTE_ORDER;
+  op.order     = order;
+  
+  return op;
 }
 
 #ifdef __cplusplus
