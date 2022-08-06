@@ -17,7 +17,7 @@
 #include "png.h"
 #include "../../file.h"
 #include "../../endian.h"
-#include "../../zz/miniz/miniz.h"
+#include "../../zz/zz.h"
 
 #define IM_PNG_TYPE(a,b,c,d)  (((unsigned)(a) << 24) + ((unsigned)(b) << 16)  \
                              + ((unsigned)(c) << 8)  + (unsigned)(d))
@@ -51,7 +51,9 @@ ImResult
 png_dec(ImImage         ** __restrict dest,
         const char       * __restrict path,
         im_open_config_t * __restrict open_config) {
+  zz_stream_t         zip_stream = {0};
   ImImage            *im;
+  ImByte             *zipped;
   ImByte             *p, *p_chk, *row, *pri, bitdepth, color, compr, interlace;
   size_t              len;
   im_png_filter_t     filter;
@@ -166,8 +168,9 @@ png_dec(ImImage         ** __restrict dest,
         }
         
         /* TODO: */
-        im->len       = (bpp + im->row_pad_last) * (width + 1) * height;
-        im->data.data = malloc(im->len);
+        im->len       = len = (bpp + im->row_pad_last) * (width + 1) * height;
+        im->data.data = malloc(len);
+        zipped        = row = malloc(len);
         break;
       }
       case IM_PNG_TYPE('P','L','T','E'): {
@@ -191,9 +194,11 @@ png_dec(ImImage         ** __restrict dest,
         break;
       }
       case IM_PNG_TYPE('I','D','A','T'): {
-        printf("idat -- p: %p\n", p);
+        // mz_uncompress(im->data.data, &len, p, chk_len);
 
-        mz_uncompress(im->data.data, &im->len, p, chk_len);
+        memcpy(row, p, chk_len);
+        row       += chk_len;
+        zippedlen += chk_len;
         break;
       }
       case IM_PNG_TYPE('I','E','N','D'): {
@@ -205,6 +210,9 @@ png_dec(ImImage         ** __restrict dest,
   }
 
 nx:
+
+  /* TODO: */
+  mz_uncompress(im->data.data, &len, zipped, zippedlen);
 
   src_bpr = bpp * width * ((float)im_minu8(bitdepth, 8) / 8.0f);
   row = p = im->data.data;
