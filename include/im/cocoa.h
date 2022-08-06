@@ -77,7 +77,7 @@ im_cgimage(ImImage *im, bool copydata) {
   
   width       = im->width;
   height      = im->height;
-  bytesPerRow = (uint32_t)(ncomp * width + im->row_pad_last);
+  bytesPerRow = (uint32_t)(im->bytesPerPixel * width + im->row_pad_last);
   
   if (!copydata) {
     data = [NSData dataWithBytesNoCopy: im->data.data length: bytesPerRow * height];
