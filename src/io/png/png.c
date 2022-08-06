@@ -187,10 +187,10 @@ png_dec(ImImage         ** __restrict dest,
           if (chk_len > 256 * 3 || (pal_len = chk_len / 3) * 3 != chk_len)
             goto err; /* invalid PLTE corrupt PNG */
           
-          im->pal->len   = 256 * 3;
-          im->pal->pal   = pal = malloc(im->pal->len);
+          im->pal->len   = chk_len;
+          im->pal->pal   = pal = malloc(chk_len);
           im->pal->white = bitdepth;
-          im->pal->count = pal_len * 3;
+          im->pal->count = pal_len - 1;
           im->alphaInfo  = IM_ALPHA_NONE;
 
           memcpy(pal, p, chk_len);
