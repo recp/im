@@ -126,9 +126,10 @@ im_load(ImImage         ** __restrict dest,
   im_open_config_t open_conf = {0};
   
   /*defaults  */
-  open_conf.openIntent = openIntent;
-  open_conf.byteOrder  = IM_BYTEORDER_ANY;
-  open_conf.rowPadding = 0;
+  open_conf.openIntent  = openIntent;
+  open_conf.byteOrder   = IM_BYTEORDER_ANY;
+  open_conf.rowPadding  = 0;
+  open_conf.supportsPal = true;
   
   /* override defaults */
   open_conf.options    = options;

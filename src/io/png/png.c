@@ -60,7 +60,6 @@ png_dec(ImImage         ** __restrict dest,
   uint32_t            dataoff, chk_len, chk_type, pal_len, i, j, width, height, src_bpr, bpp, bpc, zippedlen;
   uint16_t           *p16;
   ImFileResult        fres;
-  ImByte              pal[1024], pal_img_n;
   bool                is_cgbi;
 
   im     = NULL;
@@ -97,7 +96,7 @@ png_dec(ImImage         ** __restrict dest,
   im->byteOrder      = open_config->byteOrder;
   im->ori            = IM_ORIENTATION_UP;
   im->fileFormatType = IM_FILEFORMATTYPE_PNG;
-  pal_img_n          = height = width = bpp = bpc = zippedlen = 0;
+  height             = width = bpp = bpc = zippedlen = 0;
   bitdepth           = 8;
 
   for (;;) {
@@ -145,12 +144,20 @@ png_dec(ImImage         ** __restrict dest,
             im->format        = IM_FORMAT_RGB;
             im->alphaInfo     = IM_ALPHA_NONE;
             break;
-          case 3:
-            im->bitsPerPixel  = bitdepth * 4; /* TODO: check plt to get color type */
-            im->bytesPerPixel = bpp = bpc * 4;
+          case 3: {
+            /* palette */
+            im_pal_t *pal;
+
+            im->bitsPerPixel  = bitdepth;
+            im->bytesPerPixel = bpp = bpc;
             im->format        = IM_FORMAT_RGB;
             im->alphaInfo     = IM_ALPHA_NONE;
+            
+            pal     = calloc(1, sizeof(*pal));
+            im->pal = pal;
+
             break;
+          }
           case 4:
             im->bitsPerPixel  = bitdepth * 2;
             im->bytesPerPixel = bpp = bpc * 2;
@@ -174,18 +181,19 @@ png_dec(ImImage         ** __restrict dest,
         break;
       }
       case IM_PNG_TYPE('P','L','T','E'): {
-        if (chk_len > 256 * 3)
-          goto err; /* invalid PLTE corrupt PNG */
+        if (im->pal) {
+          ImByte *pal;
+          
+          if (chk_len > 256 * 3 || (pal_len = chk_len / 3) * 3 != chk_len)
+            goto err; /* invalid PLTE corrupt PNG */
+          
+          im->pal->len   = 256 * 3;
+          im->pal->pal   = pal = malloc(im->pal->len);
+          im->pal->white = bitdepth;
+          im->pal->count = pal_len * 3;
+          im->alphaInfo  = IM_ALPHA_NONE;
 
-        pal_len = chk_len / 3;
-        if (pal_len * 3 != chk_len)
-          goto err; /* invalid PLTE corrupt PNG */
-
-        for (i = 0; i < pal_len; ++i) {
-          pal[i * 4 + 0] = *p++;
-          pal[i * 4 + 1] = *p++;
-          pal[i * 4 + 2] = *p++;
-          pal[i * 4 + 3] = 255;
+          memcpy(pal, p, chk_len);
         }
         break;
       }

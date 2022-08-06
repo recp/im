@@ -129,6 +129,13 @@ typedef enum ImOpenIntent {
   IM_OPEN_INTENT_READWRITE
 } ImOpenIntent;
 
+typedef struct im_pal_t {
+  ImByte   *pal;
+  uint32_t  len;
+  uint32_t  count;
+  uint32_t  white;
+} im_pal_t;
+
 typedef struct ImImage {
   ImFileResult      file;
   ImImageData       data;
@@ -152,6 +159,7 @@ typedef struct ImImage {
      Default: BLACK and WHITE
    */
   ImByte            monochrome_colors[2];
+  im_pal_t         *pal;
 } ImImage;
 
 IM_EXPORT

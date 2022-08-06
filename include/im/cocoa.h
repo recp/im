@@ -39,13 +39,15 @@ extern "C" {
 CGImageRef
 im_cgimage(ImImage *im, bool copydata) {
   NSData           *data;
-  CGColorSpaceRef   colorSpace;
+  im_pal_t         *pal;
+  CGColorSpaceRef   baseColorSpace, colorSpace;
   CGDataProviderRef provider;
   CGImageRef        imageRef;
   CGBitmapInfo      bitmapInfo;
   size_t            width, height, bytesPerRow;
   uint32_t          ncomp, bitsPerComponent;
-  
+  bool              paletted;
+
   if (!im)
     return NULL;
 
@@ -85,15 +87,23 @@ im_cgimage(ImImage *im, bool copydata) {
     data = [NSData dataWithBytes:       im->data.data length: bytesPerRow * height];
   }
 
+  /* base color space */
   if (ncomp == 1) {
     /* CGColorSpaceCreateWithName(kCGColorSpaceLinearGray) */
-    colorSpace = CGColorSpaceCreateDeviceGray();
+    baseColorSpace = CGColorSpaceCreateDeviceGray();
   } else {
     if (im->format != IM_FORMAT_CMYK) {
-      colorSpace = CGColorSpaceCreateDeviceRGB();
+      baseColorSpace = CGColorSpaceCreateDeviceRGB();
     } else {
-      colorSpace = CGColorSpaceCreateDeviceCMYK();
+      baseColorSpace = CGColorSpaceCreateDeviceCMYK();
     }
+  }
+
+  /* palette */
+  if (!(paletted = ((pal = im->pal) && pal->pal))) {
+    colorSpace = baseColorSpace;
+  } else {
+    colorSpace = CGColorSpaceCreateIndexed(baseColorSpace, pal->count, pal->pal);
   }
 
 #if __has_feature(objc_arc)
@@ -171,7 +181,11 @@ im_cgimage(ImImage *im, bool copydata) {
                              );
 
   CGDataProviderRelease(provider);
-  CGColorSpaceRelease(colorSpace);
+  CGColorSpaceRelease(baseColorSpace);
+
+  if (colorSpace != baseColorSpace) {
+    CGColorSpaceRelease(colorSpace);
+  }
 
   return imageRef;
 }

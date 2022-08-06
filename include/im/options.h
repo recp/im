@@ -35,7 +35,8 @@ typedef enum im_option_type_t {
   IM_OPTION_SUPPORTED_ORIENTATIONS = 2,
   IM_OPTION_SUPPORTED_COMPRESSIONS = 3,
   IM_OPTION_USE_MMAP_FOR_WINDOWS   = 4,
-  IM_OPTION_BYTE_ORDER             = 5, /* any */
+  IM_OPTION_BYTE_ORDER             = 5, /* any  */
+  IM_OPTION_SUPPORTS_PALETTE       = 6, /* true */
 
   /*
    from bmpsuite:
@@ -52,6 +53,11 @@ typedef struct im_option_base_t {
 } im_option_base_t;
 
 #define IM_OPTIONS (im_option_base_t *[])
+
+typedef struct im_option_bool_t {
+  im_option_base_t base;
+  bool             on;
+} im_option_bool_t;
 
 typedef struct im_option_rowpadding_t {
   im_option_base_t base;
@@ -72,6 +78,17 @@ im_option_row_padding(uint32_t last) {
   pad.pad       = last;
 
   return pad;
+}
+
+IM_INLINE
+im_option_bool_t
+im_option_bool(im_option_type_t optype, bool on) {
+  im_option_bool_t opt;
+  
+  opt.base.type = optype;
+  opt.on        = on;
+  
+  return opt;
 }
 
 IM_INLINE

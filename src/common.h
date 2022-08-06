@@ -62,6 +62,7 @@ typedef struct im_open_config_t {
   ImOpenIntent      openIntent;
   ImByteOrder       byteOrder;
   uint32_t          rowPadding;
+  bool              supportsPal;
   im_option_base_t **options;
 } im_open_config_t;
 
