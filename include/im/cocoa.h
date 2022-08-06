@@ -101,15 +101,61 @@ im_cgimage(ImImage *im, bool copydata) {
 #else
   provider = CGDataProviderCreateWithCFData(data);
 #endif
-
-  switch (im->format) {
-    case IM_FORMAT_BGRA:
-      bitmapInfo = kCGBitmapByteOrder32Little | kCGImageAlphaFirst;
-      break;
-    default:
-      bitmapInfo = kCGBitmapByteOrderDefault | im->alphaInfo;
-      break;
+  
+  bitmapInfo = kCGBitmapByteOrderDefault;
+  if (im->format != IM_FORMAT_BGRA) {
+    if (bitsPerComponent > 8) {
+      switch (im->byteOrder) {
+        case IM_BYTEORDER_BIG_EDIAN:
+          switch (bitsPerComponent) {
+            case 16: bitmapInfo = kCGBitmapByteOrder16Big;   break;
+            case 32: bitmapInfo = kCGBitmapByteOrder32Big;   break;
+            default: break;
+          }
+          break;
+        case IM_BYTEORDER_LITTLE_ENDIAN:
+          switch (bitsPerComponent) {
+            case 16: bitmapInfo = kCGBitmapByteOrder16Little; break;
+            case 32: bitmapInfo = kCGBitmapByteOrder32Little; break;
+            default: break;
+          }
+          break;
+        case IM_BYTEORDER_HOST:
+#if __BYTE_ORDER__ != __ORDER_BIG_ENDIAN__
+          switch (bitsPerComponent) {
+            case 16: bitmapInfo = kCGBitmapByteOrder16Little; break;
+            case 32: bitmapInfo = kCGBitmapByteOrder32Little; break;
+            default: break;
+          }
+#else
+          switch (bitsPerComponent) {
+            case 16: bitmapInfo = kCGBitmapByteOrder16Big;   break;
+            case 32: bitmapInfo = kCGBitmapByteOrder32Big;   break;
+            default: break;
+          }
+#endif
+          break;
+        default:
+          break;
+      }
+    }
+  } else {
+    switch (im->byteOrder) {
+      case IM_BYTEORDER_BIG_EDIAN:     bitmapInfo = kCGBitmapByteOrder32Big;    break;
+      case IM_BYTEORDER_LITTLE_ENDIAN: bitmapInfo = kCGBitmapByteOrder32Little; break;
+      case IM_BYTEORDER_HOST:
+#if __BYTE_ORDER__ != __ORDER_BIG_ENDIAN__
+        bitmapInfo = kCGBitmapByteOrder32Little;
+#else
+        bitmapInfo = kCGBitmapByteOrder32Big;
+#endif
+        break;
+      default: break;
+    }
+    bitmapInfo |= kCGImageAlphaFirst;
   }
+  
+  bitmapInfo |= im->alphaInfo;
 
   imageRef   = CGImageCreate(width,                    /* width              */
                              height,                   /* height             */
