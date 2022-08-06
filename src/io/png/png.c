@@ -96,6 +96,7 @@ png_dec(ImImage         ** __restrict dest,
   im->ori            = IM_ORIENTATION_UP;
   im->fileFormatType = IM_FILEFORMATTYPE_PNG;
   pal_img_n          = height = width = bpp = bpc = zippedlen = 0;
+  bitdepth           = 8;
 
   for (;;) {
     chk_len  = im_get_u32_endian(p, false); p += 4;
@@ -115,9 +116,9 @@ png_dec(ImImage         ** __restrict dest,
         filter               = *p++;
         interlace            = *p;
 
-        bpc                  = bitdepth == 16 ? 2 : 1;
+        bpc                  = im_maxiu8(bitdepth / 8, 1);
         im->bitsPerComponent = bitdepth;
-        
+
         /*
          Color    Allowed    Interpretation
          Type    Bit Depths
@@ -205,7 +206,7 @@ png_dec(ImImage         ** __restrict dest,
 
 nx:
 
-  src_bpr = bpp * width;
+  src_bpr = bpp * width * ((float)im_minu8(bitdepth, 8) / 8.0f);
   row = p = im->data.data;
   pri = p;
   i   = 0;
@@ -231,7 +232,7 @@ nx:
     default: break;
   }
 
-  for (; i < height;) {
+  for (; i < height; ) {
     switch ((int)*row) {
       case IM_PNG_FILTER_NONE:
         memmove(row - i, row + 1, src_bpr);
