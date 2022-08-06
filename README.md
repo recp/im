@@ -17,6 +17,15 @@ TODO
 - [x] Cocoa and Win32 helpers
 - [ ] JPEG (In Progress)
 - [ ] PNG (In Progress)
+  - [x] palette
+  - [x] color types
+  - [x] 1,2,4,8,16bpp
+  - [x] options
+  - [ ] adam7 interlaced PNGs
+  - [ ] alpha - in progress -
+  - [ ] additional chunks
+  - [ ] custom unzip/deflate - in progress -
+  - [ ] convert to user selected format
 - [ ] JPEG 2000
 - [ ] TIFF
 - [ ] GIF
