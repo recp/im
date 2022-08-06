@@ -277,7 +277,7 @@ nx:
   }
 
   switch (open_config->byteOrder) {
-    case IM_BYTEORDER_LITTLE_ENDIAN:
+    case IM_BYTEORDER_LITTLE:
       if (bpc == 2) {
         for (p16 = im->data.data, i = 0; i < (len >> 1); i++) {
           p16[i] = bswapu16(p16[i]);

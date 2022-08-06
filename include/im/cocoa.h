@@ -106,14 +106,14 @@ im_cgimage(ImImage *im, bool copydata) {
   if (im->format != IM_FORMAT_BGRA) {
     if (bitsPerComponent > 8) {
       switch (im->byteOrder) {
-        case IM_BYTEORDER_BIG_EDIAN:
+        case IM_BYTEORDER_BIG:
           switch (bitsPerComponent) {
             case 16: bitmapInfo = kCGBitmapByteOrder16Big;   break;
             case 32: bitmapInfo = kCGBitmapByteOrder32Big;   break;
             default: break;
           }
           break;
-        case IM_BYTEORDER_LITTLE_ENDIAN:
+        case IM_BYTEORDER_LITTLE:
           switch (bitsPerComponent) {
             case 16: bitmapInfo = kCGBitmapByteOrder16Little; break;
             case 32: bitmapInfo = kCGBitmapByteOrder32Little; break;
@@ -141,8 +141,8 @@ im_cgimage(ImImage *im, bool copydata) {
     }
   } else {
     switch (im->byteOrder) {
-      case IM_BYTEORDER_BIG_EDIAN:     bitmapInfo = kCGBitmapByteOrder32Big;    break;
-      case IM_BYTEORDER_LITTLE_ENDIAN: bitmapInfo = kCGBitmapByteOrder32Little; break;
+      case IM_BYTEORDER_BIG:    bitmapInfo = kCGBitmapByteOrder32Big;    break;
+      case IM_BYTEORDER_LITTLE: bitmapInfo = kCGBitmapByteOrder32Little; break;
       case IM_BYTEORDER_HOST:
 #if __BYTE_ORDER__ != __ORDER_BIG_ENDIAN__
         bitmapInfo = kCGBitmapByteOrder32Little;

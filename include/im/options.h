@@ -23,10 +23,10 @@ extern "C" {
 #include "common.h"
 
 typedef enum ImByteOrder {
-  IM_BYTEORDER_HOST          = 0, /* default */
-  IM_BYTEORDER_LITTLE_ENDIAN = 1,
-  IM_BYTEORDER_BIG_EDIAN     = 2,
-  IM_BYTEORDER_ANY           = 3
+  IM_BYTEORDER_HOST    = 0, /* default */
+  IM_BYTEORDER_LITTLE  = 1,
+  IM_BYTEORDER_BIG     = 2,
+  IM_BYTEORDER_ANY     = 3
 } ImByteOrder;
 
 typedef enum im_option_type_t {
