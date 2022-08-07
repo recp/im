@@ -133,42 +133,46 @@ png_dec(ImImage         ** __restrict dest,
         
         switch (color) {
           case 0:
-            im->bitsPerPixel  = bitdepth;
-            im->bytesPerPixel = bpp = bpc;
-            im->format        = IM_FORMAT_GRAY;
-            im->alphaInfo     = IM_ALPHA_NONE;
+            im->bitsPerPixel       = bitdepth;
+            im->bytesPerPixel      = bpp = bpc;
+            im->format             = IM_FORMAT_GRAY;
+            im->alphaInfo          = IM_ALPHA_NONE;
+            im->componentsPerPixel = 1;
             break;
           case 2:
-            im->bitsPerPixel  = bitdepth * 3;
-            im->bytesPerPixel = bpp = bpc * 3;
-            im->format        = IM_FORMAT_RGB;
-            im->alphaInfo     = IM_ALPHA_NONE;
+            im->bitsPerPixel       = bitdepth * 3;
+            im->bytesPerPixel      = bpp = bpc * 3;
+            im->format             = IM_FORMAT_RGB;
+            im->alphaInfo          = IM_ALPHA_NONE;
+            im->componentsPerPixel = 3;
             break;
           case 3: {
             /* palette */
             im_pal_t *pal;
 
-            im->bitsPerPixel  = bitdepth;
-            im->bytesPerPixel = bpp = bpc;
-            im->format        = IM_FORMAT_RGB;
-            im->alphaInfo     = IM_ALPHA_NONE;
-            
+            im->bitsPerPixel       = bitdepth;
+            im->bytesPerPixel      = bpp = bpc;
+            im->format             = IM_FORMAT_RGB;
+            im->alphaInfo          = IM_ALPHA_NONE;
+            im->componentsPerPixel = 3;
+
             pal     = calloc(1, sizeof(*pal));
             im->pal = pal;
-
             break;
           }
           case 4:
-            im->bitsPerPixel  = bitdepth * 2;
-            im->bytesPerPixel = bpp = bpc * 2;
-            im->format        = IM_FORMAT_GRAY_ALPHA;
-            im->alphaInfo     = IM_ALPHA_LAST;
+            im->bitsPerPixel       = bitdepth * 2;
+            im->bytesPerPixel      = bpp = bpc * 2;
+            im->format             = IM_FORMAT_GRAY_ALPHA;
+            im->alphaInfo          = IM_ALPHA_LAST;
+            im->componentsPerPixel = 2;
             break;
           case 6:
-            im->bitsPerPixel  = bitdepth * 4;
-            im->bytesPerPixel = bpp = bpc * 4;
-            im->format        = IM_FORMAT_RGBA;
-            im->alphaInfo     = IM_ALPHA_LAST;
+            im->bitsPerPixel       = bitdepth * 4;
+            im->bytesPerPixel      = bpp = bpc * 4;
+            im->format             = IM_FORMAT_RGBA;
+            im->alphaInfo          = IM_ALPHA_LAST;
+            im->componentsPerPixel = 4;
             break;
           default:
             goto err;  /* invalid color type */

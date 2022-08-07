@@ -145,6 +145,7 @@ typedef struct ImImage {
   uint32_t          bytesPerPixel;
   uint32_t          bitsPerPixel;
   uint32_t          bitsPerComponent;
+  uint32_t          componentsPerPixel;
   uint32_t          hres;
   uint32_t          vres;
   ImFormat          format;
