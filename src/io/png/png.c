@@ -297,7 +297,7 @@ nx:
     i++;
   }
 
-  if (bpc > 1) {
+  if (unlikely(bpc > 1)) {
     switch (open_config->byteOrder) {
       case IM_BYTEORDER_LITTLE:
         if (bpc == 2) {

@@ -35,9 +35,13 @@
 #ifdef __GNUC__
 #  define IM_DESTRUCTOR  __attribute__((destructor))
 #  define IM_CONSTRUCTOR __attribute__((constructor))
+#  define unlikely(expr) __builtin_expect(!!(expr), 0)
+#  define likely(expr)   __builtin_expect(!!(expr), 1)
 #else
 #  define IM_DESTRUCTOR
 #  define IM_CONSTRUCTOR
+#  define unlikely(expr) (expr)
+#  define likely(expr)   (expr)
 #endif
 
 #ifdef IM_WINAPI
