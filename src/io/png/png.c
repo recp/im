@@ -297,25 +297,26 @@ nx:
     i++;
   }
 
-  switch (open_config->byteOrder) {
-    case IM_BYTEORDER_LITTLE:
-      if (bpc == 2) {
-        for (p16 = im->data.data, i = 0; i < (len >> 1); i++) {
-          p16[i] = bswapu16(p16[i]);
+  if (bpc > 1) {
+    switch (open_config->byteOrder) {
+      case IM_BYTEORDER_LITTLE:
+        if (bpc == 2) {
+          for (p16 = im->data.data, i = 0; i < (len >> 1); i++) {
+            p16[i] = bswapu16(p16[i]);
+          }
         }
-      }
-      break;
-    case IM_BYTEORDER_HOST:
+        break;
+      case IM_BYTEORDER_HOST:
 #if __BYTE_ORDER__ != __ORDER_BIG_ENDIAN__
-      if (bpc == 2) {
-        for (p16 = im->data.data, i = 0; i < (len >> 1); i++) {
-          p16[i] = bswapu16(p16[i]);
+        if (bpc == 2) {
+          for (p16 = im->data.data, i = 0; i < (len >> 1); i++) {
+            p16[i] = bswapu16(p16[i]);
+          }
         }
-      }
 #endif
-      break;
-    default: /* _ANY, _BIG_ENDIAN == noop */
-      break;
+        break;
+      default: break; /* _ANY, _BIG_ENDIAN == noop */
+    }
   }
 
   *dest = im;
