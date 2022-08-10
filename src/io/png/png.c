@@ -51,16 +51,15 @@ ImResult
 png_dec(ImImage         ** __restrict dest,
         const char       * __restrict path,
         im_open_config_t * __restrict open_config) {
-  zz_stream_t         zip_stream = {0};
-  ImImage            *im;
-  ImByte             *zipped;
-  ImByte             *p, *p_chk, *row, *pri, bitdepth, color, compr, interlace;
-  size_t              len;
-  im_png_filter_t     filter;
-  uint32_t            dataoff, chk_len, chk_type, pal_len, i, j, width, height, src_bpr, bpp, bpc, zippedlen;
-  uint16_t           *p16;
-  ImFileResult        fres;
-  bool                is_cgbi;
+  unzip_t        *zip;
+  ImImage        *im;
+  ImByte         *zipped;
+  ImByte         *p, *p_chk, *row, *pri, bitdepth, color, compr, interlace;
+  im_png_filter_t filter;
+  uint32_t        len, chk_len, chk_type, pal_len, i, j, width, height, src_bpr, bpp, bpc, zippedlen;
+  uint16_t       *p16;
+  ImFileResult    fres;
+  bool            is_cgbi;
 
   im     = NULL;
   row    = NULL;
@@ -231,7 +230,7 @@ nx:
   pri = p;
   i   = 0;
 
-  /*undo filter */
+  /* undo filter */
 
   switch ((int)*row) {
     case IM_PNG_FILTER_UP:
@@ -327,6 +326,7 @@ nx:
   }
 
   return IM_OK;
+
 err:
   if (fres.mmap) {
     im_unmap(fres.raw, fres.size);
@@ -337,5 +337,6 @@ err:
   }
   
   *dest = NULL;
+
   return IM_ERR;
 }
