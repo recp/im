@@ -205,8 +205,6 @@ png_dec(ImImage         ** __restrict dest,
         break;
       }
       case IM_PNG_TYPE('I','D','A','T'): {
-        // mz_uncompress(im->data.data, &len, p, chk_len);
-
         memcpy(row, p, chk_len);
         row       += chk_len;
         zippedlen += chk_len;
@@ -318,12 +316,12 @@ nx:
     }
   }
 
-  *dest = im;
-  im->file = fres;
-
   if (fres.mmap) {
     im_unmap(fres.raw, fres.size);
   }
+
+  im->file = fres;
+  *dest    = im;
 
   return IM_OK;
 
