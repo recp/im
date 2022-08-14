@@ -316,9 +316,7 @@ nx:
     }
   }
 
-  if (fres.mmap) {
-    im_unmap(fres.raw, fres.size);
-  }
+  if (fres.mmap) { im_unmap(fres.raw, fres.size); }
 
   im->file = fres;
   *dest    = im;
@@ -326,13 +324,8 @@ nx:
   return IM_OK;
 
 err:
-  if (fres.mmap) {
-    im_unmap(fres.raw, fres.size);
-  }
-  
-  if (im) {
-    free(im);
-  }
+  if (fres.mmap) { im_unmap(fres.raw, fres.size); }
+  if (im)        { free(im);                      }
   
   *dest = NULL;
 
