@@ -66,6 +66,8 @@ TODO
   - [x] pfm (portable floatmap)
   - [x] pfm alpha (pf4) / augmented pfm
   - [x] pam
+- [ ] KTX
+- [ ] DDS
 - [ ] DPX?
 - [ ] PCX?
 - [ ] ECW?
