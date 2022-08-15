@@ -39,6 +39,7 @@
 #include "io/bmp/bmp.h"
 #include "io/bmp/dib.h"
 #include "io/png/png.h"
+#include "io/tga/tga.h"
 
 #include "file.h"
 
@@ -157,7 +158,13 @@ im_load(ImImage         ** __restrict dest,
 //    {"jpg",  jpg_dec},
     {"png",  png_dec},
     {"bmp",  bmp_dec},
-    {"dib",  dib_dec}
+    {"dib",  dib_dec},
+
+    /* tga */
+    {"tga",  tga_dec},
+    {"icb",  tga_dec},
+    {"vda",  tga_dec},
+    {"vst",  tga_dec},
   };
 
   floader = NULL;
