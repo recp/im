@@ -162,6 +162,9 @@ im_load(ImImage         ** __restrict dest,
 
     /* tga */
     {"tga",  tga_dec},
+    {"tpic", tga_dec},
+
+    /* tga (old extensions) */
     {"icb",  tga_dec},
     {"vda",  tga_dec},
     {"vst",  tga_dec},
