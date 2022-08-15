@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef sc_png_h
-#define sc_png_h
+#ifndef src_png_h
+#define src_png_h
 
 #include "../common.h"
 
@@ -25,4 +25,4 @@ png_dec(ImImage         ** __restrict dest,
         const char       * __restrict path,
         im_open_config_t * __restrict open_config);
 
-#endif /* sc_png_h */
+#endif /* src_png_h */
