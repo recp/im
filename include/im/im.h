@@ -103,7 +103,9 @@ typedef enum ImFileFormatType {
   IM_FILEFORMATTYPE_BMP_OS2_StructColorIcon,
   IM_FILEFORMATTYPE_BMP_OS2_ConstColorPointer,
   IM_FILEFORMATTYPE_BMP_OS2_Icon,
-  IM_FILEFORMATTYPE_BMP_OS2_Pointer
+  IM_FILEFORMATTYPE_BMP_OS2_Pointer,
+
+  IM_FILEFORMATTYPE_TGA
 } ImFileFormatType;
 
 typedef struct ImFileResult {
