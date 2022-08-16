@@ -92,6 +92,16 @@ tga_dec(ImImage         ** __restrict dest,
   im->bytesPerPixel      = 3;
   
   memcpy(im->data.data, p, width * height * (depth / 8));
+  switch ((imdesc >> 3) & 0x1) {
+    case 0x0: im->ori = IM_ORIENTATION_LEFT;  break;
+    case 0x1: im->ori = IM_ORIENTATION_RIGHT; break;
+  }
+
+  switch ((imdesc >> 4) & 0x1) {
+    case 0x0: im->ori |= IM_ORIENTATION_DOWN; break;
+    case 0x1: im->ori |= IM_ORIENTATION_UP;   break;
+  }
+
 
   *dest = im;
   im->file = fres;
