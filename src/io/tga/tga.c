@@ -28,6 +28,7 @@ tga_dec(ImImage         ** __restrict dest,
   im_pal_t           *pal;
   uint8_t            *p;
   ImFileResult        fres;
+  bool                safemem;
 
   im   = NULL;
   fres = im_readfile(path, open_config->openIntent != IM_OPEN_INTENT_READWRITE);
@@ -35,6 +36,11 @@ tga_dec(ImImage         ** __restrict dest,
   if (fres.ret != IM_OK) {
     goto err;
   }
+  
+  safemem = !open_config->releaseFile
+              && open_config->openIntent == IM_OPEN_INTENT_READONLY
+              && !open_config->bgr2rgb
+  ;
 
   /* decode, this process will be optimized after decoding is done */
   p                  = fres.raw;
@@ -105,15 +111,20 @@ tga_dec(ImImage         ** __restrict dest,
   im->bytesPerPixel      = 3;
   im->alphaInfo          = IM_ALPHA_NONE;
 
-  memcpy(im->data.data, p, width * height * (depth / 8));
-  
-  /* TODO: check post process requirement before do this */
-  rgb8_to_bgr8_all(im->data.data, width * height * (depth / 8));
+  if (safemem)  {
+    im->data.data = p;
+  } else  {
+    if (open_config->bgr2rgb) {
+      rgb8_to_bgr8_all(im->data.data, p, width * height * (depth / 8));
+    } else {
+      memcpy(im->data.data, p, width * height * (depth / 8));
+    }
+  }
 
   *dest = im;
   im->file = fres;
 
-  if (fres.mmap) {
+  if (open_config->releaseFile && fres.mmap) {
     im_unmap(fres.raw, fres.size);
   }
 
