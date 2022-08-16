@@ -102,6 +102,22 @@ im_option_row_byteorder(ImByteOrder order) {
   return op;
 }
 
+/* pre-defined option sets */
+
+/*
+ - no palette
+ - no BGR, ABGR (convert to RGB, RGBA)
+ - no row pad
+ - no bottom-to-top or RTL images
+ - no compression
+ - minimum 1byte for pixel
+ - byte order is HOST
+ 
+ + no release file called
+ + 8bit, 16bit, 24bit, 32bit, 64bit allowed
+ */
+extern im_option_base_t * __restrict IM_OPT_SIMPLE[];
+
 #ifdef __cplusplus
 }
 #endif

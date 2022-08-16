@@ -37,3 +37,25 @@ im_option_base_t* options[] =
   false
 #endif
 };
+
+im_option_base_t * __restrict IM_OPT_SIMPLE[] = {
+  &((im_option_rowpadding_t){
+    .base = {
+      .type = IM_OPTION_ROW_PAD_LAST
+    },
+    .pad = 0
+  }).base,
+  &((im_option_byteorder_t){
+    .base = {
+      .type = IM_OPTION_BYTE_ORDER
+    },
+    .order = IM_BYTEORDER_HOST
+  }).base,
+  &((im_option_bool_t){
+    .base = {
+      .type = IM_OPTION_SUPPORTS_PALETTE
+    },
+    .on = false
+  }).base,
+  NULL
+};
