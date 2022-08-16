@@ -115,7 +115,7 @@ tga_dec(ImImage         ** __restrict dest,
     im->data.data = p;
   } else  {
     if (open_config->bgr2rgb) {
-      rgb8_to_bgr8_all(im->data.data, p, width * height * (depth / 8));
+      rgb8_to_bgr8_copy(im->data.data, p, width * height * (depth / 8));
     } else {
       memcpy(im->data.data, p, width * height * (depth / 8));
     }
