@@ -37,6 +37,7 @@ typedef enum im_option_type_t {
   IM_OPTION_USE_MMAP_FOR_WINDOWS   = 4,
   IM_OPTION_BYTE_ORDER             = 5, /* any  */
   IM_OPTION_SUPPORTS_PALETTE       = 6, /* true */
+  IM_OPTION_BGR_TO_RGB             = 7, /* false */
 
   /*
    from bmpsuite:

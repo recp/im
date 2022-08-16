@@ -139,14 +139,15 @@ im_load(ImImage         ** __restrict dest,
   if (options && (opt = options[i])) {
     do {
       switch (opt->type) {
-        case IM_OPTION_ROW_PAD_LAST:   open_conf.rowPadding = ((im_option_rowpadding_t *)opt)->pad;     break;
-        case IM_OPTION_BYTE_ORDER:     open_conf.byteOrder = ((im_option_byteorder_t *)opt)->order;     break;
-        default:
-          break;
+        case IM_OPTION_ROW_PAD_LAST:     open_conf.rowPadding = ((im_option_rowpadding_t *)opt)->pad;     break;
+        case IM_OPTION_BYTE_ORDER:       open_conf.byteOrder = ((im_option_byteorder_t *)opt)->order;     break;
+        case IM_OPTION_SUPPORTS_PALETTE: open_conf.supportsPal = ((im_option_bool_t *)opt)->on;           break;
+        case IM_OPTION_BGR_TO_RGB:       open_conf.bgr2rgb = ((im_option_bool_t *)opt)->on;               break;
+        default: break;
       }
     } while ((opt = options[++i]));
   }
-  
+
   floader_t floaders[] = {
     
     {"pbm",  pbm_dec},

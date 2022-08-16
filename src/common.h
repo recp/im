@@ -67,6 +67,8 @@ typedef struct im_open_config_t {
   ImByteOrder       byteOrder;
   uint32_t          rowPadding;
   bool              supportsPal;
+  bool              releaseFile;
+  bool              bgr2rgb;
   im_option_base_t **options;
 } im_open_config_t;
 
