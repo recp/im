@@ -19,4 +19,24 @@
 
 #include "../common.h"
 
+IM_INLINE
+void
+rgb8_to_bgr8(uint8_t * __restrict p) {
+  uint8_t t;
+  
+  t    = p[0];
+  p[0] = p[2];
+  p[2] = t;
+}
+
+IM_INLINE
+void
+rgb8_to_bgr8_all(uint8_t * __restrict p, uint32_t len) {
+  uint32_t i;
+
+  for (i = 0; i < len; i += 3) {
+    rgb8_to_bgr8(p + i);
+  }
+}
+
 #endif /* pp_h */

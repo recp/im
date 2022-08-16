@@ -17,6 +17,7 @@
 #include "tga.h"
 #include "../../file.h"
 #include "../../endian.h"
+#include "../../pp/pp.h"
 
 IM_HIDE
 ImResult
@@ -25,8 +26,7 @@ tga_dec(ImImage         ** __restrict dest,
         im_open_config_t * __restrict open_config) {
   ImImage            *im;
   im_pal_t           *pal;
-  char               *p;
-  uint32_t            dataoff;
+  uint8_t            *p;
   ImFileResult        fres;
 
   im   = NULL;
@@ -50,7 +50,7 @@ tga_dec(ImImage         ** __restrict dest,
   id        = alloca(idlen);
   pal_len   = pal_entry_size = 0;
 
-  if (img_type) {
+  if (cmap_type && img_type) {
     pal_first_idx  = im_get_u16_endian(p, true);
     pal_len        = im_get_u16_endian(p + 2, true);
     pal_entry_size = *(p + 4);
@@ -68,40 +68,47 @@ tga_dec(ImImage         ** __restrict dest,
   /* TODO: option to ignore reading ID */
   if (idlen > 0) {
     memcpy(id, p, idlen);
+    p += idlen;
   }
 
   /* palette */
-  if (img_type && pal_len > 0) {
+  if (cmap_type && img_type && pal_len > 0) {
     im->pal    = pal = calloc(1, sizeof(*pal));
     pal->count = pal_len;
     pal->len   = pal_len * (pal_entry_size / 8);
     pal->pal   = malloc(pal->len);
     
     memcpy(pal->pal, p, pal->len);
+
+    p += pal_len;
   }
-  
+
   im->data.data = malloc(width * height * depth);
   im->width     = width;
   im->height    = height;
   
-  /* TODO: just to see the result for now */
-  im->format             = IM_FORMAT_RGB;
-  im->componentsPerPixel = 3;
-  im->bitsPerComponent   = 8;
-  im->bitsPerPixel       = 24;
-  im->bytesPerPixel      = 3;
-  
-  memcpy(im->data.data, p, width * height * (depth / 8));
   switch ((imdesc >> 3) & 0x1) {
     case 0x0: im->ori = IM_ORIENTATION_LEFT;  break;
     case 0x1: im->ori = IM_ORIENTATION_RIGHT; break;
   }
-
+  
   switch ((imdesc >> 4) & 0x1) {
     case 0x0: im->ori |= IM_ORIENTATION_DOWN; break;
     case 0x1: im->ori |= IM_ORIENTATION_UP;   break;
   }
+  
+  /* TODO: just to see the result for now */
+  im->format             = IM_FORMAT_BGR;
+  im->componentsPerPixel = 3;
+  im->bitsPerComponent   = 8;
+  im->bitsPerPixel       = 24;
+  im->bytesPerPixel      = 3;
+  im->alphaInfo          = IM_ALPHA_NONE;
 
+  memcpy(im->data.data, p, width * height * (depth / 8));
+  
+  /* TODO: check post process requirement before do this */
+  rgb8_to_bgr8_all(im->data.data, width * height * (depth / 8));
 
   *dest = im;
   im->file = fres;
