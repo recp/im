@@ -55,6 +55,7 @@ TODO
   - [x] BGR to RGB
   - [ ] handle all bits-per-component and bits-per pixel cases
   - [ ] alpha
+  - [ ] RLE
 - [ ] HDR
 - [ ] EXR
 - [ ] WebP
