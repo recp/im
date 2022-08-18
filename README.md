@@ -51,6 +51,10 @@ TODO
   - [x] DIB file
 - [ ] PSD
 - [ ] TGA
+  - [x] palette
+  - [x] BGR to RGB
+  - [ ] handle all bits-per-component and bits-per pixel cases
+  - [ ] alpha
 - [ ] HDR
 - [ ] EXR
 - [ ] WebP
