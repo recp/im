@@ -51,8 +51,10 @@ tga_dec(ImImage         ** __restrict dest,
         im_open_config_t * __restrict open_config) {
   ImImage            *im;
   im_pal_t           *pal;
-  uint8_t            *p;
+  uint8_t            *p, *id;
   ImFileResult        fres;
+  uint16_t            pal_first_idx, pal_len, pos_x, pos_y, width, height;
+  uint8_t             idlen, cmap_type, imtype, pal_entry_size, depth, imdesc, ncomp;
   bool                safemem, usemmap;
 
   usemmap = false; /* TODO: */
@@ -73,12 +75,9 @@ tga_dec(ImImage         ** __restrict dest,
   im                 = calloc(1, sizeof(*im));
   im->fileFormatType = IM_FILEFORMATTYPE_TGA;
 
-  uint8_t *id, idlen, cmap_type, imtype, pal_entry_size, depth, imdesc, ncomp;
-  uint16_t pal_first_idx, pal_len, pos_x, pos_y, width, height;
-
   idlen     = *p++;
   cmap_type = *p++;
-  imtype  = *p++;
+  imtype    = *p++;
   id        = alloca(idlen);
   pal_len   = pal_entry_size = 0;
 
