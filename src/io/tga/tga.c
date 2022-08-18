@@ -136,23 +136,11 @@ tga_dec(ImImage         ** __restrict dest,
   im->bytesPerPixel      = ncomp;
   im->alphaInfo          = IM_ALPHA_NONE; /* TODO: check alpha bits */
 
-  if (unlikely(safemem))  {
+  if (likely(open_config->bgr2rgb)) {
     im->data.data = p;
+    rgb8_to_bgr8_all(p, width * height);
   } else {
-    if (likely(open_config->bgr2rgb)) {
-      if (likely(!usemmap)) {
-        im->data.data = p;
-        rgb8_to_bgr8_all(p, width * height);
-      } else {
-        rgb8_to_bgr8_copy(im->data.data, p, width * height);
-      }
-    } else {
-      if (likely(!usemmap)) {
-        im->data.data = p;
-      } else {
-        memcpy(im->data.data, p, width * height * (depth / 8));
-      }
-    }
+    im->data.data = p;
   }
 
   *dest = im;
