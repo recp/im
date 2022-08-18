@@ -19,6 +19,31 @@
 #include "../../endian.h"
 #include "../../pp/pp.h"
 
+IM_INLINE
+uint8_t
+tga_compc(ImFormat * __restrict format, uint8_t imtype, uint8_t imdesc, uint8_t depth) {
+  uint8_t ncomp;
+
+  /* TODO: use imdesc and handle error */
+  ncomp = 0;
+
+  switch (depth) {
+    case 8:           ncomp = 1; break;
+    case 15: case 16: ncomp = 2; break;
+    case 24:          ncomp = 3; break;
+    case 32:          ncomp = 4; break;
+    default: break;
+  }
+
+  switch (imtype) {
+    case 3: case 11:                 *format = IM_FORMAT_BLACKWHITE; break;
+    case 1: case 2: case 9: case 10: *format = IM_FORMAT_RGB;        break;
+    default: break;
+  }
+
+  return ncomp;
+}
+
 IM_HIDE
 ImResult
 tga_dec(ImImage         ** __restrict dest,
@@ -48,16 +73,16 @@ tga_dec(ImImage         ** __restrict dest,
   im                 = calloc(1, sizeof(*im));
   im->fileFormatType = IM_FILEFORMATTYPE_TGA;
 
-  uint8_t *id, idlen, cmap_type, img_type, pal_entry_size, depth, imdesc;
+  uint8_t *id, idlen, cmap_type, imtype, pal_entry_size, depth, imdesc, ncomp;
   uint16_t pal_first_idx, pal_len, pos_x, pos_y, width, height;
 
   idlen     = *p++;
   cmap_type = *p++;
-  img_type  = *p++;
+  imtype  = *p++;
   id        = alloca(idlen);
   pal_len   = pal_entry_size = 0;
 
-  if (cmap_type && img_type) {
+  if (cmap_type && imtype) {
     pal_first_idx  = im_get_u16_endian(p, true);
     pal_len        = im_get_u16_endian(p + 2, true);
     pal_entry_size = *(p + 4);
@@ -79,7 +104,7 @@ tga_dec(ImImage         ** __restrict dest,
   }
 
   /* palette */
-  if (cmap_type && img_type && pal_len > 0) {
+  if (cmap_type && imtype && pal_len > 0) {
     im->pal    = pal = calloc(1, sizeof(*pal));
     pal->count = pal_len;
     pal->len   = pal_len * (pal_entry_size / 8);
@@ -103,16 +128,13 @@ tga_dec(ImImage         ** __restrict dest,
     case 0x0: im->ori |= IM_ORIENTATION_DOWN; break;
     case 0x1: im->ori |= IM_ORIENTATION_UP;   break;
   }
-
-  /* TODO: just to see the result for now */
-  im->format             = IM_FORMAT_RGB;
-  im->componentsPerPixel = 3;
-  im->bitsPerComponent   = 8;
-  im->bitsPerPixel       = 24;
-  im->bytesPerPixel      = 3;
-  im->alphaInfo          = IM_ALPHA_NONE;
-
-  im->data.data = p;
+  
+  ncomp                  = tga_compc(&im->format, imtype, imdesc, depth);
+  im->componentsPerPixel = ncomp;
+  im->bitsPerComponent   = 8; /* TODO: */
+  im->bitsPerPixel       = ncomp * 8;
+  im->bytesPerPixel      = ncomp;
+  im->alphaInfo          = IM_ALPHA_NONE; /* TODO: check alpha bits */
 
   if (unlikely(safemem))  {
     im->data.data = p;
