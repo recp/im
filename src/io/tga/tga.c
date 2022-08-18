@@ -28,10 +28,11 @@ tga_dec(ImImage         ** __restrict dest,
   im_pal_t           *pal;
   uint8_t            *p;
   ImFileResult        fres;
-  bool                safemem;
+  bool                safemem, usemmap;
 
-  im   = NULL;
-  fres = im_readfile(path, open_config->openIntent != IM_OPEN_INTENT_READWRITE);
+  usemmap = false; /* TODO: */
+  im      = NULL;
+  fres    = im_readfile(path, usemmap);
 
   if (fres.ret != IM_OK) {
     goto err;
@@ -92,32 +93,43 @@ tga_dec(ImImage         ** __restrict dest,
   im->data.data = malloc(width * height * depth);
   im->width     = width;
   im->height    = height;
-  
+
   switch ((imdesc >> 3) & 0x1) {
     case 0x0: im->ori = IM_ORIENTATION_LEFT;  break;
     case 0x1: im->ori = IM_ORIENTATION_RIGHT; break;
   }
-  
+
   switch ((imdesc >> 4) & 0x1) {
     case 0x0: im->ori |= IM_ORIENTATION_DOWN; break;
     case 0x1: im->ori |= IM_ORIENTATION_UP;   break;
   }
-  
+
   /* TODO: just to see the result for now */
-  im->format             = IM_FORMAT_BGR;
+  im->format             = IM_FORMAT_RGB;
   im->componentsPerPixel = 3;
   im->bitsPerComponent   = 8;
   im->bitsPerPixel       = 24;
   im->bytesPerPixel      = 3;
   im->alphaInfo          = IM_ALPHA_NONE;
 
-  if (safemem)  {
+  im->data.data = p;
+
+  if (unlikely(safemem))  {
     im->data.data = p;
-  } else  {
-    if (open_config->bgr2rgb) {
-      rgb8_to_bgr8_copy(im->data.data, p, width * height * (depth / 8));
+  } else {
+    if (likely(open_config->bgr2rgb)) {
+      if (likely(!usemmap)) {
+        im->data.data = p;
+        rgb8_to_bgr8_all(p, width * height);
+      } else {
+        rgb8_to_bgr8_copy(im->data.data, p, width * height);
+      }
     } else {
-      memcpy(im->data.data, p, width * height * (depth / 8));
+      if (likely(!usemmap)) {
+        im->data.data = p;
+      } else {
+        memcpy(im->data.data, p, width * height * (depth / 8));
+      }
     }
   }
 
@@ -133,11 +145,11 @@ err:
   if (fres.mmap) {
     im_unmap(fres.raw, fres.size);
   }
-  
+
   if (im) {
     free(im);
   }
-  
+
   *dest = NULL;
   return IM_ERR;
 }

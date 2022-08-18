@@ -32,12 +32,27 @@ rgb8_to_bgr8(uint8_t * __restrict p) {
 IM_INLINE
 void
 rgb8_to_bgr8_copy(uint8_t * __restrict d, uint8_t * __restrict p, uint32_t len) {
-  uint32_t i;
+  for (; len > 0; len--) {
+    d[0] = p[2];
+    d[1] = p[1];
+    d[2] = p[0];
 
-  for (i = 0; i < len; i += 3) {
-    d[i + 0] = p[i + 2];
-    d[i + 1] = p[i + 1];
-    d[i + 2] = p[i + 0];
+    d += 3;
+    p += 3;
+  }
+}
+
+IM_INLINE
+void
+rgb8_to_bgr8_all(uint8_t * __restrict d, uint32_t len) {
+  uint8_t t;
+
+  for (; len > 0; len--) {
+    t    = d[0];
+    d[0] = d[2];
+    d[2] = t;
+
+    d += 3;
   }
 }
 
