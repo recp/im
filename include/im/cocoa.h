@@ -32,10 +32,12 @@ extern "C" {
 
 #import <CoreGraphics/CoreGraphics.h>
 #import <CoreImage/CoreImage.h>
+#import <Foundation/Foundation.h>
 
 /*
  https://docs.opencv.org/master/d3/def/tutorial_image_manipulation.html
  */
+CF_RETURNS_RETAINED
 CGImageRef
 im_cgimage(ImImage *im, bool copydata) {
   NSData           *data;
@@ -223,6 +225,7 @@ im_cgimage(ImImage *im, bool copydata) {
 
 @end
 
+CF_RETURNS_RETAINED
 NSImage*
 im_nsimage(ImImage * __restrict im, bool copydata) {
   CGImageRef cgImage;
@@ -238,6 +241,7 @@ im_nsimage(ImImage * __restrict im, bool copydata) {
 
 /* UIKit */
 
+CF_RETURNS_RETAINED
 UIImage*
 im_uiimage(ImImage * __restrict im, bool copydata) {
   CGImageRef cgImage;
