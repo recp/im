@@ -40,6 +40,7 @@
 #include "io/bmp/dib.h"
 #include "io/png/png.h"
 #include "io/tga/tga.h"
+#include "io/qoi/qoi.h"
 
 #include "file.h"
 
@@ -169,6 +170,8 @@ im_load(ImImage         ** __restrict dest,
     {"icb",  tga_dec},
     {"vda",  tga_dec},
     {"vst",  tga_dec},
+    
+    {"qoi",  qoi_dec}
   };
 
   floader = NULL;

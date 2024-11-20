@@ -71,6 +71,7 @@ TODO
   - [x] pfm (portable floatmap)
   - [x] pfm alpha (pf4) / augmented pfm
   - [x] pam
+- [x] QOI
 - [ ] KTX
 - [ ] DDS
 - [ ] DPX?
