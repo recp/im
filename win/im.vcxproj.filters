@@ -75,6 +75,9 @@
     <Filter Include="src\io\dds">
       <UniqueIdentifier>{15ede1d5-83c8-475f-9f1e-e51d3bea0390}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\io\qoi">
+      <UniqueIdentifier>{2b19ec61-6394-4d24-91bb-833e661b3901}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\include\im\cocoa.h">
@@ -161,6 +164,12 @@
     <ClInclude Include="..\src\io\png\png.h">
       <Filter>src\io\png</Filter>
     </ClInclude>
+    <ClInclude Include="..\src\io\qoi\qoi.h">
+      <Filter>src\io\qoi</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\io\tga\tga.h">
+      <Filter>src\io\tga</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\src\io\ppm\pam.c">
@@ -210,6 +219,11 @@
     </ClCompile>
     <ClCompile Include="..\src\io\png\png.c">
       <Filter>src\io\png</Filter>
+    <ClCompile Include="..\src\io\qoi\qoi.c">
+      <Filter>src\io\qoi</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\io\tga\tga.c">
+      <Filter>src\io\tga</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

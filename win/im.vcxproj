@@ -173,6 +173,8 @@
     <ClInclude Include="..\src\io\ppm\pgm.h" />
     <ClInclude Include="..\src\io\ppm\pnm.h" />
     <ClInclude Include="..\src\io\ppm\ppm.h" />
+    <ClInclude Include="..\src\io\qoi\qoi.h" />
+    <ClInclude Include="..\src\io\tga\tga.h" />
     <ClInclude Include="..\src\mm\mmap.h" />
     <ClInclude Include="..\src\pp\pp.h" />
     <ClInclude Include="..\src\sampler.h" />
@@ -194,6 +196,8 @@
     <ClCompile Include="..\src\io\ppm\pgm.c" />
     <ClCompile Include="..\src\io\ppm\pnm.c" />
     <ClCompile Include="..\src\io\ppm\ppm.c" />
+    <ClCompile Include="..\src\io\qoi\qoi.c" />
+    <ClCompile Include="..\src\io\tga\tga.c" />
     <ClCompile Include="..\src\mm\mmap.c" />
     <ClCompile Include="..\src\pp\pp.c" />
     <ClCompile Include="..\src\win\dllmain.c" />
