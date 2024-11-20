@@ -115,14 +115,14 @@ bswapu64(uint64_t val) {
 # define le_16(X, DATA)                                                       \
   do {                                                                        \
     memcpy(&X, DATA, 2);                                                      \
-    DATA = (char *)DATA + 2;                                                  \
+    DATA = (unsigned char *)DATA + 2;                                          \
   } while (0)
 #else
 # define le_16(X, DATA)                                                       \
   do {                                                                        \
     memcpy(&X, DATA, 2);                                                      \
     X    = bswapu16((uint16_t)X);                                             \
-    DATA = (char *)DATA + 2;                                                  \
+    DATA = (unsigned char *)DATA + 2;                                          \
   } while (0)
 #endif
 
@@ -131,14 +131,14 @@ bswapu64(uint64_t val) {
 # define le_32(X, DATA)                                                       \
   do {                                                                        \
     memcpy(&X, DATA, 4);                                                      \
-    DATA = (char *)DATA + 4;                                                  \
+    DATA = (unsigned char *)DATA + 4;                                         \
   } while (0)
 #else
 # define le_32(X, DATA)                                                       \
   do {                                                                        \
     memcpy(&X, DATA, 4);                                                      \
     X    = bswapu32((uint32_t)X);                                             \
-    DATA = (char *)DATA + 4;                                                  \
+    DATA = (unsigned char *)DATA + 4;                                         \
   } while (0)
 #endif
 
@@ -147,14 +147,14 @@ bswapu64(uint64_t val) {
 # define le_64(X, DATA)                                                       \
   do {                                                                        \
     memcpy(&X, DATA, 8);                                                      \
-    DATA = (char *)DATA + 8;                                                  \
+    DATA = (unsigned char *)DATA + 8;                                         \
   } while (0)
 #else
 # define le_64(X, DATA)                                                       \
   do {                                                                        \
     memcpy(&X, DATA, 8);                                                      \
     X    = bswapu64((uint64_t)X);                                             \
-    DATA = (char *)DATA + 8;                                                  \
+    DATA = (unsigned char *)DATA + 8;                                         \
   } while (0)
 #endif
 
@@ -165,14 +165,14 @@ bswapu64(uint64_t val) {
 # define be_16(X, DATA)                                                       \
   do {                                                                        \
     memcpy(&X, DATA, 2);                                                      \
-    DATA = (char *)DATA + 2;                                                  \
+    DATA = (unsigned char *)DATA + 2;                                         \
   } while (0)
 #else
 # define be_16(X, DATA)                                                       \
   do {                                                                        \
     memcpy(&X, DATA, 2);                                                      \
     X    = bswapu16((uint16_t)X);                                             \
-    DATA = (char *)DATA + 2;                                                  \
+    DATA = (unsigned char *)DATA + 2;                                         \
   } while (0)
 #endif
 
@@ -181,14 +181,14 @@ bswapu64(uint64_t val) {
 # define be_32(X, DATA)                                                       \
   do {                                                                        \
     memcpy(&X, DATA, 4);                                                      \
-    DATA = (char *)DATA + 4;                                                  \
+    DATA = (unsigned char *)DATA + 4;                                         \
   } while (0)
 #else
 # define be_32(X, DATA)                                                       \
   do {                                                                        \
     memcpy(&X, DATA, 4);                                                      \
     X    = bswapu32((uint32_t)X);                                             \
-    DATA = (char *)DATA + 4;                                                  \
+    DATA = (unsigned char *)DATA + 4;                                         \
   } while (0)
 #endif
 
@@ -197,14 +197,14 @@ bswapu64(uint64_t val) {
 # define be_64(X, DATA)                                                       \
   do {                                                                        \
     memcpy(&X, DATA, 8);                                                      \
-    DATA = (char *)DATA + 8;                                                  \
+    DATA = (unsigned char *)DATA + 8;                                         \
   } while (0)
 #else
 # define be_64(X, DATA)                                                       \
   do {                                                                        \
     memcpy(&X, DATA, 8);                                                      \
     X    = bswapu64((uint64_t)X);                                             \
-    DATA = (char *)DATA + 8;                                                  \
+    DATA = (unsigned char *)DATA + 8;                                         \
   } while (0)
 #endif
 
