@@ -107,8 +107,15 @@ typedef enum ImFileFormatType {
   IM_FILEFORMATTYPE_BMP_OS2_Icon,
   IM_FILEFORMATTYPE_BMP_OS2_Pointer,
 
-  IM_FILEFORMATTYPE_TGA
+  IM_FILEFORMATTYPE_TGA,
+  IM_FILEFORMATTYPE_QOI
 } ImFileFormatType;
+
+typedef enum ImColorSpace {
+  IM_COLORSPACE_UNKNOWN = 0,
+  IM_COLORSPACE_sRGB,
+  IM_COLORSPACE_LINEAR
+} ImColorSpace;
 
 typedef struct ImFileResult {
   void    *raw;
@@ -152,14 +159,16 @@ typedef struct ImImage {
   uint32_t          componentsPerPixel;
   uint32_t          hres;
   uint32_t          vres;
-  ImFormat          format;
+  ImFormat          format; /* Pixel layout (RGB, RGBA, etc.) */
   ImOrientationType ori;
   ImAlphaInfo       alphaInfo;
   ImFileFormatType  fileFormatType;
   ImByteOrder       byteOrder;
   ImOpenIntent      openIntent;
   uint32_t          row_pad_last;
-  
+
+  ImColorSpace      colorSpace;
+
   /* Monochrome color table (between 0-255),
      Default: BLACK and WHITE
    */
