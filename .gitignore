@@ -117,3 +117,4 @@ im-test/*
 ImageViewer/*
 ImageViewer*
 im_ios/*
+.build/
