@@ -110,12 +110,16 @@ typedef enum ImFileFormatType {
   IM_FILEFORMATTYPE_TGA,
   IM_FILEFORMATTYPE_QOI,
   
+  IM_FILEFORMATTYPE_HEIC
 } ImFileFormatType;
 
 typedef enum ImColorSpace {
   IM_COLORSPACE_UNKNOWN = 0,
   IM_COLORSPACE_sRGB,
-  IM_COLORSPACE_LINEAR
+  IM_COLORSPACE_LINEAR,
+  IM_COLORSPACE_GRAY,
+  IM_COLORSPACE_CMYK,
+  IM_COLORSPACE_P3
 } ImColorSpace;
 
 typedef struct ImFileResult {

@@ -61,6 +61,9 @@ TODO
 - [ ] WebP
 - [ ] AVIF
 - [ ] HEIF, HEIC, HEVC
+  - [x] Apple platform
+  - [ ] Windows
+  - [ ] Linux or other platform that has the CODEC?
 - [x] Netpbm (pgm, ppm, pbm, pam, pfm)
   - [x] Plain pbm
   - [x] Binary pbm

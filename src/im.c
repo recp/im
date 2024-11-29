@@ -41,6 +41,7 @@
 #include "io/png/png.h"
 #include "io/tga/tga.h"
 #include "io/qoi/qoi.h"
+#include "io/heic/heic.h"
 
 #include "file.h"
 
@@ -173,6 +174,7 @@ im_load(ImImage         ** __restrict dest,
     
     {"qoi",  qoi_dec},
     
+    {"heic", heic_dec}
   };
 
   floader = NULL;
