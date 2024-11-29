@@ -243,10 +243,11 @@ im_free(ImImage * __restrict im) {
     free(im->file.raw);
   }
 
-  free(im);
   if (im->data.data) {
     free(im->data.data);
   }
+
+  free(im);
 
   return IM_OK;
 }
