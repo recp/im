@@ -48,7 +48,6 @@ im_cgimage(ImImage *im, bool copydata) {
   CGBitmapInfo      bitmapInfo;
   size_t            width, height, bytesPerRow;
   uint32_t          ncomp, bitsPerComponent;
-  bool              paletted;
 
   if (!im)
     return NULL;
@@ -102,9 +101,10 @@ im_cgimage(ImImage *im, bool copydata) {
   }
 
   /* palette */
-  if (!(paletted = ((pal = im->pal) && pal->pal))) {
+  if (!((pal = im->pal) && pal->pal)) {
     colorSpace = baseColorSpace;
   } else {
+    /* palette is used */
     colorSpace = CGColorSpaceCreateIndexed(baseColorSpace, pal->count, pal->pal);
   }
 

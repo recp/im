@@ -116,7 +116,6 @@ coreimg_dec(ImImage         ** __restrict dest,
   bitmapInfo       = CGImageGetBitmapInfo(cgImage);
 
   imAlphaInfo      = IM_ALPHA_NONE;
-  imFormat         = IM_FORMAT_NONE;
   imColorSpace     = IM_COLORSPACE_UNKNOWN;
   byteOrder        = IM_BYTEORDER_ANY;
   hasAlpha         = false;
