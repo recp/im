@@ -27,6 +27,9 @@ TODO
   - [ ] custom unzip/deflate - in progress -
   - [ ] convert to user selected format
 - [ ] JPEG 2000
+  - [x] Apple platform
+- [ ] JXL
+  - [x] Apple platform
 - [ ] TIFF
 - [ ] GIF
 - [x] BMP
