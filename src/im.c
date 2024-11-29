@@ -238,5 +238,9 @@ im_free(ImImage * __restrict im) {
   }
 
   free(im);
+  if (im->data.data) {
+    free(im->data.data);
+  }
+
   return IM_OK;
 }
