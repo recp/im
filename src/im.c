@@ -171,7 +171,8 @@ im_load(ImImage         ** __restrict dest,
     {"vda",  tga_dec},
     {"vst",  tga_dec},
     
-    {"qoi",  qoi_dec}
+    {"qoi",  qoi_dec},
+    
   };
 
   floader = NULL;

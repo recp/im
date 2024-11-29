@@ -108,7 +108,8 @@ typedef enum ImFileFormatType {
   IM_FILEFORMATTYPE_BMP_OS2_Pointer,
 
   IM_FILEFORMATTYPE_TGA,
-  IM_FILEFORMATTYPE_QOI
+  IM_FILEFORMATTYPE_QOI,
+  
 } ImFileFormatType;
 
 typedef enum ImColorSpace {
