@@ -42,6 +42,8 @@
 #include "io/tga/tga.h"
 #include "io/qoi/qoi.h"
 #include "io/heic/heic.h"
+#include "io/jxl/jxl.h"
+#include "io/jp2/jp2.h"
 
 #include "file.h"
 
@@ -174,7 +176,9 @@ im_load(ImImage         ** __restrict dest,
     
     {"qoi",  qoi_dec},
     
-    {"heic", heic_dec}
+    {"heic", heic_dec},
+    {"jxl",  jxl_dec},
+    {"jp2",  jp2_dec}
   };
 
   floader = NULL;
