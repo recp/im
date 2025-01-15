@@ -224,9 +224,9 @@ nx:
   mz_uncompress(im->data.data, &len, zipped, zippedlen);
 
   src_bpr = bpp * width * ((float)im_minu8(bitdepth, 8) / 8.0f);
-  row = p = im->data.data;
-  pri = p;
-  i   = 0;
+  row     = p = im->data.data;
+  pri     = p;
+  i       = 0;
 
   /* undo filter */
 
@@ -250,7 +250,7 @@ nx:
   }
 
   for (; i < height; ) {
-    switch ((int)*row) {
+    switch (row[0]) {
       case IM_PNG_FILTER_NONE:
         memmove(row - i, row + 1, src_bpr);
         break;
@@ -294,6 +294,7 @@ nx:
     i++;
   }
 
+  /* fix byte order */
   if (unlikely(bpc > 1)) {
     switch (open_config->byteOrder) {
       case IM_BYTEORDER_LITTLE:
@@ -314,6 +315,10 @@ nx:
         break;
       default: break; /* _ANY, _BIG_ENDIAN == noop */
     }
+  }
+
+  if (im->pal && !open_config->supportsPal) {
+    /* TODO: */
   }
 
   if (fres.mmap) { im_unmap(fres.raw, fres.size); }
