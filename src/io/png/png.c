@@ -53,7 +53,7 @@ IM_INLINE int paeth(int a, int b, int c) {
 
 static
 void
-undo_filters(ImByte *pass_data, uint32_t pass_width, uint32_t bpp, uint32_t pass_height) {
+undo_filters(ImByte *pass_data, uint32_t pass_width, uint32_t pass_height, uint32_t bpp) {
   ImByte  *ptr, *row, *pri;
   uint32_t bpr, x, y;
 
@@ -128,7 +128,7 @@ deinterlace_adam7(ImImage *im, ImByte *src) {
       continue;
 
     /* process this pass's filters */
-    undo_filters(pass_data, pass_w, bpp, pass_h);
+    undo_filters(pass_data, pass_w, pass_h, bpp);
 
     /* Copy pixels to final positions */
     stride = pass_w * bpp + 1;
