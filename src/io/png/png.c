@@ -53,48 +53,62 @@ IM_INLINE int paeth(int a, int b, int c) {
 
 static
 void
-undo_filters(ImByte *pass_data, uint32_t pass_width, uint32_t pass_height, uint32_t bpp) {
+undo_filters(ImByte *data, uint32_t width, uint32_t height, uint32_t bpp) {
   ImByte  *p, *row, *pri;
   uint32_t bpr, x, y;
 
-  bpr = pass_width * bpp;
-  row = pri = pass_data;
-  p = row + 1;
+  bpr = width * bpp;
+  row = p = data;
+  pri = NULL;
 
-  /* handle the first row as a special case to improve other rows */
+  /* first row special case */
   switch (row[0]) {
-    case FILT_SUB:   for(x=bpp; x<bpr; x++) p[x] += p[x-bpp];            break;
-    case FILT_AVG:   for(x=bpp; x<bpr; x++) p[x] += p[x-bpp] >> 1;       break;
-    case FILT_PAETH: for(x=bpp; x<bpr; x++) p[x] += paeth(p[x-bpp],0,0); break;
+    case FILT_NONE:
+      memmove(p, row + 1, bpr);
+      break;
+    case FILT_SUB:
+      memcpy(p, row + 1, bpp);
+      for (x=bpp; x<bpr; x++) p[x] = row[x+1] + p[x-bpp];
+      break;
+    case FILT_UP:
+      memmove(p, row + 1, bpr);
+      break;
+    case FILT_AVG:
+      memcpy(p, row + 1, bpp);
+      for (x=bpp; x<bpr; x++) p[x] = row[x+1] + (p[x-bpp]>>1);
+      break;
+    case FILT_PAETH:
+      memcpy(p, row + 1, bpp);
+      for (x=bpp; x<bpr; x++) p[x] = row[x+1] + paeth(p[x-bpp], 0, 0);
+      break;
   }
 
-  /* move to the next row */
-  pri  = row;
-  row += bpr + 1;
-  p  = row + 1;
+  /* remaining rows */
+  for (y = 1; y < height; y++) {
+    row += bpr + 1;
+    pri  = p;
+    p   += bpr;
 
-  /* process remaining rows */
-  for (y = 1; y < pass_height; y++) {
     switch (row[0]) {
+      case FILT_NONE:
+        memmove(p, row + 1, bpr);
+        break;
       case FILT_SUB:
-        for (x=bpp; x<bpr; x++) p[x] += p[x-bpp];
+        memcpy(p, row + 1, bpp);
+        for (x=bpp; x<bpr; x++) p[x] = row[x+1] + p[x-bpp];
         break;
       case FILT_UP:
-        for (x=0; x<bpr; x++)   p[x] += pri[x+1];
+        for (x=0; x<bpr; x++)   p[x] = row[x+1] + pri[x];
         break;
       case FILT_AVG:
-        for (x=0;   x<bpp; x++) p[x] += pri[x+1] >> 1;
-        for (x=bpp; x<bpr; x++) p[x] += ((uint16_t)p[x-bpp] + pri[x+1]) >> 1;
+        for (x=0;   x<bpp; x++) p[x] = row[x+1] + (pri[x]>>1);
+        for (x=bpp; x<bpr; x++) p[x] = row[x+1] + ((p[x-bpp] + pri[x])>>1);
         break;
       case FILT_PAETH:
-        for (x=0;   x<bpp; x++) p[x] += paeth(0, pri[x+1], 0);
-        for (x=bpp; x<bpr; x++) p[x] += paeth(p[x-bpp], pri[x+1], pri[x-bpp+1]);
+        for (x=0;   x<bpp; x++) p[x] = row[x+1] + paeth(0,pri[x],0);
+        for (x=bpp; x<bpr; x++) p[x] = row[x+1] + paeth(p[x-bpp],pri[x],pri[x-bpp]);
         break;
     }
-    /* move to the next row */
-    pri  = row;
-    row += bpr + 1;
-    p    = row + 1;
   }
 }
 
@@ -232,6 +246,7 @@ png_dec(ImImage         ** __restrict dest,
   im_png_filter_t filter;
   size_t          len;
   uint32_t        chk_len, chk_type, pal_len, i, j, width, height, src_bpr, bpp, bpc, zippedlen;
+  uint16_t       *p16;
   ImFileResult    fres;
   bool            is_cgbi;
 
@@ -534,7 +549,7 @@ png_dec(ImImage         ** __restrict dest,
         if (!(name_end = memchr(p, 0, chk_len)))
           goto err;
 
-        name_len = (uint32_t)(name_end - p);
+        name_len = name_end - p;
 
         /* compression method must be 0 */
         if (*(p + name_len + 1) != 0)
@@ -543,11 +558,7 @@ png_dec(ImImage         ** __restrict dest,
         zprofile     = p + name_len + 2;
         zprofile_len = chk_len - (name_len + 2);
 
-        /* TODO: libdefl doesnt support to give actual len for now. */
-        profile_len  = zprofile_len * 3;
-        profile      = calloc(1, profile_len);
-
-        if (!infl_buf(zprofile, zprofile_len, &profile, profile_len, 1))
+        if (!infl_buf(zprofile, zprofile_len, &profile, &profile_len, 1))
           goto err;
 
         im->iccProfile     = profile;
@@ -624,52 +635,53 @@ nx:
   i       = 0;
 
   /* undo filter */
+  undo_filters(im->data.data, width, height, bpp);
 
-  switch (row[0]) {
-    case FILT_UP:
-      memmove(p, row + 1, src_bpr);
-      goto nx_row;
-    case FILT_AVG:
-      im_pixcpy(p, row + 1, bpp);
-      for (j = bpp; j < src_bpr; j++) p[j] = row[j+1] + (p[j-bpp] >> 1);
-      goto nx_row;
-    case FILT_PAETH:
-      im_pixcpy(p, row + 1, bpp);
-      for (j = bpp; j < src_bpr; j++) p[j] = row[j+1] + paeth(p[j-bpp], 0, 0);
-      goto nx_row;
-    default: break;
-  }
-
-  for (; i < height; ) {
-    switch (row[0]) {
-      case FILT_NONE:
-        memmove(row - i, row + 1, src_bpr);
-        break;
-      case FILT_SUB:
-        memmove(p, row + 1, bpp);
-        for (j=bpp; j<src_bpr; j++) p[j] = row[j+1] + p[j - bpp];
-        break;
-      case FILT_UP:
-        for (j=0; j<src_bpr; j++)   p[j] = row[j+1] + pri[j];
-        break;
-      case FILT_AVG:
-        for (j=0;   j<bpp;     j++) p[j] = row[j+1] + ((pri[j]) >> 1);
-        for (j=bpp; j<src_bpr; j++) p[j] = row[j+1] + ((p[j-bpp] + pri[j]) >> 1);
-        break;
-      case FILT_PAETH:
-        for (j=0;   j<bpp; j++)     p[j] = row[j+1] + paeth(0, pri[j], 0);
-        for (j=bpp; j<src_bpr; j++) p[j] = row[j+1] + paeth(p[j-bpp], pri[j], pri[j-bpp]);
-        break;
-      default:
-        goto err; /* unknown or unimplemented filter */
-    }
-
-  nx_row:
-    row += src_bpr + 1;
-    pri  = p;
-    p   += src_bpr;
-    i++;
-  }
+//    switch ((int)*row) {
+//      case FILT_UP:
+//        memmove(p, row + 1, src_bpr);
+//        goto nx_row;
+//      case FILT_AVG:
+//        im_pixcpy(p, row + 1, bpp);
+//        for (j = bpp; j < src_bpr; j++) p[j] = row[j+1] + (p[j-bpp] >> 1);
+//        goto nx_row;
+//      case FILT_PAETH:
+//        im_pixcpy(p, row + 1, bpp);
+//        for (j = bpp; j < src_bpr; j++) p[j] = row[j+1] + paeth(p[j-bpp], 0, 0);
+//        goto nx_row;
+//      default: break;
+//    }
+//  
+//    for (; i < height; ) {
+//      switch (row[0]) {
+//        case FILT_NONE:
+//          memmove(row - i, row + 1, src_bpr);
+//          break;
+//        case FILT_SUB:
+//          memmove(p, row + 1, bpp);
+//          for (j=bpp; j<src_bpr; j++) p[j] = row[j+1] + p[j - bpp];
+//          break;
+//        case FILT_UP:
+//          for (j=0; j<src_bpr; j++)   p[j] = row[j+1] + pri[j];
+//          break;
+//        case FILT_AVG:
+//          for (j=0;   j<bpp;     j++) p[j] = row[j+1] + ((pri[j]) >> 1);
+//          for (j=bpp; j<src_bpr; j++) p[j] = row[j+1] + ((p[j-bpp] + pri[j]) >> 1);
+//          break;
+//        case FILT_PAETH:
+//          for (j=0;   j<bpp; j++)     p[j] = row[j+1] + paeth(0, pri[j], 0);
+//          for (j=bpp; j<src_bpr; j++) p[j] = row[j+1] + paeth(p[j-bpp], pri[j], pri[j-bpp]);
+//          break;
+//        default:
+//          goto err; /* unknown or unimplemented filter */
+//      }
+//  
+//    nx_row:
+//      row += src_bpr + 1;
+//      pri  = p;
+//      p   += src_bpr;
+//      i++;
+//    }
 
 af:
   /* fix byte order */
