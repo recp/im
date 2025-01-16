@@ -17,15 +17,16 @@ TODO
 - [ ] GPU support
 - [x] Cocoa and Win32 helpers
 - [ ] JPEG (In Progress)
-- [ ] PNG (In Progress)
+- [x] PNG (In Progress)
   - [x] palette
   - [x] color types
   - [x] 1,2,4,8,16bpp
   - [x] options
   - [x] adam7 interlaced PNGs
-  - [ ] alpha - in progress -
-  - [ ] additional chunks
-  - [ ] custom unzip/deflate - in progress -
+  - [x] alpha
+  - [x] additional chunks ( more ? )
+  - [x] custom unzip/deflate - in progress -
+  - [ ] Deflate & IDAT optimization - in progress -
   - [ ] convert to user selected format
 - [ ] JPEG 2000
   - [x] Apple platform
