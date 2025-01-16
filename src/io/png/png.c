@@ -100,7 +100,7 @@ undo_filters(ImByte *pass_data, uint32_t pass_width, uint32_t pass_height, uint3
 
 static
 ImByte*
-deinterlace_adam7(ImImage *im, ImByte *src) {
+deinterlace_adam7(ImImage *im, ImByte *src, uint32_t width, uint32_t height, uint32_t bpp) {
   const uint8_t x_start[7]  = {0,4,0,2,0,1,0};
   const uint8_t y_start[7]  = {0,0,4,0,2,0,1};
   const uint8_t x_delta[7]  = {8,8,4,4,2,2,1};
@@ -108,11 +108,7 @@ deinterlace_adam7(ImImage *im, ImByte *src) {
 
   ImByte  *dest;
   ImByte  *pass_data, *src_row, pass;
-  uint32_t width, height, pass_w, pass_h, bpp, stride, x, y, dest_x, dest_y;
-
-  width  = im->width;
-  height = im->height;
-  bpp    = im->bytesPerPixel;
+  uint32_t pass_w, pass_h, stride, x, y, dest_x, dest_y;
 
   /* TODO: calloc vs malloc */
   if (!(dest = calloc(1, width * height * bpp))) return NULL;
@@ -349,7 +345,7 @@ nx:
   if (unlikely(interlace)) {
     ImByte *deinterlaced;
 
-    if (!(deinterlaced = deinterlace_adam7(im, im->data.data)))
+    if (!(deinterlaced = deinterlace_adam7(im, im->data.data, width, height, bpp)))
       goto err;
 
     free(im->data.data);
