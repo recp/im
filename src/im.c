@@ -237,6 +237,8 @@ err:
 IM_EXPORT
 ImResult
 im_free(ImImage * __restrict im) {
+  if (!im) return IM_OK;
+
   if (im->file.mmap) {
     im_unmap(im->file.raw, im->file.size);
   } else if (im->file.mustfree) {
@@ -245,6 +247,27 @@ im_free(ImImage * __restrict im) {
 
   if (im->data.data) {
     free(im->data.data);
+  }
+
+  if (im->background)
+    free(im->background);
+
+  if (im->chrm)
+    free(im->chrm);
+
+  if (im->iccProfile)
+    free(im->iccProfile);
+
+  if (im->physicalDim)
+    free(im->physicalDim);
+
+  if (im->timeStamp)
+    free(im->timeStamp);
+
+  if (im->transparency) {
+    if (im->transparency->value.pal.alpha)
+      free(im->transparency->value.pal.alpha);
+    free(im->transparency);
   }
 
   free(im);

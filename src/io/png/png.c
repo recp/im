@@ -153,6 +153,73 @@ deinterlace_adam7(ImImage * __restrict im,
   return dest;
 }
 
+static
+void
+fix_endianness(ImImage *im) {
+  if (im->bitsPerComponent <= 8)
+    return;
+
+  size_t pixels  = im->width * im->height * im->componentsPerPixel;
+  uint16_t *data = im->data.data;
+
+  switch (im->byteOrder) {
+    case IM_BYTEORDER_LITTLE:
+      for (size_t i = 0; i < pixels; i++)
+        data[i] = bswapu16(data[i]);
+      break;
+    case IM_BYTEORDER_HOST:
+#if __BYTE_ORDER__ != __ORDER_BIG_ENDIAN__
+      for (size_t i = 0; i < pixels; i++)
+        data[i] = bswapu16(data[i]);
+#endif
+      break;
+
+    default: // BIG_ENDIAN or ANY - no change needed
+      break;
+  }
+}
+
+static
+bool
+expand_palette(ImImage *im) {
+  if (!im->pal || !im->pal->pal)
+    return false;
+
+  size_t new_size = im->width * im->height * 4; // RGBA output
+  uint8_t *new_data = malloc(new_size);
+  if (!new_data)
+    return false;
+
+  uint8_t *src = im->data.data;
+  uint8_t *dst = new_data;
+  uint8_t *pal = im->pal->pal;
+  uint8_t *alpha = im->transparency ? im->transparency->value.pal.alpha : NULL;
+  size_t alpha_count = im->transparency ? im->transparency->value.pal.count : 0;
+
+  for (size_t i = 0; i < im->width * im->height; i++) {
+    uint8_t idx = src[i];
+    if (idx >= im->pal->count) {
+      free(new_data);
+      return false;
+    }
+
+    memcpy(dst, pal + idx * 3, 3);
+    dst[3] = (idx < alpha_count) ? alpha[idx] : 255;
+    dst += 4;
+  }
+
+  free(im->data.data);
+  im->data.data = new_data;
+  im->format = IM_FORMAT_RGBA;
+  im->alphaInfo = IM_ALPHA_LAST;
+  im->bytesPerPixel = 4;
+  im->bitsPerPixel = 32;
+  im->componentsPerPixel = 4;
+  im->len = new_size;
+
+  return true;
+}
+
 IM_HIDE
 ImResult
 png_dec(ImImage         ** __restrict dest,
@@ -165,7 +232,6 @@ png_dec(ImImage         ** __restrict dest,
   im_png_filter_t filter;
   size_t          len;
   uint32_t        chk_len, chk_type, pal_len, i, j, width, height, src_bpr, bpp, bpc, zippedlen;
-  uint16_t       *p16;
   ImFileResult    fres;
   bool            is_cgbi;
 
@@ -198,7 +264,9 @@ png_dec(ImImage         ** __restrict dest,
     goto err;
   }
 
-  p += 8;
+  p    += 8;
+  color = 0;
+  len   = 0;
 
   im->file           = fres;
   im->openIntent     = open_config->openIntent;
@@ -317,32 +385,70 @@ png_dec(ImImage         ** __restrict dest,
       case IM_PNG_TYPE('t','R','N','S'): {
         ImTransparency* trans;
 
-        if (!(trans = calloc(1, sizeof(*trans))))
+        /* tRNS must come after IHDR and before IDAT */
+        if (!(width > 0 && height > 0) || (zippedlen > 0))
           goto err;
 
+        /**
+         * don't allow tRNS for images that already have alpha
+         * instead of error just ignore chunk.
+         */
+        if (im->alphaInfo != IM_ALPHA_NONE)
+          goto co;
+
+        if (!(trans = calloc(1, sizeof(*trans))))
+          goto err;
+      
         switch (color) {
           case 0: { /* grayscale */
+            uint16_t gray;
+
             if (chk_len != 2)
-            goto err;
-            im->alphaInfo          = IM_ALPHA_LAST;
-            trans->value.gray.gray = im_get_u16_endian(p, false);
+              goto err;
+            
+            gray = im_get_u16_endian(p, false);
+            if (bitdepth < 16)
+              gray = gray & ((1 << bitdepth) - 1);
+
+            trans->value.gray.gray = gray;
+            im->alphaInfo = IM_ALPHA_LAST;
+            im->format    = IM_FORMAT_GRAY_ALPHA;
           } break;
+      
           case 2: { /* RGB */
             if (chk_len != 6)
               goto err;
-            im->alphaInfo          = IM_ALPHA_LAST;
-            trans->value.rgb.red   = im_get_u16_endian(p,     false);
-            trans->value.rgb.green = im_get_u16_endian(p + 2, false);
-            trans->value.rgb.blue  = im_get_u16_endian(p + 4, false);
+              
+            if (bitdepth == 16) {
+              trans->value.rgb.red   = im_get_u16_endian(p, false);
+              trans->value.rgb.green = im_get_u16_endian(p + 2, false);
+              trans->value.rgb.blue  = im_get_u16_endian(p + 4, false);
+            } else {
+              trans->value.rgb.red   = (im_get_u16_endian(p, false) & 0xFF);
+              trans->value.rgb.green = (im_get_u16_endian(p + 2, false) & 0xFF);
+              trans->value.rgb.blue  = (im_get_u16_endian(p + 4, false) & 0xFF);
+            }
+            
+            im->alphaInfo = IM_ALPHA_LAST;
+            im->format    = IM_FORMAT_RGBA;
           } break;
+      
           case 3: { /* palette */
             if (!im->pal || chk_len > 256)
               goto err;
-            im->alphaInfo          = IM_ALPHA_LAST;
+            
+            if (chk_len > im->pal->len / 3)
+              goto err; /* tRNS length must not exceed palette length */
+
             trans->value.pal.alpha = malloc(chk_len);
             trans->value.pal.count = chk_len;
             memcpy(trans->value.pal.alpha, p, chk_len);
+            
+            im->alphaInfo = IM_ALPHA_LAST;
+
+            /* format remains RGB since alpha is in palette */
           } break;
+      
           default:
             free(trans);
             goto err;
@@ -362,8 +468,128 @@ png_dec(ImImage         ** __restrict dest,
       case IM_PNG_TYPE('I','E','N','D'): {
         goto nx;
       }
+      case IM_PNG_TYPE('b','K','G','D'): {
+        ImBackground* bg;
+
+        if (!(bg = calloc(1, sizeof(*bg))))
+          goto err;
+
+        switch (color) {
+          case 0: /* grayscale */
+            bg->value.gray.gray = im_get_u16_endian(p, false);
+            break;
+          case 2: /* RGB */
+            bg->value.rgb.red   = im_get_u16_endian(p, false);
+            bg->value.rgb.green = im_get_u16_endian(p + 2, false);
+            bg->value.rgb.blue  = im_get_u16_endian(p + 4, false);
+            break;
+          case 3: /* palette */
+            bg->value.palette.index = *p;
+            break;
+          default:
+            free(bg);
+            goto err;
+        }
+        im->background = bg;
+        break;
+      }
+
+      case IM_PNG_TYPE('g','A','M','A'): {
+        if (chk_len != 4) goto err;
+        im->gamma = im_get_u32_endian(p, false) / 100000.0;
+        break;
+      }
+
+      case IM_PNG_TYPE('c','H','R','M'): {
+        ImChromaticity *chrm;
+
+        if (chk_len != 32 || !(chrm = calloc(1, sizeof(*chrm))))
+          goto err;
+
+        chrm->whiteX = im_get_u32_endian(p,      false) / 100000.0;
+        chrm->whiteY = im_get_u32_endian(p + 4,  false) / 100000.0;
+        chrm->redX   = im_get_u32_endian(p + 8,  false) / 100000.0;
+        chrm->redY   = im_get_u32_endian(p + 12, false) / 100000.0;
+        chrm->greenX = im_get_u32_endian(p + 16, false) / 100000.0;
+        chrm->greenY = im_get_u32_endian(p + 20, false) / 100000.0;
+        chrm->blueX  = im_get_u32_endian(p + 24, false) / 100000.0;
+        chrm->blueY  = im_get_u32_endian(p + 28, false) / 100000.0;
+        
+        im->chrm = chrm;
+        break;
+      }
+
+      case IM_PNG_TYPE('s','R','G','B'): {
+        if (chk_len != 1) goto err;
+        im->srgbIntent = *p;
+        im->colorSpace = IM_COLORSPACE_sRGB;
+        break;
+      }
+
+      case IM_PNG_TYPE('i','C','C','P'): {
+        ImByte  *name_end;
+        uint8_t *zprofile, *profile;
+        uint32_t name_len, zprofile_len, profile_len;
+
+        if (!(name_end = memchr(p, 0, chk_len)))
+          goto err;
+
+        name_len = (uint32_t)(name_end - p);
+
+        /* compression method must be 0 */
+        if (*(p + name_len + 1) != 0)
+          goto err;
+
+        zprofile     = p + name_len + 2;
+        zprofile_len = chk_len - (name_len + 2);
+
+        /* TODO: libdefl doesnt support to give actual len for now. */
+        profile_len  = zprofile_len * 3;
+        profile      = calloc(1, profile_len);
+
+        if (!infl_buf(zprofile, zprofile_len, &profile, profile_len, 1))
+          goto err;
+
+        im->iccProfile     = profile;
+        im->iccProfileSize = profile_len;
+
+        /* default, can be overridden by profile */
+        im->colorSpace     = IM_COLORSPACE_sRGB;
+        break;
+      }
+
+      case IM_PNG_TYPE('p','H','Y','s'): {
+        ImPhysicalDim *phys;
+
+        if (chk_len != 9 || !(phys = calloc(1, sizeof(*phys))))
+          goto err;
+
+        phys->pixelsPerUnitX = im_get_u32_endian(p, false);
+        phys->pixelsPerUnitY = im_get_u32_endian(p + 4, false);
+        phys->unit           = p[8];
+
+        im->physicalDim = phys;
+        break;
+      }
+
+      case IM_PNG_TYPE('t','I','M','E'): {
+        ImTimeStamp *ts;
+
+        if (chk_len != 7 || !(ts = calloc(1, sizeof(*ts))))
+          goto err;
+
+        ts->year      = im_get_u16_endian(p, false);
+        ts->month     = p[2];
+        ts->day       = p[3];
+        ts->hour      = p[4];
+        ts->minute    = p[5];
+        ts->second    = p[6];
+        im->timeStamp = ts;
+        break;
+      }
     }
 
+  co:
     p = p_chk + chk_len + 4; /* 4: CRC */
   }
 
@@ -447,30 +673,11 @@ nx:
 
 af:
   /* fix byte order */
-  if (unlikely(bpc > 1)) {
-    switch (open_config->byteOrder) {
-      case IM_BYTEORDER_LITTLE:
-        if (bpc == 2) {
-          for (p16 = im->data.data, i = 0; i < (len >> 1); i++) {
-            p16[i] = bswapu16(p16[i]);
-          }
-        }
-        break;
-      case IM_BYTEORDER_HOST:
-#if __BYTE_ORDER__ != __ORDER_BIG_ENDIAN__
-        if (bpc == 2) {
-          for (p16 = im->data.data, i = 0; i < (len >> 1); i++) {
-            p16[i] = bswapu16(p16[i]);
-          }
-        }
-#endif
-        break;
-      default: break; /* _ANY, _BIG_ENDIAN == noop */
-    }
-  }
+  fix_endianness(im);
 
   if (im->pal && !open_config->supportsPal) {
-    /* TODO: */
+    if (!expand_palette(im))
+      goto err;
   }
 
   if (fres.mmap) { im_unmap(fres.raw, fres.size); }
@@ -487,6 +694,9 @@ err:
   if (im) {
     if (im->transparency) {
       free(im->transparency);
+    }
+    if (im->iccProfile) {
+      free(im->iccProfile);
     }
     free(im);
   }

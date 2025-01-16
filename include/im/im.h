@@ -171,6 +171,36 @@ typedef struct ImTransparency {
   } value;
 } ImTransparency;
 
+typedef struct ImBackground {
+  union {
+    struct { uint16_t gray;             } gray;
+    struct { uint16_t red, green, blue; } rgb;
+    struct { uint8_t  index;            } palette;
+  } value;
+} ImBackground;
+
+typedef struct ImChromaticity {
+  double whiteX, whiteY;
+  double redX,   redY;
+  double greenX, greenY;
+  double blueX,  blueY;
+} ImChromaticity;
+
+typedef struct ImPhysicalDim {
+  uint32_t pixelsPerUnitX;
+  uint32_t pixelsPerUnitY;
+  uint8_t  unit; /* 0: unknown, 1: meter */
+} ImPhysicalDim;
+
+typedef struct ImTimeStamp {
+  uint16_t year;
+  uint8_t  month;
+  uint8_t  day;
+  uint8_t  hour;
+  uint8_t  minute;
+  uint8_t  second;
+} ImTimeStamp;
+
 typedef struct ImImage {
   ImFileResult      file;
   ImImageData       data;
@@ -199,8 +229,19 @@ typedef struct ImImage {
   ImByte            monochrome_colors[2];
   im_pal_t         *pal;
 
-  /* Transparency information */
-  ImTransparency*   transparency; /* Optional transparency info */
+  /* Some PNG ancillary chunks but can be used with other formats too  */
+  /* optional transparency information */
+  ImTransparency   *transparency;
+
+  /* ancillary chunk info */
+  ImBackground     *background;
+  double            gamma;
+  ImChromaticity   *chrm;
+  uint8_t           srgbIntent; /* 0: perceptual, 1: relative, 2: saturation, 3: absolute */
+  uint8_t          *iccProfile;
+  size_t            iccProfileSize;
+  ImPhysicalDim    *physicalDim;
+  ImTimeStamp      *timeStamp;
 } ImImage;
 
 IM_EXPORT
