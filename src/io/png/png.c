@@ -54,53 +54,57 @@ IM_INLINE int paeth(int a, int b, int c) {
 static
 void
 undo_filters(ImByte *pass_data, uint32_t pass_width, uint32_t pass_height, uint32_t bpp) {
-  ImByte  *ptr, *row, *pri;
+  ImByte  *p, *row, *pri;
   uint32_t bpr, x, y;
 
   bpr = pass_width * bpp;
   row = pri = pass_data;
-  ptr = row + 1;
+  p = row + 1;
 
   /* handle the first row as a special case to improve other rows */
   switch (row[0]) {
-    case FILT_SUB:   for(x=bpp; x<bpr; x++) ptr[x] += ptr[x-bpp];            break;
-    case FILT_AVG:   for(x=bpp; x<bpr; x++) ptr[x] += ptr[x-bpp] >> 1;       break;
-    case FILT_PAETH: for(x=bpp; x<bpr; x++) ptr[x] += paeth(ptr[x-bpp],0,0); break;
+    case FILT_SUB:   for(x=bpp; x<bpr; x++) p[x] += p[x-bpp];            break;
+    case FILT_AVG:   for(x=bpp; x<bpr; x++) p[x] += p[x-bpp] >> 1;       break;
+    case FILT_PAETH: for(x=bpp; x<bpr; x++) p[x] += paeth(p[x-bpp],0,0); break;
   }
 
   /* move to the next row */
   pri  = row;
   row += bpr + 1;
-  ptr  = row + 1;
+  p  = row + 1;
 
   /* process remaining rows */
   for (y = 1; y < pass_height; y++) {
     switch (row[0]) {
       case FILT_SUB:
-        for (x=bpp; x<bpr; x++) ptr[x] += ptr[x-bpp];
+        for (x=bpp; x<bpr; x++) p[x] += p[x-bpp];
         break;
       case FILT_UP:
-        for (x=0; x<bpr; x++)   ptr[x] += pri[x+1];
+        for (x=0; x<bpr; x++)   p[x] += pri[x+1];
         break;
       case FILT_AVG:
-        for (x=0;   x<bpp; x++) ptr[x] += pri[x+1] >> 1;
-        for (x=bpp; x<bpr; x++) ptr[x] += ((uint16_t)ptr[x-bpp] + pri[x+1]) >> 1;
+        for (x=0;   x<bpp; x++) p[x] += pri[x+1] >> 1;
+        for (x=bpp; x<bpr; x++) p[x] += ((uint16_t)p[x-bpp] + pri[x+1]) >> 1;
         break;
       case FILT_PAETH:
-        for (x=0;   x<bpp; x++) ptr[x] += paeth(0, pri[x+1], 0);
-        for (x=bpp; x<bpr; x++) ptr[x] += paeth(ptr[x-bpp], pri[x+1], pri[x-bpp+1]);
+        for (x=0;   x<bpp; x++) p[x] += paeth(0, pri[x+1], 0);
+        for (x=bpp; x<bpr; x++) p[x] += paeth(p[x-bpp], pri[x+1], pri[x-bpp+1]);
         break;
     }
     /* move to the next row */
     pri  = row;
     row += bpr + 1;
-    ptr  = row + 1;
+    p    = row + 1;
   }
 }
 
 static
 ImByte*
-deinterlace_adam7(ImImage *im, ImByte *src, uint32_t width, uint32_t height, uint32_t bpp) {
+deinterlace_adam7(ImImage * __restrict im,
+                  ImByte  * __restrict src,
+                  uint32_t             width,
+                  uint32_t             height,
+                  uint8_t              bpp) {
   const uint8_t x_start[7]  = {0,4,0,2,0,1,0};
   const uint8_t y_start[7]  = {0,0,4,0,2,0,1};
   const uint8_t x_delta[7]  = {8,8,4,4,2,2,1};
