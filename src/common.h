@@ -416,7 +416,7 @@ im_pixcpy(void * __restrict dst, const void * __restrict src, uint8_t bpp) {
    //      }
    */
   
-  memcpy(dst, src, bpp);
+  memmove(dst, src, bpp);
 }
 
 #endif /* src_common_h */
