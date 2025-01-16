@@ -625,7 +625,7 @@ nx:
 
   /* undo filter */
 
-  switch ((int)*row) {
+  switch (row[0]) {
     case FILT_UP:
       memmove(p, row + 1, src_bpr);
       goto nx_row;
