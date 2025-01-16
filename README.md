@@ -13,6 +13,7 @@ Companion Libaries:
 
 TODO
 -----
+- [ ] Streaming Decode + Progresive Support 
 - [ ] GPU support
 - [x] Cocoa and Win32 helpers
 - [ ] JPEG (In Progress)
@@ -21,7 +22,7 @@ TODO
   - [x] color types
   - [x] 1,2,4,8,16bpp
   - [x] options
-  - [ ] adam7 interlaced PNGs
+  - [x] adam7 interlaced PNGs
   - [ ] alpha - in progress -
   - [ ] additional chunks
   - [ ] custom unzip/deflate - in progress -
