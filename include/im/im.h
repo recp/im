@@ -154,6 +154,23 @@ typedef struct im_pal_t {
   uint32_t  white;
 } im_pal_t;
 
+typedef struct ImTransparency {
+  union {
+    struct {
+      uint16_t gray;    /* For grayscale */
+    } gray;
+    struct {
+      uint16_t red;     /* For RGB */
+      uint16_t green;
+      uint16_t blue;
+    } rgb;
+    struct {
+      uint8_t* alpha;   /* For palette */
+      size_t   count;
+    } pal;
+  } value;
+} ImTransparency;
+
 typedef struct ImImage {
   ImFileResult      file;
   ImImageData       data;
@@ -181,6 +198,9 @@ typedef struct ImImage {
    */
   ImByte            monochrome_colors[2];
   im_pal_t         *pal;
+
+  /* Transparency information */
+  ImTransparency*   transparency; /* Optional transparency info */
 } ImImage;
 
 IM_EXPORT

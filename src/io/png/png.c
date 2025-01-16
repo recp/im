@@ -315,7 +315,40 @@ png_dec(ImImage         ** __restrict dest,
         break;
       }
       case IM_PNG_TYPE('t','R','N','S'): {
-        printf("\nTRNS not implemented yet\n");
+        ImTransparency* trans;
+
+        if (!(trans = calloc(1, sizeof(*trans))))
+          goto err;
+
+        switch (color) {
+          case 0: { /* grayscale */
+            if (chk_len != 2)
+            goto err;
+            im->alphaInfo          = IM_ALPHA_LAST;
+            trans->value.gray.gray = im_get_u16_endian(p, false);
+          } break;
+          case 2: { /* RGB */
+            if (chk_len != 6)
+              goto err;
+            im->alphaInfo          = IM_ALPHA_LAST;
+            trans->value.rgb.red   = im_get_u16_endian(p,     false);
+            trans->value.rgb.green = im_get_u16_endian(p + 2, false);
+            trans->value.rgb.blue  = im_get_u16_endian(p + 4, false);
+          } break;
+          case 3: { /* palette */
+            if (!im->pal || chk_len > 256)
+              goto err;
+            im->alphaInfo          = IM_ALPHA_LAST;
+            trans->value.pal.alpha = malloc(chk_len);
+            trans->value.pal.count = chk_len;
+            memcpy(trans->value.pal.alpha, p, chk_len);
+          } break;
+          default:
+            free(trans);
+            goto err;
+        }
+        
+        im->transparency = trans;
         break;
       }
       case IM_PNG_TYPE('I','D','A','T'): {
@@ -451,7 +484,12 @@ af:
 
 err:
   if (fres.mmap) { im_unmap(fres.raw, fres.size); }
-  if (im)        { free(im);                      }
+  if (im) {
+    if (im->transparency) {
+      free(im->transparency);
+    }
+    free(im);
+  }
   *dest = NULL;
 
   infl_destroy(imdefl);
