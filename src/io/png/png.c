@@ -53,11 +53,12 @@ IM_INLINE int paeth(int a, int b, int c) {
 
 static
 void
-undo_filters(ImByte *data, uint32_t width, uint32_t height, uint32_t bpp) {
+undo_filters(ImByte *data, uint32_t width, uint32_t height, uint32_t bpp, uint8_t bitdepth) {
   ImByte  *p, *row, *pri;
   uint32_t bpr, x, y;
 
-  bpr = width * bpp;
+  bpr = bpp * width * ((float)im_minu8(bitdepth, 8) / 8.0f);
+  /* bpr = width * bpp; */
   row = p = data;
   pri = NULL;
 
@@ -118,7 +119,8 @@ deinterlace_adam7(ImImage * __restrict im,
                   ImByte  * __restrict src,
                   uint32_t             width,
                   uint32_t             height,
-                  uint8_t              bpp) {
+                  uint8_t              bpp,
+                  uint8_t              bitdepth) {
   const uint8_t x_start[7]  = {0,4,0,2,0,1,0};
   const uint8_t y_start[7]  = {0,0,4,0,2,0,1};
   const uint8_t x_delta[7]  = {8,8,4,4,2,2,1};
@@ -142,7 +144,7 @@ deinterlace_adam7(ImImage * __restrict im,
       continue;
 
     /* process this pass's filters */
-    undo_filters(pass_data, pass_w, pass_h, bpp);
+    undo_filters(pass_data, pass_w, pass_h, bpp, bitdepth);
 
     /* Copy pixels to final positions */
     stride = pass_w * bpp + 1;
@@ -258,10 +260,10 @@ png_dec(ImImage         ** __restrict dest,
   infl_stream_t  *imdefl;
   ImImage        *im;
   ImByte         *zipped;
-  ImByte         *p, *p_chk, *row, *pri, bitdepth, color, compr, interlace;
+  ImByte         *p, *p_chk, *row, bitdepth, color, compr, interlace;
   im_png_filter_t filter;
   size_t          len;
-  uint32_t        chk_len, chk_type, pal_len, i, width, height, src_bpr, bpp, bpc, zippedlen;
+  uint32_t        chk_len, chk_type, pal_len, width, height, bpp, bpc, zippedlen;
   ImFileResult    fres;
   bool            is_cgbi;
 
@@ -617,7 +619,7 @@ nx:
   if (unlikely(interlace)) {
     ImByte *deint;
 
-    if (!(deint = deinterlace_adam7(im, im->data.data, width, height, bpp)))
+    if (!(deint = deinterlace_adam7(im, im->data.data, width, height, bpp, bitdepth)))
       goto err;
 
     free(im->data.data);
@@ -627,13 +629,7 @@ nx:
   }
 
   /* non-interlaced: undo filter in the usual way */
-  src_bpr = bpp * width * ((float)im_minu8(bitdepth, 8) / 8.0f);
-  row     = p = im->data.data;
-  pri     = p;
-  i       = 0;
-
-  /* undo filter */
-  undo_filters(im->data.data, width, height, bpp);
+  undo_filters(im->data.data, width, height, bpp, bitdepth);
 
 af:
   /* fix byte order */
