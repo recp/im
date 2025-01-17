@@ -652,12 +652,11 @@ af:
 err:
   if (fres.mmap) { im_unmap(fres.raw, fres.size); }
   if (im) {
-    if (im->transparency) {
-      free(im->transparency);
-    }
-    if (im->iccProfile) {
-      free(im->iccProfile);
-    }
+    if (im->transparency) free(im->transparency);
+    if (im->iccProfile)   free(im->iccProfile);
+    if (im->iccProfile)   free(im->iccProfile);
+
+    /* free other mallocs/callocs... */
     free(im);
   }
   *dest = NULL;
