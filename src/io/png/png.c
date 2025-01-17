@@ -53,6 +53,69 @@ IM_INLINE int paeth(int a, int b, int c) {
 
 static
 void
+undo_filters_adam7(ImByte *pass_data, uint32_t pass_width, uint32_t pass_height, uint32_t bpp, uint8_t bitdepth) {
+  ImByte  *p, *row, *pri;
+  uint32_t bpr, x, y;
+
+  bpr = bpp * pass_width * ((float)im_minu8(bitdepth, 8) / 8.0f);
+  row = pri = pass_data;
+  p   = row + 1;
+
+  /* handle the first row as a special case to improve other rows */
+  /* first row special case */
+  switch (row[0]) {
+    case FILT_NONE:
+      memmove(p, row + 1, bpr);
+      break;
+    case FILT_SUB:
+      memcpy(p, row + 1, bpp);
+      for (x=bpp; x<bpr; x++) p[x] = row[x+1] + p[x-bpp];
+      break;
+    case FILT_UP:
+      memmove(p, row + 1, bpr);
+      break;
+    case FILT_AVG:
+      memcpy(p, row + 1, bpp);
+      for (x=bpp; x<bpr; x++) p[x] = row[x+1] + (p[x-bpp]>>1);
+      break;
+    case FILT_PAETH:
+      memcpy(p, row + 1, bpp);
+      for (x=bpp; x<bpr; x++) p[x] = row[x+1] + paeth(p[x-bpp], 0, 0);
+      break;
+  }
+
+  /* move to the next row */
+  pri  = row;
+  row += bpr + 1;
+  p    = row + 1;
+
+  /* process remaining rows */
+  for (y = 1; y < pass_height; y++) {
+    switch (row[0]) {
+      case FILT_SUB:
+        for (x=bpp; x<bpr; x++) p[x] += p[x-bpp];
+        break;
+      case FILT_UP:
+        for (x=0; x<bpr; x++)   p[x] += pri[x+1];
+        break;
+      case FILT_AVG:
+        for (x=0;   x<bpp; x++) p[x] += pri[x+1] >> 1;
+        for (x=bpp; x<bpr; x++) p[x] += ((uint16_t)p[x-bpp] + pri[x+1]) >> 1;
+        break;
+      case FILT_PAETH:
+        for (x=0;   x<bpp; x++) p[x] += paeth(0, pri[x+1], 0);
+        for (x=bpp; x<bpr; x++) p[x] += paeth(p[x-bpp], pri[x+1], pri[x-bpp+1]);
+        break;
+    }
+    /* move to the next row */
+    pri  = row;
+    row += bpr + 1;
+    p    = row + 1;
+  }
+}
+
+static
+void
 undo_filters(ImByte *data, uint32_t width, uint32_t height, uint32_t bpp, uint8_t bitdepth) {
   ImByte  *p, *row, *pri;
   uint32_t bpr, x, y;
@@ -115,16 +178,16 @@ undo_filters(ImByte *data, uint32_t width, uint32_t height, uint32_t bpp, uint8_
 
 static
 ImByte*
-deinterlace_adam7(ImImage * __restrict im,
-                  ImByte  * __restrict src,
-                  uint32_t             width,
-                  uint32_t             height,
-                  uint8_t              bpp,
-                  uint8_t              bitdepth) {
-  const uint8_t x_start[7]  = {0,4,0,2,0,1,0};
-  const uint8_t y_start[7]  = {0,0,4,0,2,0,1};
-  const uint8_t x_delta[7]  = {8,8,4,4,2,2,1};
-  const uint8_t y_delta[7]  = {8,8,8,4,4,2,2};
+adam7(ImImage * __restrict im,
+      ImByte  * __restrict src,
+      uint32_t             width,
+      uint32_t             height,
+      uint8_t              bpp,
+      uint8_t              bitdepth) {
+  const uint8_t xstart[7]  = {0,4,0,2,0,1,0};
+  const uint8_t ystart[7]  = {0,0,4,0,2,0,1};
+  const uint8_t xdelta[7]  = {8,8,4,4,2,2,1};
+  const uint8_t ydelta[7]  = {8,8,8,4,4,2,2};
 
   ImByte  *dest;
   ImByte  *pass_data, *src_row, pass;
@@ -137,33 +200,33 @@ deinterlace_adam7(ImImage * __restrict im,
 
   /* process each pass */
   for (pass = 0; pass < 7; pass++) {
-    pass_w = (width  - x_start[pass] + x_delta[pass] - 1) / x_delta[pass];
-    pass_h = (height - y_start[pass] + y_delta[pass] - 1) / y_delta[pass];
+    pass_w = (width -xstart[pass]+xdelta[pass]-1) / xdelta[pass];
+    pass_h = (height-ystart[pass]+ydelta[pass]-1) / ydelta[pass];
 
     if (!pass_w || !pass_h)
       continue;
 
     /* process this pass's filters */
-    undo_filters(pass_data, pass_w, pass_h, bpp, bitdepth);
+    undo_filters_adam7(pass_data, pass_w, pass_h, bpp, bitdepth);
 
     /* Copy pixels to final positions */
     stride = pass_w * bpp + 1;
     for (y = 0; y < pass_h; y++) {
       src_row = pass_data + y * stride + 1;  /* skip filter byte */
-      dest_y  = y * y_delta[pass] + y_start[pass];
+      dest_y  = y * ydelta[pass] + ystart[pass];
 
       if (dest_y >= height)
         continue;
 
       for (x = 0; x < pass_w; x++) {
-        dest_x = x * x_delta[pass] + x_start[pass];
+        dest_x = x * xdelta[pass] + xstart[pass];
         if (dest_x < width)
-          memcpy(&dest[(dest_y * width + dest_x) * bpp], &src_row[x * bpp], bpp);
+          memcpy(&dest[(dest_y*width+dest_x)*bpp], &src_row[x*bpp], bpp);
       }
     }
 
     /* move to next pass */
-    pass_data += pass_h * (pass_w * bpp + 1);
+    pass_data += pass_h*(pass_w*bpp+1);
   }
 
   return dest;
@@ -256,7 +319,7 @@ IM_HIDE
 ImResult
 png_dec(ImImage         ** __restrict dest,
         const char       * __restrict path,
-        im_open_config_t * __restrict open_config) {
+        im_open_config_t * __restrict oconfig) {
   infl_stream_t  *imdefl;
   ImImage        *im;
   ImByte         *zipped;
@@ -272,7 +335,7 @@ png_dec(ImImage         ** __restrict dest,
   zipped    = NULL;
   imdefl    = NULL;
   interlace = 0;
-  fres      = im_readfile(path, open_config->openIntent != IM_OPEN_INTENT_READWRITE);
+  fres      = im_readfile(path, oconfig->openIntent != IM_OPEN_INTENT_READWRITE);
 
   if (fres.ret != IM_OK) {
     goto err;
@@ -301,8 +364,8 @@ png_dec(ImImage         ** __restrict dest,
   len   = 0;
 
   im->file           = fres;
-  im->openIntent     = open_config->openIntent;
-  im->byteOrder      = open_config->byteOrder;
+  im->openIntent     = oconfig->openIntent;
+  im->byteOrder      = oconfig->byteOrder;
   im->ori            = IM_ORIENTATION_UP;
   im->fileFormatType = IM_FILEFORMATTYPE_PNG;
   height             = width = bpp = bpc = zippedlen = 0;
@@ -582,7 +645,7 @@ png_dec(ImImage         ** __restrict dest,
         phys->pixelsPerUnitY = im_get_u32_endian(p + 4, false);
         phys->unit           = p[8];
 
-        im->physicalDim = phys;
+        im->physicalDim      = phys;
       } break;
       case IM_PNG_TYPE('t','I','M','E'): {
         ImTimeStamp *ts;
@@ -619,7 +682,7 @@ nx:
   if (unlikely(interlace)) {
     ImByte *deint;
 
-    if (!(deint = deinterlace_adam7(im, im->data.data, width, height, bpp, bitdepth)))
+    if (!(deint = adam7(im, im->data.data, width, height, bpp, bitdepth)))
       goto err;
 
     free(im->data.data);
@@ -635,7 +698,7 @@ af:
   /* fix byte order */
   fix_endianness(im);
 
-  if (im->pal && !open_config->supportsPal) {
+  if (im->pal && !oconfig->supportsPal) {
     if (!expand_palette(im))
       goto err;
   }
