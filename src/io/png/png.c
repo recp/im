@@ -170,11 +170,14 @@ deinterlace_adam7(ImImage * __restrict im,
 static
 void
 fix_endianness(ImImage *im) {
+  uint16_t *data;
+  size_t    pixels;
+
   if (im->bitsPerComponent <= 8)
     return;
 
-  size_t pixels  = im->width * im->height * im->componentsPerPixel;
-  uint16_t *data = im->data.data;
+  pixels = im->width * im->height * im->componentsPerPixel;
+  data   = im->data.data;
 
   switch (im->byteOrder) {
     case IM_BYTEORDER_LITTLE:
@@ -187,8 +190,7 @@ fix_endianness(ImImage *im) {
         data[i] = bswapu16(data[i]);
 #endif
       break;
-
-    default: // BIG_ENDIAN or ANY - no change needed
+    default: /* BIG_ENDIAN or ANY - no change needed */
       break;
   }
 }
@@ -196,40 +198,54 @@ fix_endianness(ImImage *im) {
 static
 bool
 expand_palette(ImImage *im) {
+  uint8_t *new_data, *src, *dst, *pal, *alpha, idx;
+  size_t   new_size, alpha_count, i;
+  bool     has_alpha;
+
   if (!im->pal || !im->pal->pal)
     return false;
 
-  size_t new_size = im->width * im->height * 4; // RGBA output
-  uint8_t *new_data = malloc(new_size);
+  /* Check both the transparency data and alphaInfo */
+  has_alpha = (im->alphaInfo == IM_ALPHA_LAST || im->alphaInfo == IM_ALPHA_FIRST) 
+              || (im->transparency && im->transparency->value.pal.alpha);
+
+  new_size = im->width * im->height * (has_alpha ? 4 : 3); /* RGBA or RGB output */
+  new_data = malloc(new_size);
+
   if (!new_data)
     return false;
 
-  uint8_t *src = im->data.data;
-  uint8_t *dst = new_data;
-  uint8_t *pal = im->pal->pal;
-  uint8_t *alpha = im->transparency ? im->transparency->value.pal.alpha : NULL;
-  size_t alpha_count = im->transparency ? im->transparency->value.pal.count : 0;
+  src         = im->data.data;
+  dst         = new_data;
+  pal         = im->pal->pal;
+  alpha       = has_alpha ? im->transparency->value.pal.alpha : NULL;
+  alpha_count = has_alpha ? im->transparency->value.pal.count : 0;
 
-  for (size_t i = 0; i < im->width * im->height; i++) {
-    uint8_t idx = src[i];
+  for (i = 0; i < im->width * im->height; i++) {
+    idx = src[i];
     if (idx >= im->pal->count) {
       free(new_data);
       return false;
     }
 
     memcpy(dst, pal + idx * 3, 3);
-    dst[3] = (idx < alpha_count) ? alpha[idx] : 255;
-    dst += 4;
+    if (has_alpha) {
+      dst[3] = (idx < alpha_count) ? alpha[idx] : 255;
+      dst += 4;
+    } else {
+      dst += 3;
+    }
   }
 
   free(im->data.data);
-  im->data.data = new_data;
-  im->format = IM_FORMAT_RGBA;
-  im->alphaInfo = IM_ALPHA_LAST;
-  im->bytesPerPixel = 4;
-  im->bitsPerPixel = 32;
-  im->componentsPerPixel = 4;
-  im->len = new_size;
+
+  im->data.data          = new_data;
+  im->format             = has_alpha ? IM_FORMAT_RGBA : IM_FORMAT_RGB;
+  im->alphaInfo          = has_alpha ? IM_ALPHA_LAST  : IM_ALPHA_NONE;
+  im->bytesPerPixel      = has_alpha ? 4  : 3;
+  im->bitsPerPixel       = has_alpha ? 32 : 24;
+  im->componentsPerPixel = has_alpha ? 4  : 3;
+  im->len                = new_size;
 
   return true;
 }
@@ -245,8 +261,7 @@ png_dec(ImImage         ** __restrict dest,
   ImByte         *p, *p_chk, *row, *pri, bitdepth, color, compr, interlace;
   im_png_filter_t filter;
   size_t          len;
-  uint32_t        chk_len, chk_type, pal_len, i, j, width, height, src_bpr, bpp, bpc, zippedlen;
-  uint16_t       *p16;
+  uint32_t        chk_len, chk_type, pal_len, i, width, height, src_bpr, bpp, bpc, zippedlen;
   ImFileResult    fres;
   bool            is_cgbi;
 
@@ -350,8 +365,7 @@ png_dec(ImImage         ** __restrict dest,
 
             pal     = calloc(1, sizeof(*pal));
             im->pal = pal;
-            break;
-          }
+          } break;
           case 4:
             im->bitsPerPixel       = bitdepth * 2;
             im->bytesPerPixel      = bpp = bpc * 2;
@@ -378,8 +392,7 @@ png_dec(ImImage         ** __restrict dest,
         zipped        = row = malloc(len);
 
         imdefl        = infl_init(im->data.data, (uint32_t)im->len, 1);
-        break;
-      }
+      } break;
       case IM_PNG_TYPE('P','L','T','E'): {
         if (im->pal) {
           ImByte *pal;
@@ -395,8 +408,7 @@ png_dec(ImImage         ** __restrict dest,
 
           memcpy(pal, p, chk_len);
         }
-        break;
-      }
+      } break;
       case IM_PNG_TYPE('t','R','N','S'): {
         ImTransparency* trans;
 
@@ -429,7 +441,6 @@ png_dec(ImImage         ** __restrict dest,
             im->alphaInfo = IM_ALPHA_LAST;
             im->format    = IM_FORMAT_GRAY_ALPHA;
           } break;
-      
           case 2: { /* RGB */
             if (chk_len != 6)
               goto err;
@@ -447,7 +458,6 @@ png_dec(ImImage         ** __restrict dest,
             im->alphaInfo = IM_ALPHA_LAST;
             im->format    = IM_FORMAT_RGBA;
           } break;
-      
           case 3: { /* palette */
             if (!im->pal || chk_len > 256)
               goto err;
@@ -463,23 +473,20 @@ png_dec(ImImage         ** __restrict dest,
 
             /* format remains RGB since alpha is in palette */
           } break;
-      
           default:
             free(trans);
             goto err;
         }
         
         im->transparency = trans;
-        break;
-      }
+      } break;
       case IM_PNG_TYPE('I','D','A','T'): {
         memcpy(row, p, chk_len);
         row       += chk_len;
         zippedlen += chk_len;
 
         //        infl_include(imdefl, p, chk_len);
-        break;
-      }
+      } break;
       case IM_PNG_TYPE('I','E','N','D'): {
         goto nx;
       }
@@ -506,15 +513,11 @@ png_dec(ImImage         ** __restrict dest,
             goto err;
         }
         im->background = bg;
-        break;
-      }
-
+      } break;
       case IM_PNG_TYPE('g','A','M','A'): {
         if (chk_len != 4) goto err;
         im->gamma = im_get_u32_endian(p, false) / 100000.0;
-        break;
-      }
-
+      } break;
       case IM_PNG_TYPE('c','H','R','M'): {
         ImChromaticity *chrm;
 
@@ -531,16 +534,12 @@ png_dec(ImImage         ** __restrict dest,
         chrm->blueY  = im_get_u32_endian(p + 28, false) / 100000.0;
         
         im->chrm = chrm;
-        break;
-      }
-
+      } break;
       case IM_PNG_TYPE('s','R','G','B'): {
         if (chk_len != 1) goto err;
         im->srgbIntent = *p;
         im->colorSpace = IM_COLORSPACE_sRGB;
-        break;
-      }
-
+      } break;
       case IM_PNG_TYPE('i','C','C','P'): {
         ImByte  *name_end;
         uint8_t *zprofile, *profile;
@@ -549,7 +548,7 @@ png_dec(ImImage         ** __restrict dest,
         if (!(name_end = memchr(p, 0, chk_len)))
           goto err;
 
-        name_len = name_end - p;
+        name_len = (uint32_t)(name_end - p);
 
         /* compression method must be 0 */
         if (*(p + name_len + 1) != 0)
@@ -558,7 +557,11 @@ png_dec(ImImage         ** __restrict dest,
         zprofile     = p + name_len + 2;
         zprofile_len = chk_len - (name_len + 2);
 
-        if (!infl_buf(zprofile, zprofile_len, &profile, &profile_len, 1))
+        /* TODO: libdefl doesnt support to export actual length for now */
+        profile_len  = zprofile_len * 4;
+        profile      = calloc(1, profile_len);
+
+        if (!infl_buf(zprofile, zprofile_len, profile, profile_len, 1))
           goto err;
 
         im->iccProfile     = profile;
@@ -566,9 +569,7 @@ png_dec(ImImage         ** __restrict dest,
 
         /* default, can be overridden by profile */
         im->colorSpace     = IM_COLORSPACE_sRGB;
-        break;
-      }
-
+      } break;
       case IM_PNG_TYPE('p','H','Y','s'): {
         ImPhysicalDim *phys;
 
@@ -580,9 +581,7 @@ png_dec(ImImage         ** __restrict dest,
         phys->unit           = p[8];
 
         im->physicalDim = phys;
-        break;
-      }
-
+      } break;
       case IM_PNG_TYPE('t','I','M','E'): {
         ImTimeStamp *ts;
 
@@ -596,8 +595,7 @@ png_dec(ImImage         ** __restrict dest,
         ts->minute    = p[5];
         ts->second    = p[6];
         im->timeStamp = ts;
-        break;
-      }
+      } break;
     }
 
   co:
@@ -617,13 +615,13 @@ nx:
   }
 
   if (unlikely(interlace)) {
-    ImByte *deinterlaced;
+    ImByte *deint;
 
-    if (!(deinterlaced = deinterlace_adam7(im, im->data.data, width, height, bpp)))
+    if (!(deint = deinterlace_adam7(im, im->data.data, width, height, bpp)))
       goto err;
 
     free(im->data.data);
-    im->data.data = deinterlaced;
+    im->data.data = deint;
 
     goto af;
   }
@@ -636,52 +634,6 @@ nx:
 
   /* undo filter */
   undo_filters(im->data.data, width, height, bpp);
-
-//    switch ((int)*row) {
-//      case FILT_UP:
-//        memmove(p, row + 1, src_bpr);
-//        goto nx_row;
-//      case FILT_AVG:
-//        im_pixcpy(p, row + 1, bpp);
-//        for (j = bpp; j < src_bpr; j++) p[j] = row[j+1] + (p[j-bpp] >> 1);
-//        goto nx_row;
-//      case FILT_PAETH:
-//        im_pixcpy(p, row + 1, bpp);
-//        for (j = bpp; j < src_bpr; j++) p[j] = row[j+1] + paeth(p[j-bpp], 0, 0);
-//        goto nx_row;
-//      default: break;
-//    }
-//  
-//    for (; i < height; ) {
-//      switch (row[0]) {
-//        case FILT_NONE:
-//          memmove(row - i, row + 1, src_bpr);
-//          break;
-//        case FILT_SUB:
-//          memmove(p, row + 1, bpp);
-//          for (j=bpp; j<src_bpr; j++) p[j] = row[j+1] + p[j - bpp];
-//          break;
-//        case FILT_UP:
-//          for (j=0; j<src_bpr; j++)   p[j] = row[j+1] + pri[j];
-//          break;
-//        case FILT_AVG:
-//          for (j=0;   j<bpp;     j++) p[j] = row[j+1] + ((pri[j]) >> 1);
-//          for (j=bpp; j<src_bpr; j++) p[j] = row[j+1] + ((p[j-bpp] + pri[j]) >> 1);
-//          break;
-//        case FILT_PAETH:
-//          for (j=0;   j<bpp; j++)     p[j] = row[j+1] + paeth(0, pri[j], 0);
-//          for (j=bpp; j<src_bpr; j++) p[j] = row[j+1] + paeth(p[j-bpp], pri[j], pri[j-bpp]);
-//          break;
-//        default:
-//          goto err; /* unknown or unimplemented filter */
-//      }
-//  
-//    nx_row:
-//      row += src_bpr + 1;
-//      pri  = p;
-//      p   += src_bpr;
-//      i++;
-//    }
 
 af:
   /* fix byte order */
