@@ -19,7 +19,6 @@
 
 #include "../../file.h"
 #include "../../endian.h"
-#include "../../zz/zz.h"
 
 #define IM_PNG_TYPE(a,b,c,d)  (((unsigned)(a) << 24) + ((unsigned)(b) << 16)  \
                              + ((unsigned)(c) << 8)  + (unsigned)(d))
@@ -35,13 +34,6 @@ typedef enum im_png_filter_t {
 IM_INLINE ImByte mod256u8(ImByte b) { return b & 0xFF; }
 IM_INLINE int    mod256i(int b)     { return b & 0xFF; }
 
-
-//#if defined(__ARM_NEON)
-//#  include "arch/neon.h"
-//#elif defined(__x86_64__) || defined(_M_X64)
-//#  include "arch/x86.h"
-//#endif
-
 IM_INLINE int paeth(int a, int b, int c) {
   int p  = a + b - c;
   int pa = abs(p - a);
@@ -50,6 +42,14 @@ IM_INLINE int paeth(int a, int b, int c) {
 
   return (pa <= pb && pa <= pc) ? a : (pb <= pc ? b : c);
 }
+
+/*
+#if defined(__ARM_NEON)
+#  include "arch/neon.h"
+#elif defined(__x86_64__) || defined(_M_X64)
+#  include "arch/x86.h"
+#endif
+*/
 
 static
 void
@@ -674,7 +674,7 @@ nx:
   //  decompress_idat(zipped, zippedlen, im->data.data, im->len);
   //  zsinflate(im->data.data, (int)im->len, zipped, zippedlen);
 
-  defl_include(imdefl, zipped, zippedlen);
+  infl_include(imdefl, zipped, zippedlen);
   if (infl(imdefl)) {
     goto err;
   }
