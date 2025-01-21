@@ -325,6 +325,15 @@ im_get_u32_endian(void * __restrict p, bool isLittleEndian) {
   return *(uint32_t *)(void *)&buf;
 }
 
+IM_INLINE uint32_t u32be(ImByte ** __restrict p) {uint32_t b;be_32(b,*p);return b;}
+IM_INLINE uint32_t u32le(ImByte ** __restrict p) {uint32_t b;le_32(b,*p);return b;}
+IM_INLINE uint32_t u16be(ImByte ** __restrict p) {uint16_t b;be_16(b,*p);return b;}
+IM_INLINE uint32_t u16le(ImByte ** __restrict p) {uint16_t b;le_16(b,*p);return b;}
+IM_INLINE float    f32be(ImByte ** __restrict p) {float    b;be_32(b,*p);return b;}
+IM_INLINE float    f32le(ImByte ** __restrict p) {float    b;le_32(b,*p);return b;}
+IM_INLINE double   f64be(ImByte ** __restrict p) {double   b;be_64(b,*p);return b;}
+IM_INLINE double   f64le(ImByte ** __restrict p) {double   b;le_64(b,*p);return b;}
+
 IM_INLINE
 float
 im_get_f32_endian(void * __restrict p, bool isLittleEndian) {

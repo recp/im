@@ -372,8 +372,8 @@ png_dec(ImImage         ** __restrict dest,
   bitdepth           = 8;
 
   for (;;) {
-    chk_len  = im_get_u32_endian(p, false); p += 4;
-    chk_type = im_get_u32_endian(p, false); p += 4;
+    chk_len  = u32be(&p);
+    chk_type = u32be(&p);
     p_chk    = p;
 
     switch (chk_type) {
@@ -381,8 +381,8 @@ png_dec(ImImage         ** __restrict dest,
         is_cgbi = true;
         break;
       case IM_PNG_TYPE('I','H','D','R'): {
-        im->width            = width  = im_get_u32_endian(p, false); p += 4;
-        im->height           = height = im_get_u32_endian(p, false); p += 4;
+        im->width            = width  = u32be(&p);
+        im->height           = height = u32be(&p);
         bitdepth             = *p++;
         color                = *p++;
         compr                = *p++;
@@ -581,7 +581,7 @@ png_dec(ImImage         ** __restrict dest,
       } break;
       case IM_PNG_TYPE('g','A','M','A'): {
         if (chk_len != 4) goto err;
-        im->gamma = im_get_u32_endian(p, false) / 100000.0;
+        im->gamma = u32be(&p) / 100000.0;
       } break;
       case IM_PNG_TYPE('c','H','R','M'): {
         ImChromaticity *chrm;
@@ -589,15 +589,15 @@ png_dec(ImImage         ** __restrict dest,
         if (chk_len != 32 || !(chrm = calloc(1, sizeof(*chrm))))
           goto err;
 
-        chrm->whiteX = im_get_u32_endian(p,      false) / 100000.0;
-        chrm->whiteY = im_get_u32_endian(p + 4,  false) / 100000.0;
-        chrm->redX   = im_get_u32_endian(p + 8,  false) / 100000.0;
-        chrm->redY   = im_get_u32_endian(p + 12, false) / 100000.0;
-        chrm->greenX = im_get_u32_endian(p + 16, false) / 100000.0;
-        chrm->greenY = im_get_u32_endian(p + 20, false) / 100000.0;
-        chrm->blueX  = im_get_u32_endian(p + 24, false) / 100000.0;
-        chrm->blueY  = im_get_u32_endian(p + 28, false) / 100000.0;
-        
+        chrm->whiteX = u32be(&p) / 100000.0;
+        chrm->whiteY = u32be(&p) / 100000.0;
+        chrm->redX   = u32be(&p) / 100000.0;
+        chrm->redY   = u32be(&p) / 100000.0;
+        chrm->greenX = u32be(&p) / 100000.0;
+        chrm->greenY = u32be(&p) / 100000.0;
+        chrm->blueX  = u32be(&p) / 100000.0;
+        chrm->blueY  = u32be(&p) / 100000.0;
+
         im->chrm = chrm;
       } break;
       case IM_PNG_TYPE('s','R','G','B'): {
@@ -641,8 +641,8 @@ png_dec(ImImage         ** __restrict dest,
         if (chk_len != 9 || !(phys = calloc(1, sizeof(*phys))))
           goto err;
 
-        phys->pixelsPerUnitX = im_get_u32_endian(p, false);
-        phys->pixelsPerUnitY = im_get_u32_endian(p + 4, false);
+        phys->pixelsPerUnitX = u32be(&p);
+        phys->pixelsPerUnitY = u32be(&p);
         phys->unit           = p[8];
 
         im->physicalDim      = phys;
