@@ -708,7 +708,7 @@ af:
   im->file = fres;
   *dest    = im;
 
-  //  unzip_cleanup(zip);
+  infl_destroy(imdefl);
 
   return IM_OK;
 
