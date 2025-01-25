@@ -717,7 +717,10 @@ err:
   if (im) {
     if (im->transparency) free(im->transparency);
     if (im->iccProfile)   free(im->iccProfile);
-    if (im->iccProfile)   free(im->iccProfile);
+    if (im->timeStamp)    free(im->timeStamp);
+    if (im->background)   free(im->background);
+    if (im->chrm)         free(im->chrm);
+    if (im->physicalDim)  free(im->physicalDim);
 
     /* free other mallocs/callocs... */
     free(im);
