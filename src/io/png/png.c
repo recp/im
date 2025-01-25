@@ -68,18 +68,18 @@ undo_filters_adam7(ImByte *pass_data, uint32_t pass_width, uint32_t pass_height,
       memmove(p, row + 1, bpr);
       break;
     case FILT_SUB:
-      memcpy(p, row + 1, bpp);
+      memmove(p, row + 1, bpp);
       for (x=bpp; x<bpr; x++) p[x] = row[x+1] + p[x-bpp];
       break;
     case FILT_UP:
       memmove(p, row + 1, bpr);
       break;
     case FILT_AVG:
-      memcpy(p, row + 1, bpp);
+      memmove(p, row + 1, bpp);
       for (x=bpp; x<bpr; x++) p[x] = row[x+1] + (p[x-bpp]>>1);
       break;
     case FILT_PAETH:
-      memcpy(p, row + 1, bpp);
+      memmove(p, row + 1, bpp);
       for (x=bpp; x<bpr; x++) p[x] = row[x+1] + paeth(p[x-bpp], 0, 0);
       break;
   }
@@ -131,18 +131,18 @@ undo_filters(ImByte *data, uint32_t width, uint32_t height, uint32_t bpp, uint8_
       memmove(p, row + 1, bpr);
       break;
     case FILT_SUB:
-      memcpy(p, row + 1, bpp);
+      memmove(p, row + 1, bpp);
       for (x=bpp; x<bpr; x++) p[x] = row[x+1] + p[x-bpp];
       break;
     case FILT_UP:
       memmove(p, row + 1, bpr);
       break;
     case FILT_AVG:
-      memcpy(p, row + 1, bpp);
+      memmove(p, row + 1, bpp);
       for (x=bpp; x<bpr; x++) p[x] = row[x+1] + (p[x-bpp]>>1);
       break;
     case FILT_PAETH:
-      memcpy(p, row + 1, bpp);
+      memmove(p, row + 1, bpp);
       for (x=bpp; x<bpr; x++) p[x] = row[x+1] + paeth(p[x-bpp], 0, 0);
       break;
   }
@@ -158,7 +158,7 @@ undo_filters(ImByte *data, uint32_t width, uint32_t height, uint32_t bpp, uint8_
         memmove(p, row + 1, bpr);
         break;
       case FILT_SUB:
-        memcpy(p, row + 1, bpp);
+        memmove(p, row + 1, bpp);
         for (x=bpp; x<bpr; x++) p[x] = row[x+1] + p[x-bpp];
         break;
       case FILT_UP:
