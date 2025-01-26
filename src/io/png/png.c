@@ -35,10 +35,12 @@ IM_INLINE ImByte mod256u8(ImByte b) { return b & 0xFF; }
 IM_INLINE int    mod256i(int b)     { return b & 0xFF; }
 
 IM_INLINE int paeth(int a, int b, int c) {
-  int p  = a + b - c;
-  int pa = abs(p - a);
-  int pb = abs(p - b);
-  int pc = abs(p - c);
+  int ac = a - c;
+  int bc = b - c;
+
+  int pa = abs(bc);
+  int pb = abs(ac);
+  int pc = abs(ac + bc);
 
   return (pa <= pb && pa <= pc) ? a : (pb <= pc ? b : c);
 }
