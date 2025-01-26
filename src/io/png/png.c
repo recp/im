@@ -137,6 +137,7 @@ undo_filters(ImByte *data, uint32_t width, uint32_t height, uint32_t bpp, uint8_
       memmove(p, row + 1, bpr);
       break;
     case FILT_SUB:
+    case FILT_PAETH:
       memmove(p, row + 1, bpp);
       for (x=bpp; x<bpr; x++) p[x] = row[x+1] + p[x-bpp];
       break;
@@ -147,10 +148,12 @@ undo_filters(ImByte *data, uint32_t width, uint32_t height, uint32_t bpp, uint8_
       memmove(p, row + 1, bpp);
       for (x=bpp; x<bpr; x++) p[x] = row[x+1] + (p[x-bpp]>>1);
       break;
-    case FILT_PAETH:
-      memmove(p, row + 1, bpp);
-      for (x=bpp; x<bpr; x++) p[x] = row[x+1] + paeth(p[x-bpp], 0, 0);
-      break;
+//    case FILT_PAETH:
+//      memmove(p, row + 1, bpp);
+//      // for (x=bpp; x<bpr; x++) p[x] = row[x+1] + paeth(p[x-bpp], 0, 0);
+//      /* paeth(p[x-bpp], 0, 0) == a ? */
+//      for (x=bpp; x<bpr; x++) p[x] = row[x+1] + p[x-bpp];
+//      break;
   }
 
   /* remaining rows */
@@ -178,7 +181,8 @@ undo_filters(ImByte *data, uint32_t width, uint32_t height, uint32_t bpp, uint8_
         break;
       case FILT_PAETH:
         for (x=0; x<bpr; x++) {
-          if (x<bpp) p[x] = row[x+1] + paeth(0, pri[x], 0);
+          // if (x<bpp) p[x] = row[x+1] + paeth(0, pri[x], 0);
+          if (x<bpp) p[x] = row[x+1] + pri[x];
           else       p[x] = row[x+1] + paeth(p[x-bpp], pri[x], pri[x-bpp]);
         }
         break;
