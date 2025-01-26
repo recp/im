@@ -101,12 +101,16 @@ undo_filters_adam7(ImByte *pass_data, uint32_t pass_width, uint32_t pass_height,
         for (x=0; x<bpr; x++)   p[x] += pri[x+1];
         break;
       case FILT_AVG:
-        for (x=0;   x<bpp; x++) p[x] += pri[x+1] >> 1;
-        for (x=bpp; x<bpr; x++) p[x] += ((uint16_t)p[x-bpp] + pri[x+1]) >> 1;
+        for (x=0; x<bpr; x++) {
+          if (x<bpp) p[x] = row[x+1] + (pri[x]>>1);
+          else       p[x] = row[x+1] + ((p[x-bpp] + pri[x])>>1);
+        }
         break;
       case FILT_PAETH:
-        for (x=0;   x<bpp; x++) p[x] += paeth(0, pri[x+1], 0);
-        for (x=bpp; x<bpr; x++) p[x] += paeth(p[x-bpp], pri[x+1], pri[x-bpp+1]);
+        for (x=0; x<bpr; x++) {
+          if (x<bpp) p[x] += paeth(0, pri[x+1], 0);
+          else       p[x] += paeth(p[x-bpp], pri[x+1], pri[x-bpp+1]);
+        }
         break;
     }
     /* move to the next row */
@@ -167,12 +171,16 @@ undo_filters(ImByte *data, uint32_t width, uint32_t height, uint32_t bpp, uint8_
         for (x=0; x<bpr; x++)   p[x] = row[x+1] + pri[x];
         break;
       case FILT_AVG:
-        for (x=0;   x<bpp; x++) p[x] = row[x+1] + (pri[x]>>1);
-        for (x=bpp; x<bpr; x++) p[x] = row[x+1] + ((p[x-bpp] + pri[x])>>1);
+        for (x=0; x<bpr; x++) {
+          if (x<bpp) p[x] = row[x+1] + (pri[x]>>1);
+          else       p[x] = row[x+1] + ((p[x-bpp] + pri[x])>>1);
+        }
         break;
       case FILT_PAETH:
-        for (x=0;   x<bpp; x++) p[x] = row[x+1] + paeth(0,pri[x],0);
-        for (x=bpp; x<bpr; x++) p[x] = row[x+1] + paeth(p[x-bpp],pri[x],pri[x-bpp]);
+        for (x=0; x<bpr; x++) {
+          if (x<bpp) p[x] = row[x+1] + paeth(0, pri[x], 0);
+          else       p[x] = row[x+1] + paeth(p[x-bpp], pri[x], pri[x-bpp]);
+        }
         break;
     }
   }
