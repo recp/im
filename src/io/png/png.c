@@ -101,16 +101,12 @@ undo_filters_adam7(ImByte *pass_data, uint32_t pass_width, uint32_t pass_height,
         for (x=0; x<bpr; x++)   p[x] += pri[x+1];
         break;
       case FILT_AVG:
-        for (x=0; x<bpr; x++) {
-          if (x<bpp) p[x] = row[x+1] + (pri[x]>>1);
-          else       p[x] = row[x+1] + ((p[x-bpp] + pri[x])>>1);
-        }
+        for (x=0;   x<bpp; x++) p[x] = row[x+1] + (pri[x]>>1);
+        for (x=bpp; x<bpr; x++) p[x] = row[x+1] + ((p[x-bpp] + pri[x])>>1);
         break;
       case FILT_PAETH:
-        for (x=0; x<bpr; x++) {
-          if (x<bpp) p[x] += paeth(0, pri[x+1], 0);
-          else       p[x] += paeth(p[x-bpp], pri[x+1], pri[x-bpp+1]);
-        }
+        for (x=0;   x<bpp; x++) p[x] = row[x+1] + pri[x];
+        for (x=bpp; x<bpr; x++) p[x] = row[x+1] + paeth(p[x-bpp],pri[x],pri[x-bpp]);
         break;
     }
     /* move to the next row */
@@ -134,15 +130,13 @@ undo_filters(ImByte *data, uint32_t width, uint32_t height, uint32_t bpp, uint8_
   /* first row special case */
   switch (row[0]) {
     case FILT_NONE:
+    case FILT_UP:
       memmove(p, row + 1, bpr);
       break;
     case FILT_SUB:
     case FILT_PAETH:
       memmove(p, row + 1, bpp);
       for (x=bpp; x<bpr; x++) p[x] = row[x+1] + p[x-bpp];
-      break;
-    case FILT_UP:
-      memmove(p, row + 1, bpr);
       break;
     case FILT_AVG:
       memmove(p, row + 1, bpp);
@@ -174,17 +168,12 @@ undo_filters(ImByte *data, uint32_t width, uint32_t height, uint32_t bpp, uint8_
         for (x=0; x<bpr; x++)   p[x] = row[x+1] + pri[x];
         break;
       case FILT_AVG:
-        for (x=0; x<bpr; x++) {
-          if (x<bpp) p[x] = row[x+1] + (pri[x]>>1);
-          else       p[x] = row[x+1] + ((p[x-bpp] + pri[x])>>1);
-        }
+        for (x=0;   x<bpp; x++) p[x] = row[x+1] + (pri[x]>>1);
+        for (x=bpp; x<bpr; x++) p[x] = row[x+1] + ((p[x-bpp] + pri[x])>>1);
         break;
       case FILT_PAETH:
-        for (x=0; x<bpr; x++) {
-          // if (x<bpp) p[x] = row[x+1] + paeth(0, pri[x], 0);
-          if (x<bpp) p[x] = row[x+1] + pri[x];
-          else       p[x] = row[x+1] + paeth(p[x-bpp], pri[x], pri[x-bpp]);
-        }
+        for (x=0;   x<bpp; x++) p[x] = row[x+1] + pri[x];
+        for (x=bpp; x<bpr; x++) p[x] = row[x+1] + paeth(p[x-bpp],pri[x],pri[x-bpp]);
         break;
     }
   }
