@@ -151,30 +151,71 @@ undo_filters(ImByte *data, uint32_t width, uint32_t height, uint32_t bpp, uint8_
   }
 
   /* remaining rows */
-  for (y = 1; y < height; y++) {
-    row += bpr + 1;
-    pri  = p;
-    p   += bpr;
+  if (bpp == 4) {
+    for (y = 1; y < height; y++) {
+      row += bpr + 1;
+      pri  = p;
+      p   += bpr;
 
-    switch (row[0]) {
-      case FILT_NONE:
-        memmove(p, row + 1, bpr);
-        break;
-      case FILT_SUB:
-        memmove(p, row + 1, bpp);
-        for (x=bpp; x<bpr; x++) p[x] = row[x+1] + p[x-bpp];
-        break;
-      case FILT_UP:
-        for (x=0; x<bpr; x++)   p[x] = row[x+1] + pri[x];
-        break;
-      case FILT_AVG:
-        for (x=0;   x<bpp; x++) p[x] = row[x+1] + (pri[x]>>1);
-        for (x=bpp; x<bpr; x++) p[x] = row[x+1] + ((p[x-bpp] + pri[x])>>1);
-        break;
-      case FILT_PAETH:
-        for (x=0;   x<bpp; x++) p[x] = row[x+1] + pri[x];
-        for (x=bpp; x<bpr; x++) p[x] = row[x+1] + paeth(p[x-bpp],pri[x],pri[x-bpp]);
-        break;
+      switch (row[0]) {
+        case FILT_NONE:
+          memmove(p, row + 1, bpr);
+          break;
+        case FILT_SUB:
+          p[0] = row[1]; p[1] = row[2]; p[2] = row[3]; p[3] = row[4];
+          for (x=4; x<bpr; x++) p[x] = row[x+1] + p[x-4];
+          break;
+        case FILT_UP:
+          for (x=0; x<bpr; x++) p[x] = row[x+1] + pri[x];
+          break;
+        case FILT_AVG:
+          p[0] = row[1]+(pri[0]>>1); p[1] = row[2]+(pri[1]>>1);
+          p[2] = row[3]+(pri[2]>>1); p[3] = row[4]+(pri[3]>>1);
+          for (x=4; x<bpr; x+=4) {
+            p[x]   = row[x+1] + ((p[x-4] + pri[x])>>1);
+            p[x+1] = row[x+2] + ((p[x-3] + pri[x+1])>>1);
+            p[x+2] = row[x+3] + ((p[x-2] + pri[x+2])>>1);
+            p[x+3] = row[x+4] + ((p[x-1] + pri[x+3])>>1);
+          }
+          break;
+        case FILT_PAETH:
+          p[0] = row[1]+pri[0]; p[1] = row[2]+pri[1];
+          p[2] = row[3]+pri[2]; p[3] = row[4]+pri[3];
+          for (x=4; x<bpr; x+=4) {
+            p[x]   = row[x+1] + paeth(p[x-4],pri[x],  pri[x-4]);
+            p[x+1] = row[x+2] + paeth(p[x-3],pri[x+1],pri[x-3]);
+            p[x+2] = row[x+3] + paeth(p[x-2],pri[x+2],pri[x-2]);
+            p[x+3] = row[x+4] + paeth(p[x-1],pri[x+3],pri[x-1]);
+          }
+          break;
+      }
+    }
+  } else {
+    for (y = 1; y < height; y++) {
+      row += bpr + 1;
+      pri  = p;
+      p   += bpr;
+
+      switch (row[0]) {
+        case FILT_NONE:
+          memmove(p, row + 1, bpr);
+          break;
+        case FILT_SUB:
+          memmove(p, row + 1, bpp);
+          for (x=bpp; x<bpr; x++) p[x] = row[x+1] + p[x-bpp];
+          break;
+        case FILT_UP:
+          for (x=0; x<bpr; x++)   p[x] = row[x+1] + pri[x];
+          break;
+        case FILT_AVG:
+          for (x=0;   x<bpp; x++) p[x] = row[x+1] + (pri[x]>>1);
+          for (x=bpp; x<bpr; x++) p[x] = row[x+1] + ((p[x-bpp] + pri[x])>>1);
+          break;
+        case FILT_PAETH:
+          for (x=0;   x<bpp; x++) p[x] = row[x+1] + pri[x];
+          for (x=bpp; x<bpr; x++) p[x] = row[x+1] + paeth(p[x-bpp],pri[x],pri[x-bpp]);
+          break;
+      }
     }
   }
 }
