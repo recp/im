@@ -24,19 +24,19 @@ im_option_rowpadding_t im__opt_pad = {
   .pad = 0
 };
 
-im_option_base_t* options[] =
-{
-  &im__opt_pad,                    /* 0:  _ROW_PAD_LAST                */
-  0,                               /* 1:  _SUPPORTED_FORMATS           */
-  false,                           /* 2:  _SUPPORTED_ORIENTATIONS      */
-  false,                           /* 3:  _SUPPORTED_COMPRESSIONS      */
+// im_option_base_t* options[] =
+// {
+//   &im__opt_pad,                    /* 0:  _ROW_PAD_LAST                */
+//   0,                               /* 1:  _SUPPORTED_FORMATS           */
+//   false,                           /* 2:  _SUPPORTED_ORIENTATIONS      */
+//   false,                           /* 3:  _SUPPORTED_COMPRESSIONS      */
 
-#ifndef _MSC_VER
-  true                             /* 4: _USE_MMAP_FOR_WINDOWS         */
-#else
-  false
-#endif
-};
+// #ifndef _MSC_VER
+//   true                             /* 4: _USE_MMAP_FOR_WINDOWS         */
+// #else
+//   false
+// #endif
+// };
 
 im_option_base_t * __restrict IM_OPT_SIMPLE[] = {
   &((im_option_rowpadding_t){

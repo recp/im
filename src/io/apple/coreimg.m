@@ -17,7 +17,7 @@
 #import <Foundation/Foundation.h>
 #import <CoreGraphics/CoreGraphics.h>
 #import <CoreImage/CoreImage.h>
-#import "heic.h"
+#import "coreimg.h"
 
 IM_HIDE
 ImResult
