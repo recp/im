@@ -1,0 +1,6 @@
+[submodule "deps/defl"]
+	path = deps/defl
+	url = https://recp@github.com/recp/defl.git
+[submodule "deps/huff"]
+	path = deps/huff
+	url = https://recp@github.com/recp/huff.git
