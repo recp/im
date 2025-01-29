@@ -120,3 +120,5 @@ im_ios/*
 .build/
 src/zz/
 build/
+build_win/
+out/
