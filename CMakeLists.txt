@@ -6,6 +6,12 @@ project(im
   LANGUAGES C
 )
 
+# Enable Hot Reload for MSVC compilers if supported.
+if (POLICY CMP0141)
+  cmake_policy(SET CMP0141 NEW)
+  set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "$<IF:$<AND:$<C_COMPILER_ID:MSVC>,$<CXX_COMPILER_ID:MSVC>>,$<$<CONFIG:Debug,RelWithDebInfo>:EditAndContinue>,$<$<CONFIG:Debug,RelWithDebInfo>:ProgramDatabase>>")
+endif()
+
 set(IM_BUILD)
 option(IM_SHARED "Shared build" ON)
 option(IM_STATIC "Static build" OFF)
@@ -65,6 +71,13 @@ include(GNUInstallDirs)
 
 # Target Start
 add_library(${PROJECT_NAME} ${IM_BUILD} "")
+
+# Set C standard - try C2x/C23 if available, fallback to C11
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.21)
+  set_property(TARGET ${PROJECT_NAME} PROPERTY C_STANDARD 23)
+elseif(CMAKE_VERSION VERSION_GREATER_EQUAL 3.12)
+  set_property(TARGET ${PROJECT_NAME} PROPERTY C_STANDARD 11)
+endif()
 
 if(IM_SHARED)
   add_definitions(-DIM_EXPORTS)
