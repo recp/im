@@ -31,8 +31,10 @@ typedef enum im_png_filter_t {
   FILT_PAETH = 4
 } im_png_filter_t;
 
+/*
 IM_INLINE ImByte mod256u8(ImByte b) { return b & 0xFF; }
 IM_INLINE int    mod256i(int b)     { return b & 0xFF; }
+*/
 
 IM_INLINE int paeth(int a, int b, int c) {
   int ac = a - c;
