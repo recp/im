@@ -123,3 +123,4 @@ build/
 build_win/
 out/
 .vscode/
+.swiftpm/
