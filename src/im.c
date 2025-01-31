@@ -123,25 +123,26 @@ static inline int hash_ext(const char * __restrict ext) {
 
 typedef ImResult (*imloader)(ImImage**, const char*, im_open_config_t*);
 
-static const struct { imloader fn; } extmap[256] = {
-  [0x06] = { dib_dec  },         /* dib                  */
-  [0x1F] = { ppm_dec  },         /* ppm                  */
-  [0x30] = { tga_dec  },         /* vda                  */
-  [0x3C] = { pbm_dec  },         /* pbm                  */
-  [0x54] = { heic_dec },         /* heic                 */
-  [0x58] = { jp2_dec  },         /* jp2                  */
-  [0x64] = { tga_dec  },         /* icb                  */
-  [0x68] = { pgm_dec  },         /* pgm                  */
-  [0x79] = { bmp_dec  },         /* bmp                  */
-  [0x7A] = { jxl_dec  },         /* jxl                  */
-  [0x99] = { qoi_dec  },         /* qoi                  */
-  [0x9D] = { tga_dec  },         /* vst                  */
-  [0xA9] = { png_dec  },         /* png                  */
-  [0xEA] = { tga_dec  },         /* tga                  */
-  [0xF0] = { pam_dec  },         /* pam                  */
-  [0xF7] = { jpg_dec  },         /* jpg                  */
-  [0xFB] = { pfm_dec  },         /* pfm                  */
-  [0xFC] = { jpg_dec  },         /* jpeg                 */
+/* static const struct { imloader fn; } extmap[256] = { */
+static const imloader extmap[256] = {
+  [0x06] = dib_dec,         /* dib  */
+  [0x1F] = ppm_dec,         /* ppm  */
+  [0x30] = tga_dec,         /* vda  */
+  [0x3C] = pbm_dec,         /* pbm  */
+  [0x54] = heic_dec,        /* heic */
+  [0x58] = jp2_dec,         /* jp2  */
+  [0x64] = tga_dec,         /* icb  */
+  [0x68] = pgm_dec,         /* pgm  */
+  [0x79] = bmp_dec,         /* bmp  */
+  [0x7A] = jxl_dec,         /* jxl  */
+  [0x99] = qoi_dec,         /* qoi  */
+  [0x9D] = tga_dec,         /* vst  */
+  [0xA9] = png_dec,         /* png  */
+  [0xEA] = tga_dec,         /* tga  */
+  [0xF0] = pam_dec,         /* pam  */
+  [0xF7] = jpg_dec,         /* jpg  */
+  [0xFB] = pfm_dec,         /* pfm  */
+  [0xFC] = jpg_dec,         /* jpeg */
 };
 
 #if 0
@@ -217,7 +218,7 @@ im_load(ImImage         ** __restrict dest,
     }
   }
 
-  if (!filetype && (ext=strrchr(url,'.')) && (fn=extmap[hash_ext(ext+1)].fn))
+  if (!filetype && (ext=strrchr(url,'.')) && (fn=extmap[hash_ext(ext+1)]))
     return fn(dest, url, &conf);
 
 #ifdef __APPLE__
