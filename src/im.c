@@ -30,7 +30,8 @@
 #include "color.h"
 #include "sampler.h"
 
-//#include "io/jpg/dec/dec.h"
+#include "io/jpg/dec/dec.h"
+#include "io/apple/coreimg.h"
 #include "io/ppm/ppm.h"
 #include "io/ppm/pgm.h"
 #include "io/ppm/pbm.h"
@@ -127,15 +128,15 @@ im_load(ImImage         ** __restrict dest,
   localurl = url;
   if (!localurl)
     return IM_EBADF;
-  
+
   im_open_config_t open_conf = {0};
-  
+
   /*defaults  */
   open_conf.openIntent  = openIntent;
   open_conf.byteOrder   = IM_BYTEORDER_ANY;
   open_conf.rowPadding  = 0;
   open_conf.supportsPal = true;
-  
+
   /* override defaults */
   open_conf.options    = options;
 
@@ -153,7 +154,6 @@ im_load(ImImage         ** __restrict dest,
   }
 
   floader_t floaders[] = {
-    
     {"pbm",  pbm_dec},
     {"pgm",  pgm_dec},
     {"ppm",  ppm_dec},
@@ -173,9 +173,9 @@ im_load(ImImage         ** __restrict dest,
     {"icb",  tga_dec},
     {"vda",  tga_dec},
     {"vst",  tga_dec},
-    
+
     {"qoi",  qoi_dec},
-    
+
     {"heic", heic_dec},
     {"jxl",  jxl_dec},
     {"jp2",  jp2_dec}
@@ -223,10 +223,16 @@ im_load(ImImage         ** __restrict dest,
     }
   }
 
-  if (floader)
+  if (floader) {
     _err_no = floader->floader_fn(dest, localurl, &open_conf);
-  else
+  } else {
+#ifdef __APPLE__
+    /* unknown source; let CoreGraphics/CoreImage decode if it can on Apple */
+    _err_no = coreimg_dec(dest, localurl, &open_conf);
+#else
     goto err;
+#endif
+  }
 
   return _err_no;
 err:
