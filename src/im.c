@@ -110,6 +110,37 @@ im_init_data(ImImage * __restrict im, uint32_t size) {
 #endif
 }
 
+/* fast and secure extension hash - uses first 4 chars max */
+static inline int hash_ext(const char * __restrict ext) {
+  int h = 0x811C9DC5; /* FNV offset basis */
+  /* mix up to 4 chars - handles both short and long extensions */
+  for (int i = 0; i < 4 && ext[i]; i++) {
+    h ^= (uint8_t)ext[i] | 0x20; /* case insensitive */
+    h *= 0x01000193;             /* FNV prime        */
+  }
+  /* fold to fit table size */
+  return (uint8_t)((h ^ (h >> 16)) & 0xFF);
+}
+
+typedef ImResult (*imloader)(ImImage**, const char*, im_open_config_t*);
+
+static const struct { imloader fn; } extmap[256] = {
+  [37]  = { pbm_dec },         /* pbm                  */
+  [42]  = { pgm_dec },         /* pgm                  */
+  [53]  = { ppm_dec },         /* ppm                  */
+  [89]  = { pfm_dec },         /* pfm                  */
+  [91]  = { pam_dec },         /* pam                  */
+  [103] = { png_dec },         /* png                  */
+  [113] = { bmp_dec },         /* bmp                  */
+  [127] = { dib_dec },         /* dib                  */
+  [142] = { tga_dec },         /* tga/tpic/icb/vda/vst */
+  [167] = { qoi_dec },         /* qoi                  */
+  [173] = { heic_dec },        /* heic                 */
+  //    [181] = { jpg_dec},        /* jpg/jpeg             */
+  [191] = { jxl_dec },         /* jxl                  */
+  [211] = { jp2_dec },         /* jp2                  */
+};
+
 IM_EXPORT
 ImResult
 im_load(ImImage         ** __restrict dest,
@@ -117,127 +148,49 @@ im_load(ImImage         ** __restrict dest,
         im_option_base_t *            options[],
         ImOpenIntent                  openIntent) {
   im_option_base_t *opt;
-  floader_t        *floader;
-  const char       *localurl;
+  const char       *ext;
+  imloader          fn;
   int               file_type;
-  int               _err_no, i;
 
+  if (!url || !dest) return IM_EBADF;
+
+  /* TODO: currently file_type from file ext.  */
   file_type = IM_FILE_TYPE_AUTO;
 
-  /* TODO: remote or another kind URL than file URL ? */
-  localurl = url;
-  if (!localurl)
-    return IM_EBADF;
-
-  im_open_config_t open_conf = {0};
-
-  /*defaults  */
-  open_conf.openIntent  = openIntent;
-  open_conf.byteOrder   = IM_BYTEORDER_ANY;
-  open_conf.rowPadding  = 0;
-  open_conf.supportsPal = true;
-
-  /* override defaults */
-  open_conf.options    = options;
-
-  i = 0;
-  if (options && (opt = options[i])) {
-    do {
-      switch (opt->type) {
-        case IM_OPTION_ROW_PAD_LAST:     open_conf.rowPadding = ((im_option_rowpadding_t *)opt)->pad;     break;
-        case IM_OPTION_BYTE_ORDER:       open_conf.byteOrder = ((im_option_byteorder_t *)opt)->order;     break;
-        case IM_OPTION_SUPPORTS_PALETTE: open_conf.supportsPal = ((im_option_bool_t *)opt)->on;           break;
-        case IM_OPTION_BGR_TO_RGB:       open_conf.bgr2rgb = ((im_option_bool_t *)opt)->on;               break;
-        default: break;
-      }
-    } while ((opt = options[++i]));
-  }
-
-  floader_t floaders[] = {
-    {"pbm",  pbm_dec},
-    {"pgm",  pgm_dec},
-    {"ppm",  ppm_dec},
-    {"pfm",  pfm_dec},
-    {"pam",  pam_dec},
-//    {"jpeg", jpg_dec},
-//    {"jpg",  jpg_dec},
-    {"png",  png_dec},
-    {"bmp",  bmp_dec},
-    {"dib",  dib_dec},
-
-    /* tga */
-    {"tga",  tga_dec},
-    {"tpic", tga_dec},
-
-    /* tga (old extensions) */
-    {"icb",  tga_dec},
-    {"vda",  tga_dec},
-    {"vst",  tga_dec},
-
-    {"qoi",  qoi_dec},
-
-    {"heic", heic_dec},
-    {"jxl",  jxl_dec},
-    {"jp2",  jp2_dec}
+  im_open_config_t conf = {
+    .openIntent  = openIntent,
+    .byteOrder   = IM_BYTEORDER_ANY,
+    .rowPadding  = 0,
+    .supportsPal = true,
+    .options     = options
   };
 
-  floader = NULL;
-
-  if (file_type == IM_FILE_TYPE_AUTO) {
-    char * file_ext;
-    file_ext = strrchr(localurl, '.');
-    if (file_ext) {
-      int floader_len;
-      int i;
-
-      ++file_ext;
-      floader_len = IM_ARRAY_LEN(floaders);
-      for (i = 0; i < floader_len; i++) {
-        if (strcasecmp(file_ext, floaders[i].fext) == 0) {
-          floader = &floaders[i];
-          break;
-        }
+  if (options) {
+    for (int i = 0; options[i]; i++) {
+      opt = options[i];
+      switch (opt->type) {
+        case IM_OPTION_ROW_PAD_LAST:     conf.rowPadding  = ((im_option_rowpadding_t*)opt)->pad;  break;
+        case IM_OPTION_BYTE_ORDER:       conf.byteOrder   = ((im_option_byteorder_t*)opt)->order; break;
+        case IM_OPTION_SUPPORTS_PALETTE: conf.supportsPal = ((im_option_bool_t*)opt)->on;         break;
+        case IM_OPTION_BGR_TO_RGB:       conf.bgr2rgb     = ((im_option_bool_t*)opt)->on;         break;
+        default: break;
       }
-    } else {
-      /* TODO */
-    }
-  } else {
-    switch (file_type) {
-      case IM_FILE_TYPE_PPM: {
-        floader = &floaders[0];
-        break;
-      }
-      case IM_FILE_TYPE_PGM: {
-        floader = &floaders[1];
-        break;
-      }
-      case IM_FILE_TYPE_PBM:
-        floader = &floaders[3];
-        break;
-      case IM_FILE_TYPE_JPEG:
-        floader = &floaders[4];
-        break;
-      default:
-        *dest = NULL;
-        break;
     }
   }
 
-  if (floader) {
-    _err_no = floader->floader_fn(dest, localurl, &open_conf);
-  } else {
+  if (file_type == IM_FILE_TYPE_AUTO
+      && (ext = strrchr(url, '.'))
+      && (fn = extmap[hash_ext(ext + 1)].fn)) {
+    return fn(dest, url, &conf);
+  }
+
 #ifdef __APPLE__
-    /* unknown source; let CoreGraphics/CoreImage decode if it can on Apple */
-    _err_no = coreimg_dec(dest, localurl, &open_conf);
+  /* unknown source; let CoreGraphics/CoreImage decode if it can on Apple */
+  return coreimg_dec(dest, url, &conf);
 #else
-    goto err;
-#endif
-  }
-
-  return _err_no;
-err:
   *dest = NULL;
   return IM_ERR;
+#endif
 }
 
 IM_EXPORT
