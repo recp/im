@@ -653,8 +653,8 @@ png_dec(ImImage         ** __restrict dest,
       } break;
       case IM_PNG_TYPE('i','C','C','P'): {
         ImByte  *name_end;
-        uint8_t *zprofile, *profile;
-        uint32_t name_len, zprofile_len, profile_len;
+        uint8_t *zprof, *prof;
+        uint32_t name_len, zprof_len, prof_len;
 
         if (!(name_end = memchr(p, 0, chk_len)))
           goto err;
@@ -665,18 +665,20 @@ png_dec(ImImage         ** __restrict dest,
         if (*(p + name_len + 1) != 0)
           goto err;
 
-        zprofile     = p + name_len + 2;
-        zprofile_len = chk_len - (name_len + 2);
+        zprof     = p + name_len + 2;
+        zprof_len = chk_len - (name_len + 2);
 
         /* TODO: libdefl doesnt support to export actual length for now */
-        profile_len  = zprofile_len * 4;
-        profile      = calloc(1, profile_len);
+        prof_len  = zprof_len * 4;
+        prof      = calloc(1, prof_len);
 
-        if (!infl_buf(zprofile, zprofile_len, profile, profile_len, 1))
+        if (!infl_buf(zprof, zprof_len, prof, prof_len, 1)) {
+          free(prof);
           goto err;
+        }
 
-        im->iccProfile     = profile;
-        im->iccProfileSize = profile_len;
+        im->iccProfile     = prof;
+        im->iccProfileSize = prof_len;
 
         /* default, can be overridden by profile */
         im->colorSpace     = IM_COLORSPACE_sRGB;
