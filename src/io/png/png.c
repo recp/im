@@ -62,7 +62,7 @@ undo_filters_adam7(ImByte *pass_data, uint32_t pass_width, uint32_t pass_height,
   uint32_t bpr, x, y;
 
   bpr = bpp * pass_width * ((float)im_minu8(bitdepth, 8) / 8.0f);
-  row = pri = pass_data;
+  row = pass_data;
   p   = row + 1;
 
   /* handle the first row as a special case to improve other rows */
@@ -719,10 +719,6 @@ png_dec(ImImage         ** __restrict dest,
 nx:
 
   /* TODO: */
-  //   mz_uncompress(im->data.data, &len, zipped, zippedlen);
-  //  decompress_idat(zipped, zippedlen, im->data.data, im->len);
-  //  zsinflate(im->data.data, (int)im->len, zipped, zippedlen);
-
   infl_include(imdefl, zipped, zippedlen);
   if (infl(imdefl)) {
     goto err;

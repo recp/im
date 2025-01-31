@@ -113,13 +113,24 @@ im_init_data(ImImage * __restrict im, uint32_t size) {
 /* fast and secure extension hash - uses first 4 chars max */
 static inline int hash_ext(const char * __restrict ext) {
   int h = 0x811C9DC5; /* FNV offset basis */
-  /* mix up to 4 chars - handles both short and long extensions */
   for (int i = 0; i < 4 && ext[i]; i++) {
-    h ^= (uint8_t)ext[i] | 0x20; /* case insensitive */
-    h *= 0x01000193;             /* FNV prime        */
+    h ^= (uint8_t)ext[i] | 0x20;
+    h *= 0x01000193;
   }
-  /* fold to fit table size */
-  return (uint8_t)((h ^ (h >> 16)) & 0xFF);
+  
+  h = (uint8_t)((h ^ (h >> 16)) & 0xFF);
+  
+  /* TGA variants if hash lookup would fail */
+  if (unlikely(!h)) {
+    const char c0 = ext[0]|0x20, c1 = ext[1]|0x20, c2 = ext[2]|0x20;
+    if ((c0 == 't' && c1 == 'p' && c2 == 'i')  /* tpic */
+     || (c0 == 'i' && c1 == 'c' && c2 == 'b')  /* icb  */
+     || (c0 == 'v' && c1 == 'd' && c2 == 'a')  /* vda  */
+     || (c0 == 'v' && c1 == 's' && c2 == 't')) /* vst  */ {
+      return 142; /* TGA hash */
+    }
+  }
+  return h;
 }
 
 typedef ImResult (*imloader)(ImImage**, const char*, im_open_config_t*);
@@ -150,12 +161,12 @@ im_load(ImImage         ** __restrict dest,
   im_option_base_t *opt;
   const char       *ext;
   imloader          fn;
-  int               file_type;
+  int               filetype;
 
   if (!url || !dest) return IM_EBADF;
 
   /* TODO: currently file_type from file ext.  */
-  file_type = IM_FILE_TYPE_AUTO;
+  filetype = IM_FILE_TYPE_AUTO;
 
   im_open_config_t conf = {
     .openIntent  = openIntent,
@@ -178,11 +189,8 @@ im_load(ImImage         ** __restrict dest,
     }
   }
 
-  if (file_type == IM_FILE_TYPE_AUTO
-      && (ext = strrchr(url, '.'))
-      && (fn = extmap[hash_ext(ext + 1)].fn)) {
+  if (!filetype && (ext=strrchr(url,'.')) && (fn=extmap[hash_ext(ext+1)].fn))
     return fn(dest, url, &conf);
-  }
 
 #ifdef __APPLE__
   /* unknown source; let CoreGraphics/CoreImage decode if it can on Apple */
