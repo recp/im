@@ -21,6 +21,8 @@
 
 IM_HIDE
 ImResult
-jpg_dec(ImImage ** __restrict dest, const char * __restrict path);
+jpg_dec(ImImage         ** __restrict dest,
+        const char       * __restrict path,
+        im_open_config_t * __restrict open_config);
 
 #endif /* src_jpg_dec_h */

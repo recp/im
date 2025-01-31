@@ -118,39 +118,67 @@ static inline int hash_ext(const char * __restrict ext) {
     h *= 0x01000193;
   }
   
-  h = (uint8_t)((h ^ (h >> 16)) & 0xFF);
-  
-  /* TGA variants if hash lookup would fail */
-  if (unlikely(!h)) {
-    const char c0 = ext[0]|0x20, c1 = ext[1]|0x20, c2 = ext[2]|0x20;
-    if ((c0 == 't' && c1 == 'p' && c2 == 'i')  /* tpic */
-     || (c0 == 'i' && c1 == 'c' && c2 == 'b')  /* icb  */
-     || (c0 == 'v' && c1 == 'd' && c2 == 'a')  /* vda  */
-     || (c0 == 'v' && c1 == 's' && c2 == 't')) /* vst  */ {
-      return 142; /* TGA hash */
-    }
-  }
-  return h;
+  return (uint8_t)((h ^ (h >> 16)) & 0xFF);
 }
 
 typedef ImResult (*imloader)(ImImage**, const char*, im_open_config_t*);
 
 static const struct { imloader fn; } extmap[256] = {
-  [37]  = { pbm_dec },         /* pbm                  */
-  [42]  = { pgm_dec },         /* pgm                  */
-  [53]  = { ppm_dec },         /* ppm                  */
-  [89]  = { pfm_dec },         /* pfm                  */
-  [91]  = { pam_dec },         /* pam                  */
-  [103] = { png_dec },         /* png                  */
-  [113] = { bmp_dec },         /* bmp                  */
-  [127] = { dib_dec },         /* dib                  */
-  [142] = { tga_dec },         /* tga/tpic/icb/vda/vst */
-  [167] = { qoi_dec },         /* qoi                  */
-  [173] = { heic_dec },        /* heic                 */
-  //    [181] = { jpg_dec},        /* jpg/jpeg             */
-  [191] = { jxl_dec },         /* jxl                  */
-  [211] = { jp2_dec },         /* jp2                  */
+  [0x06] = { dib_dec  },         /* dib                  */
+  [0x1F] = { ppm_dec  },         /* ppm                  */
+  [0x30] = { tga_dec  },         /* vda                  */
+  [0x3C] = { pbm_dec  },         /* pbm                  */
+  [0x54] = { heic_dec },         /* heic                 */
+  [0x58] = { jp2_dec  },         /* jp2                  */
+  [0x64] = { tga_dec  },         /* icb                  */
+  [0x68] = { pgm_dec  },         /* pgm                  */
+  [0x79] = { bmp_dec  },         /* bmp                  */
+  [0x7A] = { jxl_dec  },         /* jxl                  */
+  [0x99] = { qoi_dec  },         /* qoi                  */
+  [0x9D] = { tga_dec  },         /* vst                  */
+  [0xA9] = { png_dec  },         /* png                  */
+  [0xEA] = { tga_dec  },         /* tga                  */
+  [0xF0] = { pam_dec  },         /* pam                  */
+  [0xF7] = { jpg_dec  },         /* jpg                  */
+  [0xFB] = { pfm_dec  },         /* pfm                  */
+  [0xFC] = { jpg_dec  },         /* jpeg                 */
 };
+
+#if 0
+static void print_ext_hash(const char *ext) {
+  int h = 0x811C9DC5;
+  for (int i = 0; i < 4 && ext[i]; i++) {
+    h ^= (uint8_t)ext[i] | 0x20;
+    h *= 0x01000193;
+  }
+  h = (uint8_t)((h ^ (h >> 16)) & 0xFF);
+  printf("Extension: %-4s -> Hash: %d (0x%02x)\n", ext, h, h);
+}
+
+static void __attribute__((constructor)) verify_hashes(void) {
+  printf("Verifying extension hashes:\n");
+  print_ext_hash("pbm");
+  print_ext_hash("pgm");
+  print_ext_hash("ppm");
+  print_ext_hash("pfm");
+  print_ext_hash("pam");
+  print_ext_hash("png");
+  print_ext_hash("bmp");
+  print_ext_hash("dib");
+  print_ext_hash("tga");
+  print_ext_hash("tpic");
+  print_ext_hash("icb");
+  print_ext_hash("vda");
+  print_ext_hash("vst");
+  print_ext_hash("qoi");
+  print_ext_hash("heic");
+  print_ext_hash("jpg");
+  print_ext_hash("jpeg");
+  print_ext_hash("jxl");
+  print_ext_hash("jp2");
+  printf("-------------------\n");
+}
+#endif
 
 IM_EXPORT
 ImResult

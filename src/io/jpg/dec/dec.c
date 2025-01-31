@@ -215,7 +215,9 @@ im_on_worker_idct(void *argv) {
 
 IM_HIDE
 ImResult
-jpg_dec(ImImage ** __restrict dest, const char * __restrict path) {
+jpg_dec(ImImage         ** __restrict dest,
+        const char       * __restrict path,
+        im_open_config_t * __restrict open_config) {
   ImJpeg      *jpg;
   th_thread   *scan_worker, *idct_worker;
   worker_arg_t arg;
