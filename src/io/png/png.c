@@ -681,7 +681,8 @@ png_dec(ImImage         ** __restrict dest,
         im->iccProfileSize = prof_len;
 
         /* default, can be overridden by profile */
-        im->colorSpace     = IM_COLORSPACE_sRGB;
+        if (im->colorSpace == IM_COLORSPACE_UNKNOWN)
+          im->colorSpace = IM_COLORSPACE_sRGB;
       } break;
       case IM_PNG_TYPE('p','H','Y','s'): {
         ImPhysicalDim *phys;
