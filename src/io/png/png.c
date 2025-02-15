@@ -672,7 +672,7 @@ png_dec(ImImage         ** __restrict dest,
         prof_len  = zprof_len * 4;
         prof      = calloc(1, prof_len);
 
-        if (!infl_buf(zprof, zprof_len, prof, prof_len, 1)) {
+        if (infl_buf(zprof, zprof_len, prof, prof_len, 1)<0) {
           free(prof);
           goto err;
         }
