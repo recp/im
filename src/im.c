@@ -112,9 +112,9 @@ im_init_data(ImImage * __restrict im, uint32_t size) {
 
 /* fast and secure extension hash - uses first 4 chars max */
 static inline int hash_ext(const char * __restrict ext) {
-  int h = 0x811C9DC5; /* FNV offset basis */
+  uint32_t h = 0x811C9DC5; /* FNV offset basis */
   for (int i = 0; i < 4 && ext[i]; i++) {
-    h ^= (uint8_t)ext[i] | 0x20;
+    h ^= (uint8_t)(ext[i] | 0x20);
     h *= 0x01000193;
   }
   
