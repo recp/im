@@ -531,6 +531,7 @@ png_dec(ImImage         ** __restrict dest,
          * don't allow tRNS for images that already have alpha
          * instead of error just ignore chunk.
          */
+        /* if (color == 4 || color == 6) */
         if (im->alphaInfo != IM_ALPHA_NONE)
           goto co;
 
@@ -608,10 +609,12 @@ png_dec(ImImage         ** __restrict dest,
           goto err;
 
         switch (color) {
-          case 0: /* grayscale */
+          case 0: 
+          case 4: /* grayscale and grayscale+alph */
             bg->value.gray.gray = im_get_u16_endian(p, false);
             break;
-          case 2: /* RGB */
+          case 2:
+          case 6: /* RGB and RGBA */
             bg->value.rgb.red   = im_get_u16_endian(p, false);
             bg->value.rgb.green = im_get_u16_endian(p + 2, false);
             bg->value.rgb.blue  = im_get_u16_endian(p + 4, false);
