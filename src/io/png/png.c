@@ -523,7 +523,7 @@ png_dec(ImImage         ** __restrict dest,
           im->pal->len   = chk_len;
           im->pal->pal   = pal = malloc(chk_len);
           im->pal->white = bitdepth;
-          im->pal->count = pal_len - 1;
+          im->pal->count = pal_len;
           im->alphaInfo  = IM_ALPHA_NONE;
 
           memcpy(pal, p, chk_len);
