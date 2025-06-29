@@ -498,7 +498,16 @@ png_dec(ImImage         ** __restrict dest,
         /* TODO: */
         // im->len       = len = (bpp + im->row_pad_last) * (width + 1) * height;
         //        im->len       = len = (bpp * width + im->row_pad_last + 1) * height;
-        im->len       = len = (bpp + im->row_pad_last) * (width + 1) * height;
+
+        if (interlace) {
+          /* Adam7 interlacing needs extra space */
+          im->len = len = ((width * (bpp + im->row_pad_last)) + 1) * height + (7 * height);
+        } else {
+          /* non-interlaced: each row = 1 filter byte + pixel data */
+          im->len = len = (1 + (width * (bpp + im->row_pad_last))) * height;
+        }
+
+//        im->len       = len = (bpp + im->row_pad_last) * (width + 1) * height;
         im->data.data = malloc(len);
         zipped        = row = malloc(len);
 
