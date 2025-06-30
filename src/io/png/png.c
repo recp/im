@@ -501,10 +501,10 @@ png_dec(ImImage         ** __restrict dest,
 
         if (interlace) {
           /* Adam7 interlacing needs extra space */
-          im->len = len = ((width * (bpp + im->row_pad_last)) + 1) * height + (7 * height);
+          im->len = len = (width * bpp + im->row_pad_last + 1) * height + (7 * height);
         } else {
           /* non-interlaced: each row = 1 filter byte + pixel data */
-          im->len = len = (1 + (width * (bpp + im->row_pad_last))) * height;
+          im->len = len = (width * bpp + im->row_pad_last + 1) * height;
         }
 
 //        im->len       = len = (bpp + im->row_pad_last) * (width + 1) * height;
@@ -590,9 +590,9 @@ png_dec(ImImage         ** __restrict dest,
             trans->value.pal.count = chk_len;
             memcpy(trans->value.pal.alpha, p, chk_len);
             
+            /* Set alpha info since this palette now has transparency */
             im->alphaInfo = IM_ALPHA_LAST;
-
-            /* format remains RGB since alpha is in palette */
+            /* format remains RGB since alpha is in palette data, not pixel format yet */
           } break;
           default:
             free(trans);
