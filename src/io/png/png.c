@@ -339,8 +339,10 @@ expand_palette(ImImage *im) {
       return false;
     }
 
+    /* copy RGB values */
     memcpy(dst, pal + idx * 3, 3);
     if (has_alpha) {
+      /* use transparency value if available, otherwise opaque */
       dst[3] = (idx < alpha_count) ? alpha[idx] : 255;
       dst += 4;
     } else {
@@ -357,6 +359,21 @@ expand_palette(ImImage *im) {
   im->bitsPerPixel       = has_alpha ? 32 : 24;
   im->componentsPerPixel = has_alpha ? 4  : 3;
   im->len                = new_size;
+
+  /* clean up palette data - no longer needed */
+  if (im->pal) {
+    if (im->pal->pal) free(im->pal->pal);
+    free(im->pal);
+    im->pal = NULL;
+  }
+
+  /* clean up transparency data if it was palette-specific */
+  if (has_alpha && im->transparency) {
+    if (im->transparency->value.pal.alpha)
+      free(im->transparency->value.pal.alpha);
+    free(im->transparency);
+    im->transparency = NULL;
+  }
 
   return true;
 }
@@ -376,6 +393,7 @@ png_dec(ImImage         ** __restrict dest,
   ImFileResult    fres;
   bool            is_cgbi;
 
+  is_cgbi   = false;
   im        = NULL;
   row       = NULL;
   zipped    = NULL;
@@ -755,7 +773,7 @@ af:
   /* fix byte order */
   fix_endianness(im);
 
-  if (im->pal && !oconfig->supportsPal) {
+  if (im->pal && (!oconfig->supportsPal || (im->transparency && im->transparency->value.pal.alpha))) {
     if (!expand_palette(im))
       goto err;
   }
