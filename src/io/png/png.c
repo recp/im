@@ -103,12 +103,12 @@ undo_filters_adam7(ImByte *pass_data, uint32_t pass_width, uint32_t pass_height,
         for (x=0; x<bpr; x++)   p[x] += pri[x+1];
         break;
       case FILT_AVG:
-        for (x=0;   x<bpp; x++) p[x] = row[x+1] + (pri[x]>>1);
-        for (x=bpp; x<bpr; x++) p[x] = row[x+1] + ((p[x-bpp] + pri[x])>>1);
+        for (x=0;   x<bpp; x++) p[x] = row[x+1] + (pri[x+1]>>1);
+        for (x=bpp; x<bpr; x++) p[x] = row[x+1] + ((p[x-bpp] + pri[x+1])>>1);
         break;
       case FILT_PAETH:
-        for (x=0;   x<bpp; x++) p[x] = row[x+1] + pri[x];
-        for (x=bpp; x<bpr; x++) p[x] = row[x+1] + paeth(p[x-bpp],pri[x],pri[x-bpp]);
+        for (x=0;   x<bpp; x++) p[x] = row[x+1] + pri[x+1];
+        for (x=bpp; x<bpr; x++) p[x] = row[x+1] + paeth(p[x-bpp],pri[x+1],pri[x+1-bpp]);
         break;
     }
     /* move to the next row */
@@ -256,7 +256,8 @@ adam7(ImImage * __restrict im,
     undo_filters_adam7(pass_data, pass_w, pass_h, bpp, bitdepth);
 
     /* Copy pixels to final positions */
-    stride = pass_w * bpp + 1;
+    stride = bpp * pass_w * ((float)im_minu8(bitdepth, 8) / 8.0f) + 1;
+    /* stride = pass_w * bpp + 1; */
     for (y = 0; y < pass_h; y++) {
       src_row = pass_data + y * stride + 1;  /* skip filter byte */
       dest_y  = y * ydelta[pass] + ystart[pass];
@@ -272,7 +273,7 @@ adam7(ImImage * __restrict im,
     }
 
     /* move to next pass */
-    pass_data += pass_h*(pass_w*bpp+1);
+    pass_data += pass_h * stride;
   }
 
   return dest;
