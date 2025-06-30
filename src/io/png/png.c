@@ -378,6 +378,51 @@ expand_palette(ImImage *im) {
   return true;
 }
 
+static
+bool
+expand_rgb_transp(ImImage *im) {
+  if (!im->transparency || im->format != IM_FORMAT_RGBA)
+    return true;
+
+  /* only for RGB images with tRNS */
+  if (im->componentsPerPixel != 3)
+    return true;
+
+  size_t pixels = (size_t)im->width * im->height;
+  uint8_t *new_data = malloc(pixels * 4);
+  if (!new_data)
+    return false;
+
+  uint8_t *src = im->data.data;
+  uint8_t *dst = new_data;
+
+  uint8_t trans_r = im->transparency->value.rgb.red & 0xFF;
+  uint8_t trans_g = im->transparency->value.rgb.green & 0xFF;
+  uint8_t trans_b = im->transparency->value.rgb.blue & 0xFF;
+
+  /* convert RGB to RGBA, setting alpha=0 for transparent color */
+  for (size_t i = 0; i < pixels; i++) {
+    uint8_t r = src[i * 3];
+    uint8_t g = src[i * 3 + 1];
+    uint8_t b = src[i * 3 + 2];
+
+    dst[i * 4]     = r;
+    dst[i * 4 + 1] = g;
+    dst[i * 4 + 2] = b;
+    dst[i * 4 + 3] = (r == trans_r && g == trans_g && b == trans_b) ? 0 : 255;
+  }
+
+  free(im->data.data);
+
+  im->data.data          = new_data;
+  im->bytesPerPixel      = 4;
+  im->bitsPerPixel       = 32;
+  im->componentsPerPixel = 4;
+  im->len                = pixels * 4;
+
+  return true;
+}
+
 IM_HIDE
 ImResult
 png_dec(ImImage         ** __restrict dest,
@@ -593,7 +638,8 @@ png_dec(ImImage         ** __restrict dest,
               trans->value.rgb.green = (im_get_u16_endian(p + 2, false) & 0xFF);
               trans->value.rgb.blue  = (im_get_u16_endian(p + 4, false) & 0xFF);
             }
-            
+
+            /* TODO: ignore transparency expand by config see expand_rgb_transp() call below */
             im->alphaInfo = IM_ALPHA_LAST;
             im->format    = IM_FORMAT_RGBA;
           } break;
@@ -773,8 +819,16 @@ af:
   /* fix byte order */
   fix_endianness(im);
 
+  /* expand palette if needed */
   if (im->pal && (!oconfig->supportsPal || (im->transparency && im->transparency->value.pal.alpha))) {
     if (!expand_palette(im))
+      goto err;
+  }
+
+  /* TODO: ignore transparency expand by config */
+  /* expand RGB transparency if needed */
+  if (im->transparency && im->format == IM_FORMAT_RGBA && im->componentsPerPixel == 3) {
+    if (!expand_rgb_transp(im))
       goto err;
   }
 
