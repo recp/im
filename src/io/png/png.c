@@ -57,7 +57,11 @@ IM_INLINE int paeth(int a, int b, int c) {
 
 static
 void
-undo_filters_adam7(ImByte *pass_data, uint32_t pass_width, uint32_t pass_height, uint32_t bpp, uint8_t bitdepth) {
+undo_filters_adam7(ImByte  *pass_data,
+                   uint32_t pass_width,
+                   uint32_t pass_height,
+                   uint32_t bpp,
+                   uint8_t  bitdepth) {
   ImByte  *p, *row, *pri;
   uint32_t bpr, x, y;
 
@@ -559,10 +563,6 @@ png_dec(ImImage         ** __restrict dest,
             goto err;  /* invalid color type */
         }
 
-        /* TODO: */
-        // im->len       = len = (bpp + im->row_pad_last) * (width + 1) * height;
-        //        im->len       = len = (bpp * width + im->row_pad_last + 1) * height;
-
         if (interlace) {
           /* Adam7 interlacing needs extra space */
           im->len = len = (width * bpp + im->row_pad_last + 1) * height + (7 * height);
@@ -571,10 +571,7 @@ png_dec(ImImage         ** __restrict dest,
           im->len = len = (width * bpp + im->row_pad_last + 1) * height;
         }
 
-//        im->len       = len = (bpp + im->row_pad_last) * (width + 1) * height;
         im->data.data = malloc(len);
-        zipped        = row = malloc(len);
-
         imdefl        = infl_init(im->data.data, (uint32_t)im->len, 1);
       } break;
       case IM_PNG_TYPE('P','L','T','E'): {
@@ -667,11 +664,11 @@ png_dec(ImImage         ** __restrict dest,
         im->transparency = trans;
       } break;
       case IM_PNG_TYPE('I','D','A','T'): {
-        memcpy(row, p, chk_len);
-        row       += chk_len;
-        zippedlen += chk_len;
-
-        //        infl_include(imdefl, p, chk_len);
+        /* With the new chunking system, small IDAT chunks will be automatically
+         * appended together, while large ones will be allocated directly.
+         * This is much more efficient for PNG files with many small IDAT chunks.
+         */
+        infl_include(imdefl, p, chk_len);
       } break;
       case IM_PNG_TYPE('I','E','N','D'): {
         goto nx;
@@ -794,9 +791,6 @@ png_dec(ImImage         ** __restrict dest,
   }
 
 nx:
-
-  /* TODO: */
-  infl_include(imdefl, zipped, zippedlen);
   if (infl(imdefl)) {
     goto err;
   }
