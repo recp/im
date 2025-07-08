@@ -439,7 +439,7 @@ png_dec(ImImage         ** __restrict dest,
   ImByte         *p, *p_chk, *row, bitdepth, color, compr, interlace;
   im_png_filter_t filter;
   size_t          len;
-  uint32_t        chk_len, chk_type, pal_len, width, height, bpp, bpc, zippedlen;
+  uint32_t        chk_len, chk_type, pal_len, width, height, bpp, bpc;
   ImFileResult    fres;
   bool            is_cgbi;
 
@@ -475,14 +475,13 @@ png_dec(ImImage         ** __restrict dest,
 
   p    += 8;
   color = 0;
-  len   = 0;
 
   im->file           = fres;
   im->openIntent     = oconfig->openIntent;
   im->byteOrder      = oconfig->byteOrder;
   im->ori            = IM_ORIENTATION_UP;
   im->fileFormatType = IM_FILEFORMATTYPE_PNG;
-  height             = width = bpp = bpc = zippedlen = 0;
+  height             = width = bpp = 0;
   bitdepth           = 8;
 
   for (;;) {
@@ -594,7 +593,7 @@ png_dec(ImImage         ** __restrict dest,
         ImTransparency* trans;
 
         /* tRNS must come after IHDR and before IDAT */
-        if (!(width > 0 && height > 0) || (zippedlen > 0))
+        if (!(width > 0 && height > 0))
           goto err;
 
         /**
