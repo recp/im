@@ -20,8 +20,8 @@
 #include "../../file.h"
 #include "../../endian.h"
 
-#define IM_PNG_TYPE(a,b,c,d)  (((unsigned)(a) << 24) + ((unsigned)(b) << 16)  \
-                             + ((unsigned)(c) << 8)  + (unsigned)(d))
+#define IM_PNG_TYPE(a,b,c,d)  (((unsigned)(a) << 24) | ((unsigned)(b) << 16)  \
+                             | ((unsigned)(c) << 8)  | (unsigned)(d))
 
 typedef enum im_png_filter_t {
   FILT_NONE  = 0,
