@@ -28,7 +28,7 @@
 
 #include "../../color.h"
 
-#if DEBUG
+#ifdef DEBUG
 IM_HIDE
 void
 print_byte(uint8_t byte);

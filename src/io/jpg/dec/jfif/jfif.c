@@ -74,13 +74,13 @@ jfif_dec(ImByte *raw, ImJpeg *jpg) {
     pRaw += 2;
   }
 
-#if DEBUG
+#ifdef DEBUG
   printf("Found Marker: 0x%X\n", mrk);
 #endif
 
   while (mrk != JPG_EOI && pRaw) {
     
-#if DEBUG
+#ifdef DEBUG
   printf("Found Marker: 0x%X\n", mrk);
 #endif
     
@@ -131,7 +131,7 @@ jfif_dec(ImByte *raw, ImJpeg *jpg) {
 
 fr:
 
-#if DEBUG
+#ifdef DEBUG
   assert(mrk == JPG_EOI);
 #else
   if (mrk != JPG_EOI) {

@@ -70,7 +70,7 @@ im_readfile(const char * __restrict file, bool readonly) {
   blksize = fcontents_size;
   res.raw = malloc(fcontents_size + 1);
 
-#if DEBUG
+#ifdef DEBUG
   assert(res.raw && "malloc failed");
 #endif
   

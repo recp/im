@@ -17,7 +17,7 @@
 #include "common.h"
 #include <stdio.h>
 
-#if DEBUG
+#ifdef DEBUG
 
 IM_HIDE
 void

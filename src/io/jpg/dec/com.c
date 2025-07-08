@@ -36,7 +36,7 @@ jpg_com(ImByte * __restrict pRaw, ImJpeg * __restrict jpg) {
   com->next = jpg->comments;
   jpg->comments = com;
 
-#if DEBUG
+#ifdef DEBUG
   printf("\nComment:\n%s\n", com->buff);
 #endif
 

@@ -19,7 +19,7 @@
 #include <stdio.h>
 #include <math.h>
 
-#if DEBUG
+#ifdef DEBUG
 #  include <assert.h>
 #endif
 
@@ -49,25 +49,25 @@ jpg_huffcodes(ImByte    * __restrict BITS,
 IM_HIDE
 void
 jpg_handle_scanmarker(ImScan * __restrict scan, uint16_t marker) {
-#if DEBUG
+#ifdef DEBUG
   printf("\n\nFound Marker in Scan: 0x%X\n", marker);
 #endif
   
   switch (marker) {
     case JPG_EOI:
-#if DEBUG
+#ifdef DEBUG
       printf("Found JPG_EOI\n");
 #endif
       scan->jpg->result = IM_JPEG_EOI;
       scan->jpg->nScans--;
       goto ex;
     case JPG_DNL:
-#if DEBUG
+#ifdef DEBUG
       printf("TODO, Found JPG_DNL\n");
 #endif
       goto ex; /* TODO: remove this */
     default:
-#if DEBUG
+#ifdef DEBUG
       printf("TODO, nextbit: process error\n");
 #endif
       scan->jpg->result = IM_JPEG_UKNOWN_MARKER_IN_SCAN;
@@ -103,7 +103,7 @@ jpg_nextbit(ImScan * __restrict scan) {
   bit     = b >> 7;
   scan->b = b << 1;
 
-#if DEBUG
+#ifdef DEBUG
   assert(bit == 0 || bit == 1);
 #endif
 
