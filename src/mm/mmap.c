@@ -17,7 +17,10 @@
 #include "mmap.h"
 #include "../common.h"
 
-#ifndef IM_WINAPI
+/* WASI has no mmap: the file is read instead (file.c) */
+#if defined(__wasi__)
+#  define IM_NO_MMAP 1
+#elif !defined(IM_WINAPI)
 #  include <sys/mman.h>
 #else
 #  define WIN32_LEAN_AND_MEAN
@@ -32,7 +35,10 @@ im_mmap_rdonly(int fd, size_t size) {
   
   mapped = NULL;
   
-#ifndef IM_WINAPI
+#if IM_NO_MMAP
+  IM__UNUSED(fd);
+  IM__UNUSED(size);
+#elif !defined(IM_WINAPI)
   mapped = mmap(0, size, PROT_READ, MAP_SHARED, fd, 0);
   if (!mapped || mapped == MAP_FAILED)
     return NULL;
@@ -53,7 +59,10 @@ im_mmap_rdonly(int fd, size_t size) {
 IM_HIDE
 void
 im_unmap(void *file, size_t size) {
-#ifndef IM_WINAPI
+#if IM_NO_MMAP
+  IM__UNUSED(file);
+  IM__UNUSED(size);
+#elif !defined(IM_WINAPI)
   munmap(file, size);
 #else
   IM__UNUSED(size);
