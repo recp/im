@@ -651,6 +651,190 @@ par_item(void *arg, uint32_t worker, uint32_t item) {
   return true;
 }
 
+/* -- lossless (H.1, H.2): differences, then the predictors ------------------- */
+
+/* libjpeg's jdlhuff.c, jddiffct.c and jdlossls.c: an MCU row of
+   differences at a time (restarts come between rows); where data ran out
+   the rows after are zeros; each component predicted row by row, from the
+   row above (kept as it was predicted, modulo 2^16) and the sample before,
+   the first row after a scan's start, a restart or a row of zeros by the
+   one before alone, from 2^(P - Pt - 1); samples out shifted by Pt */
+typedef struct jloss {
+  int32_t  *diff[J_COMPS];  /* a component's rows of an MCU row */
+  uint16_t *prev[J_COMPS];  /* its row above, unshifted */
+  bool      first[J_COMPS]; /* its next row predicted as a first one */
+  uint32_t  y[J_COMPS];     /* its next sample row */
+} jloss_t;
+
+static void
+undifference(jpg_t *j, jloss_t *L, uint32_t ci, const int32_t *d) {
+  jcomp_t  *c = &j->comp[ci];
+  uint16_t *prev = L->prev[ci];
+  uint32_t  w = c->cw, x, psv = j->ss, al = j->al;
+  int32_t   ra, rb, rc;
+  uint16_t  out[1];
+
+  (void)out;
+  if (L->y[ci] >= c->bh) return;
+  if (L->first[ci]) {
+    ra = (d[0] + (1 << (j->prec - al - 1u))) & 0xFFFF;
+    prev[0] = (uint16_t)ra;
+    for (x = 1; x < w; x++) {
+      ra      = (d[x] + ra) & 0xFFFF;
+      prev[x] = (uint16_t)ra;
+    }
+    L->first[ci] = false;
+  } else {
+    rb = prev[0];
+    ra = (d[0] + rb) & 0xFFFF;
+    prev[0] = (uint16_t)ra;
+    for (x = 1; x < w; x++) {
+      int32_t p;
+
+      rc = rb;
+      rb = prev[x];
+      switch (psv) {
+      case 1:  p = ra; break;
+      case 2:  p = rb; break;
+      case 3:  p = rc; break;
+      case 4:  p = ra + rb - rc; break;
+      case 5:  p = ra + ((rb - rc) >> 1); break;
+      case 6:  p = rb + ((ra - rc) >> 1); break;
+      default: p = (ra + rb) >> 1; break;
+      }
+      ra      = (d[x] + p) & 0xFFFF;
+      prev[x] = (uint16_t)ra;
+    }
+  }
+  /* to the plane, shifted (and cut to the sample's type, as libjpeg) */
+  if (j->prec <= 8u) {
+    uint8_t *o = (uint8_t *)c->plane + (size_t)L->y[ci] * c->stride;
+
+    for (x = 0; x < w; x++) o[x] = (uint8_t)((uint32_t)prev[x] << al);
+  } else {
+    uint16_t *o = (uint16_t *)c->plane + (size_t)L->y[ci] * c->stride;
+
+    for (x = 0; x < w; x++) o[x] = (uint16_t)((uint32_t)prev[x] << al);
+  }
+  L->y[ci]++;
+}
+
+/* a difference (F.1.2.1 with H.1.2.2's 16: 32768, no bits) */
+IM_INLINE int32_t
+loss_diff(jbits_t *b, const jhuff_t *h) {
+  uint32_t s = huff_sym(b, h);
+
+  if (!s) return 0;
+  if (s == 16u) return 32768;
+  return extend(get_bits(b, s), s);
+}
+
+IM_HIDE bool
+jpg_scan_lossless(jpg_t *j) {
+  jctx_t   x;
+  jloss_t  L;
+  uint32_t i, nrows, per_row, rows_to_go = 0u, cur = 0u, next_rst = 0u, irow, nirows, blocks = 0u;
+  bool     at_marker = false, ok = false, single = j->nscomp == 1u;
+  size_t   margin;
+
+  memset(&L, 0, sizeof(L));
+  for (i = 0; i < j->nscomp; i++) {
+    const jcomp_t *c = &j->comp[j->scomp[i]];
+
+    blocks += single ? 1u : (uint32_t)c->h * c->v;
+  }
+  per_row = single ? j->comp[j->scomp[0]].cw : j->mcux;
+  nrows   = single ? j->comp[j->scomp[0]].ch : j->mcuy;
+  if (j->restart && j->restart % per_row) return false; /* libjpeg: JERR_BAD_RESTART */
+  margin = (size_t)blocks * per_row * 5u + 64u; /* an MCU row: 17 + 16 bits a sample at most */
+  if (!ctx_init(&x, j, margin)) return false;
+  for (i = 0; i < j->nscomp; i++) {
+    uint32_t ci = j->scomp[i];
+    jcomp_t *c  = &j->comp[ci];
+
+    if (!(L.diff[ci] = calloc((size_t)c->bw * c->v, sizeof(int32_t))) || !(L.prev[ci] = calloc(c->bw, sizeof(uint16_t)))) {
+      goto done;
+    }
+    L.first[ci] = true;
+    L.y[ci]     = 0u;
+  }
+  for (i = 0; i < J_COMPS; i++) L.first[i] = true;
+  rows_to_go = j->restart / per_row;
+  rd_start(&x, 0u);
+
+  /* iMCU rows: an MCU row each, interleaved; v sample rows of a lone
+     component (its last fewer) */
+  nirows = single ? (nrows + j->comp[j->scomp[0]].v - 1u) / j->comp[j->scomp[0]].v : nrows;
+  for (irow = 0; irow < nirows; irow++) {
+    uint32_t mrows = 1u, yo;
+
+    if (single) {
+      uint32_t v = j->comp[j->scomp[0]].v;
+
+      mrows = irow + 1u < nirows ? v : (nrows % v ? nrows % v : v);
+    }
+    for (yo = 0; yo < mrows; yo++) {
+      if (j->restart) {
+        if (!rows_to_go) {
+          restart(&x, &next_rst, &cur, &at_marker);
+          for (i = 0; i < J_COMPS; i++) L.first[i] = true;
+          rows_to_go = j->restart / per_row;
+        }
+      }
+      if (x.lacking) {
+        for (i = 0; i < j->nscomp; i++) {
+          uint32_t ci = j->scomp[i];
+          jcomp_t *c  = &j->comp[ci];
+
+          if (single) memset(L.diff[ci] + (size_t)yo * c->bw, 0, (size_t)c->bw * sizeof(int32_t));
+          else memset(L.diff[ci], 0, (size_t)c->bw * c->v * sizeof(int32_t));
+        }
+        for (i = 0; i < J_COMPS; i++) L.first[i] = true;
+      } else {
+        uint32_t mx;
+
+        if (!x.r.tail && x.r.b.p >= x.r.lim) rd_tail(&x);
+        for (mx = 0; mx < per_row; mx++) {
+          for (i = 0; i < j->nscomp; i++) {
+            uint32_t ci = j->scomp[i];
+            jcomp_t *c  = &j->comp[ci];
+
+            if (single) {
+              L.diff[ci][(size_t)yo * c->bw + mx] = loss_diff(&x.r.b, j->dc[c->td]);
+            } else {
+              uint32_t a, b;
+
+              for (b = 0; b < c->v; b++) {
+                for (a = 0; a < c->h; a++) L.diff[ci][(size_t)b * c->bw + mx * c->h + a] = loss_diff(&x.r.b, j->dc[c->td]);
+              }
+            }
+          }
+        }
+        if (rd_past(&x.r)) x.lacking = true;
+      }
+      if (j->restart) rows_to_go--;
+    }
+    /* the iMCU row's rows, predicted in order */
+    for (i = 0; i < j->nscomp; i++) {
+      uint32_t ci = j->scomp[i];
+      jcomp_t *c  = &j->comp[ci];
+      uint32_t rows = single ? mrows : c->v, r;
+
+      if (!single && irow + 1u == nirows && c->ch % c->v) rows = c->ch % c->v;
+      for (r = 0; r < rows; r++) undifference(j, &L, ci, L.diff[ci] + (size_t)r * c->bw);
+    }
+  }
+  ok = true;
+
+done:
+  for (i = 0; i < J_COMPS; i++) {
+    free(L.diff[i]);
+    free(L.prev[i]);
+  }
+  free(x.tail);
+  return ok;
+}
+
 /* -- one segment on threads: speculative, self-synchronising ------------------- */
 
 /* A sequential scan without restarts is one segment; its bits can still be

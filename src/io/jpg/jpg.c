@@ -240,7 +240,7 @@ idct_all(jpg_t *j) {
 
 static bool
 read_sof(jpg_t *j, uint32_t m, const uint8_t *s, uint32_t len) {
-  uint32_t i;
+  uint32_t i, unit;
 
   if (j->frame || len < 6u) return false;
   j->prec   = s[0];
@@ -253,9 +253,9 @@ read_sof(jpg_t *j, uint32_t m, const uint8_t *s, uint32_t len) {
   case 3:  j->process = J_LOSSLESS;    break;
   default: j->process = J_SEQUENTIAL;  break;
   }
-  if (j->process == J_LOSSLESS) return false; /* not yet */
+  if (j->process == J_LOSSLESS && j->arith) return false; /* libjpeg has none: not yet */
   if (!j->width || !j->height || !j->ncomp || j->ncomp > J_COMPS || len != 6u + j->ncomp * 3u) return false;
-  if (j->prec != 8u && j->prec != 12u) return false;
+  if (j->process == J_LOSSLESS ? j->prec < 2u || j->prec > 16u : j->prec != 8u && j->prec != 12u) return false;
   j->idct = j->prec == 8u ? jpg_idct8 : jpg_idct12;
 
   j->hmax = j->vmax = 1u;
@@ -270,8 +270,10 @@ read_sof(jpg_t *j, uint32_t m, const uint8_t *s, uint32_t len) {
     if (c->h > j->hmax) j->hmax = c->h;
     if (c->v > j->vmax) j->vmax = c->v;
   }
-  j->mcux = (j->width + 8u * j->hmax - 1u) / (8u * j->hmax);
-  j->mcuy = (j->height + 8u * j->vmax - 1u) / (8u * j->vmax);
+  /* a data unit: a block, or (lossless) a sample */
+  unit    = j->process == J_LOSSLESS ? 1u : 8u;
+  j->mcux = (j->width + unit * j->hmax - 1u) / (unit * j->hmax);
+  j->mcuy = (j->height + unit * j->vmax - 1u) / (unit * j->vmax);
   for (i = 0; i < j->ncomp; i++) {
     jcomp_t *c = &j->comp[i];
     uint64_t samples;
@@ -280,10 +282,10 @@ read_sof(jpg_t *j, uint32_t m, const uint8_t *s, uint32_t len) {
     c->bh     = j->mcuy * c->v;
     c->cw     = (uint32_t)(((uint64_t)j->width * c->h + j->hmax - 1u) / j->hmax);
     c->ch     = (uint32_t)(((uint64_t)j->height * c->v + j->vmax - 1u) / j->vmax);
-    c->sw     = (c->cw + 7u) / 8u;
-    c->sh     = (c->ch + 7u) / 8u;
-    c->stride = (size_t)c->bw * 8u;
-    samples   = (uint64_t)c->bw * 8u * c->bh * 8u;
+    c->sw     = (c->cw + unit - 1u) / unit;
+    c->sh     = (c->ch + unit - 1u) / unit;
+    c->stride = (size_t)c->bw * unit;
+    samples   = (uint64_t)c->bw * unit * c->bh * unit;
     if (samples > J_SAMPLES || !(c->plane = malloc((size_t)samples * (j->prec > 8u ? 2u : 1u)))) return false;
     memset(c->bits, -1, sizeof(c->bits));
   }
@@ -380,6 +382,16 @@ read_sos(jpg_t *j, const uint8_t *s, uint32_t len) {
   j->ah     = s[3u + n * 2u] >> 4;
   j->al     = s[3u + n * 2u] & 15u;
 
+  if (j->process == J_LOSSLESS) {
+    /* Ss the predictor, Al the point transform (libjpeg's checks) */
+    if (j->ss < 1u || j->ss > 7u || j->se != 0u || j->ah != 0u || j->al >= j->prec) return false;
+    for (i = 0; i < n; i++) {
+      const jcomp_t *c = &j->comp[j->scomp[i]];
+
+      if (c->td > 3u || !j->dc[c->td] || !j->dc[c->td]->ok) return false;
+    }
+    return true;
+  }
   if (j->arith) {
     bool dc = j->ss == 0u;
 
@@ -472,6 +484,13 @@ jpg_free(jpg_t *j) {
   free(j->icc);
   free(j->sd.buf);
   free(j->sd.seg);
+}
+
+/* the scan whose data is unstuffed in `j->sd`, as its process codes it */
+static bool
+scan(jpg_t *j) {
+  if (j->process == J_LOSSLESS) return jpg_scan_lossless(j);
+  return j->arith ? jpg_scan_arith(j) : jpg_scan_huff(j, j->pool);
 }
 
 /* the stream's byte `k` from `p` (`have` there): past its end libjpeg's
@@ -599,14 +618,14 @@ decode_stream(jpg_t *j, ImImage *im, ImByteOrder order, uint8_t **padp) {
         uint32_t i;
 
         if (j->threads > 1u && (uint64_t)j->width * j->height >= (1u << 18)) j->pool = im_pool_new(j->threads);
-        j->multiscan = j->process == J_PROGRESSIVE || j->nscomp < j->ncomp;
+        j->multiscan = j->process != J_LOSSLESS && (j->process == J_PROGRESSIVE || j->nscomp < j->ncomp);
         for (i = 0; i < j->ncomp && j->multiscan; i++) {
           jcomp_t *c = &j->comp[i];
 
           if (!(c->coefs = calloc((size_t)c->bw * c->bh * 64u, sizeof(int16_t)))) return false;
         }
         first = false;
-      } else if (!j->multiscan) {
+      } else if (!j->multiscan && j->process != J_LOSSLESS) {
         /* one pass: later scans aren't read */
         if (tail) break;
         if (!jpg_unstuff(&j->sd, p, end)) return false;
@@ -616,11 +635,11 @@ decode_stream(jpg_t *j, ImImage *im, ImByteOrder order, uint8_t **padp) {
       if (tail) {
         static const uint8_t fake[3] = { 0xD9u, 0xFFu, 0xD9u };
 
-        if (!jpg_unstuff(&j->sd, odd ? fake : fake + 1, fake + 3) || !(j->arith ? jpg_scan_arith(j) : jpg_scan_huff(j, j->pool))) return false;
+        if (!jpg_unstuff(&j->sd, odd ? fake : fake + 1, fake + 3) || !scan(j)) return false;
         j->nscans++;
         break;
       }
-      if (!jpg_unstuff(&j->sd, p, end) || !(j->arith ? jpg_scan_arith(j) : jpg_scan_huff(j, j->pool))) return false;
+      if (!jpg_unstuff(&j->sd, p, end) || !scan(j)) return false;
       j->nscans++;
       p = j->sd.next;
       break;

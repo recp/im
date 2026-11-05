@@ -160,6 +160,8 @@ IM_HIDE bool jpg_unstuff(jdata_t *d, const uint8_t *p, const uint8_t *end);
 IM_HIDE bool jpg_scan_huff(jpg_t *j, im_pool_t *pool);
 IM_HIDE bool jpg_resync(const jdata_t *d, uint32_t *next_rst, uint32_t *cur);
 
+IM_HIDE bool jpg_scan_lossless(jpg_t *j);
+
 /* arith.c */
 IM_HIDE bool jpg_scan_arith(jpg_t *j);
 

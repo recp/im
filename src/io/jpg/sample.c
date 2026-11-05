@@ -333,6 +333,17 @@ out_band(void *arg, uint32_t worker, uint32_t item) {
 
       for (i = 0; i < n; i++) row[i] = up_row8(j, &j->comp[i], &o->up[i], y, rows + o->rowlen * i, &o->scratch[worker]);
       pixels8(row, n, o->space, &o->t, (int32_t)o->max, o->invert, w, o->px + (size_t)y * w * n);
+      if (j->prec < 8u) {
+        /* shallower samples spread over 0–255 */
+        uint8_t *p = o->px + (size_t)y * w * n;
+        size_t   k;
+
+        for (k = 0; k < (size_t)w * n; k++) {
+          uint32_t v = p[k] > o->max ? o->max : p[k];
+
+          p[k] = (uint8_t)((v * 255u + o->max / 2u) / o->max);
+        }
+      }
     } else {
       const uint16_t *row[J_COMPS];
       uint16_t       *p = (uint16_t *)o->px + (size_t)y * w * n;
@@ -342,7 +353,9 @@ out_band(void *arg, uint32_t worker, uint32_t item) {
       pixels16(row, n, o->space, &o->t, (int32_t)o->max, o->invert, w, p);
       /* deeper samples to 16 bits, in the order asked */
       for (k = 0; k < (size_t)w * n; k++) {
-        uint32_t v = j->prec == 16u ? p[k] : (uint32_t)(((uint64_t)p[k] * 65535u + o->max / 2u) / o->max);
+        uint32_t v = p[k] > o->max ? o->max : p[k]; /* damage past the depth: its top */
+
+        v = j->prec == 16u ? v : (uint32_t)(((uint64_t)v * 65535u + o->max / 2u) / o->max);
 
         p[k] = o->swap ? bswapu16((uint16_t)v) : (uint16_t)v;
       }
