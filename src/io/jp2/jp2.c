@@ -285,6 +285,7 @@ typedef struct jpx {
   arena_t   arena;
   uint32_t  x1, y1, x0, y0, tw, th, tx0, ty0, ntx, nty, ncomp;
   uint8_t   prec[X_COMPS], sgnd[X_COMPS], dx[X_COMPS], dy[X_COMPS];
+  bool      skip[X_COMPS]; /* not wanted: its code-blocks, wavelet and samples left out */
   xcod_t    cod;
   bool      coc[X_COMPS], qcc[X_COMPS];
   uint8_t  *ppm;
@@ -2210,7 +2211,7 @@ place_row(jpx_t *j, xscratch_t *s, void *ctx, uint32_t item) {
     const xtc_t *tc = &t->tc[c];
     uint32_t     w = (uint32_t)(tc->x1 - tc->x0);
 
-    if (item >= (uint32_t)(tc->y1 - tc->y0)) continue;
+    if (item >= (uint32_t)(tc->y1 - tc->y0) || j->skip[c]) continue;
     place_samples(j, c, tc->cc->reversible, (uint32_t *)tc->data + (size_t)item * w,
                   j->plane[c] + ((size_t)(tc->y0 - (int64_t)j->py0[c]) + item) * j->pw[c] + (size_t)(tc->x0 - (int64_t)j->px0[c]), w);
   }
@@ -2317,6 +2318,7 @@ tile_decode(jpx_t *j, uint32_t tile) {
     for (c = 0; c < j->ncomp; c++) {
       xtc_t *tc = &t->tc[c];
 
+      if (j->skip[c]) continue;
       for (r = 0; r < tc->nres; r++) {
         xres_t  *res = &tc->res[r];
         uint32_t k, b, m;
@@ -2340,6 +2342,7 @@ tile_decode(jpx_t *j, uint32_t tile) {
     for (c = 0; c < j->ncomp; c++) {
       xtc_t *tc = &t->tc[c];
 
+      if (j->skip[c]) continue;
       for (r = 1; r < tc->nres; r++) {
         xlevel_t lv;
         uint32_t w = (uint32_t)(tc->res[r].x1 - tc->res[r].x0), h = (uint32_t)(tc->res[r].y1 - tc->res[r].y0);
@@ -2560,22 +2563,26 @@ typedef struct jxopts {
   size_t      dest_stride, dest_size;
 } jxopts_t;
 
-/* the planes as `im`'s pixels: the colours then the opacity, a sample 8
-   bits or (any channel deeper) 16 in `order` */
+/* which channel is which: through a palette where the JP2 maps one; the
+   colours (by colr, else an ICC profile's space, else the count) and an
+   opacity (cdef's, else the first past the colours); sYCC. False: the
+   mapping doesn't fit */
+typedef struct xpick {
+  xchan_t  ch[X_COMPS];
+  uint32_t nch, ncol, space, colour[4];
+  int32_t  opacity;
+  bool     ycc, premult;
+} xpick_t;
+
 static bool
-compose(jpx_t *j, const jp2_t *x, ImImage *im, const jxopts_t *o) {
-  ImByteOrder order = o->order;
-  xchan_t   ch[X_COMPS];
-  uint32_t  nch = 0, ncol, space, colour[4], use[5], nuse, k, u, w = j->x1 - j->x0, h = j->y1 - j->y0, X, Y, step;
+pick(const jpx_t *j, const jp2_t *x, bool raw, xpick_t *pk) {
+  xchan_t  *ch = pk->ch;
+  uint32_t  nch = 0, ncol, space, *colour = pk->colour, k;
   int32_t   opacity = -1;
-  bool      ycc = false, premult = false, wide = false, direct;
-  uint32_t *cols;
-  uint8_t  *px, *icc = NULL;
-  void     *alpha = NULL;
-  size_t    n = (size_t)w * h, len, i;
+  bool      ycc = false, premult = false;
 
   /* the channels: through a palette where the JP2 maps one */
-  if (!o->raw && x->nmap && x->pal) {
+  if (!raw && x->nmap && x->pal) {
     for (k = 0; k < x->nmap; k++) {
       if (x->map[k].cmp >= j->ncomp || (x->map[k].palette && x->map[k].col >= x->pal_cols)) return false;
       ch[nch].comp = x->map[k].cmp;
@@ -2593,7 +2600,7 @@ compose(jpx_t *j, const jp2_t *x, ImImage *im, const jxopts_t *o) {
   }
 
   /* which are colour, which opacity; the indexes asked for: the first */
-  if (o->raw) {
+  if (raw) {
     space     = 1u;
     ncol      = 1u;
     colour[0] = 0u;
@@ -2630,6 +2637,42 @@ compose(jpx_t *j, const jp2_t *x, ImImage *im, const jxopts_t *o) {
     }
     /* sYCC: said so, or three with the second subsampled (opj_decompress's guess) */
     ycc = ncol == 3u && (x->enumcs == 18u || (!x->colr && j->ncomp == 3u && j->dx[0] == j->dy[0] && j->dx[1] != 1u));
+  }
+
+  pk->nch     = nch;
+  pk->ncol    = ncol;
+  pk->space   = space;
+  pk->opacity = opacity;
+  pk->ycc     = ycc;
+  pk->premult = premult;
+  return true;
+}
+
+/* the planes as `im`'s pixels: the colours then the opacity, a sample 8
+   bits or (any channel deeper) 16 in `order` */
+static bool
+compose(jpx_t *j, const jp2_t *x, ImImage *im, const jxopts_t *o) {
+  ImByteOrder order = o->order;
+  xchan_t   ch[X_COMPS];
+  uint32_t  ncol, space, colour[4], use[5], nuse, k, u, w = j->x1 - j->x0, h = j->y1 - j->y0, X, Y, step;
+  int32_t   opacity = -1;
+  bool      ycc = false, premult = false, wide = false, direct;
+  uint32_t *cols;
+  uint8_t  *px, *icc = NULL;
+  void     *alpha = NULL;
+  size_t    n = (size_t)w * h, len, i;
+
+  {
+    xpick_t pk;
+
+    if (!pick(j, x, o->raw, &pk)) return false;
+    memcpy(ch, pk.ch, sizeof(ch));
+    ncol    = pk.ncol;
+    space   = pk.space;
+    opacity = pk.opacity;
+    ycc     = pk.ycc;
+    premult = pk.premult;
+    for (k = 0; k < 4u; k++) colour[k] = pk.colour[k];
   }
 
   /* not asked for: not there; CMYK, interleaved, goes without (im has no
@@ -2916,6 +2959,19 @@ jpx_decode(const uint8_t *data, size_t len, ImImage *im, const jxopts_t *o) {
     j->ph[c]  = (uint32_t)ceil_div_u(j->y1, j->dy[c]) - j->py0[c];
     if (!j->pw[c] || !j->ph[c] || !(j->plane[c] = calloc((size_t)j->pw[c] * j->ph[c], sizeof(uint16_t)))) goto done;
   }
+  /* no opacity wanted: its component (no colour's, past the colour
+     transform's three) not decoded */
+  if (o->opacity == IM_OPACITY_NONE && !o->raw) {
+    xpick_t pk;
+
+    if (pick(j, &x, false, &pk) && pk.opacity >= 0 && pk.ch[pk.opacity].col < 0) {
+      uint32_t comp = pk.ch[pk.opacity].comp, k;
+      bool     colour = comp < 3u;
+
+      for (k = 0; k < pk.ncol && !colour; k++) colour = pk.ch[pk.colour[k]].comp == comp;
+      if (!colour) j->skip[comp] = true;
+    }
+  }
   t1_tables(j);
   pool_start(j);
   for (tile = 0; tile < j->ntx * j->nty; tile++) {
@@ -2981,18 +3037,9 @@ jp2_info(const uint8_t *data, size_t len, ImInfo *info) {
   }
   /* an opacity channel, as compose finds it */
   {
-    uint32_t nch = x.nmap && x.pal ? x.nmap : j->ncomp, k;
-    uint32_t ncol = x.enumcs == 17u ? 1u : x.enumcs == 12u ? 4u
-                  : x.enumcs == 16u || x.enumcs == 18u || x.enumcs == 14u || x.enumcs == 24u ? 3u
-                  : x.icc == 0x47524159u ? 1u : x.icc == 0x434D594Bu ? 4u : x.icc == 0x52474220u ? 3u
-                  : nch <= 2u ? 1u : nch == 3u ? 3u : 4u;
+    xpick_t pk;
 
-    if (ncol > nch) ncol = nch >= 3u ? 3u : 1u;
-    if (x.ndef) {
-      for (k = 0; k < x.ndef; k++) info->opacity = info->opacity || (x.def[k].cn < nch && (x.def[k].typ == 1u || x.def[k].typ == 2u));
-    } else {
-      info->opacity = nch > ncol;
-    }
+    info->opacity = pick(j, &x, false, &pk) && pk.opacity >= 0;
   }
   ok = true;
 
