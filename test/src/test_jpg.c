@@ -19,7 +19,8 @@
  * pixels hashed as im gives them, each of which is libjpeg-turbo's to the
  * byte (deeper samples spread over 16 bits, shallower over 8, Adobe's CMYK
  * un-inverted): every sampling libjpeg upsamples, progressive, restarts,
- * 12-bit, arithmetic coding, lossless at 2 to 16 bits, CMYK and YCCK,
+ * 12-bit, arithmetic coding, lossless at 2 to 16 bits, CMYK and YCCK, a
+ * height from a DNL (420.jpg's and prog.jpg's pixels),
  * streams cut short (the rest grey; a progressive one smoothed), a large
  * one on threads; 16-bit samples in either order; an ICC profile's chunks
  * joined in order; every seventh cut of five files decoding as far as it
@@ -136,6 +137,8 @@ TEST_IMPL(jpg_fixtures) {
     { "420-cut.jpg",    RGB,  8,  sRGB,   37,  23,  0xE4B5AF76u }, /* the rest grey */
     { "prog-cut.jpg",   RGB,  8,  sRGB,   37,  23,  0x86D88A7Du }, /* smoothed */
     { "threads.jpg",    RGB,  8,  sRGB,   777, 777, 0x6AA49719u }, /* restarts on threads */
+    { "dnl.jpg",        RGB,  8,  sRGB,   37,  23,  0x82F94015u }, /* the height a DNL's */
+    { "dnl-prog.jpg",   RGB,  8,  sRGB,   37,  23,  0x82F94015u },
   };
   size_t i;
 

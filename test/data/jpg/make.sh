@@ -3,8 +3,10 @@
 # 3.2.1's) from a synthetic 37 × 23 picture (and a 7 × 5 one): gradients,
 # a ring, stripes, a little noise; CMYK and YCCK with its TurboJPEG
 # encoder (mkcmyk.c); threads.jpg from macOS's "iMac Blue" desktop picture
-# at 777 × 777, a restart a row. Each decodes to libjpeg-turbo's pixels to
-# the byte (its default decompression, the C IDCT for the cut ones).
+# at 777 × 777, a restart a row; two with a DNL for their height. Each
+# decodes to libjpeg-turbo's pixels to the byte (its default decompression,
+# the C IDCT for the cut ones; the DNL ones their twins', libjpeg refusing
+# DNL).
 set -eu
 cd ${0:A:h}
 python3 - <<'PY'
@@ -56,6 +58,25 @@ cjpeg -lossless 1 -restart 1 -outfile ll-rst.jpg $s
 # cut short: the rest of the baseline one grey, the progressive one smoothed
 head -c 640 prog.jpg > prog-cut.jpg
 head -c 700 420.jpg > 420-cut.jpg
+# no height in the frame, a DNL after the first scan giving it (B.2.5):
+# 420.jpg's and prog.jpg's pixels (libjpeg refuses DNL)
+python3 - <<'PY'
+def dnl(src, dst):
+    d = bytearray(open(src, 'rb').read()); i = 2; sof = None
+    while True:
+        m = d[i + 1]; L = d[i + 2] << 8 | d[i + 3]
+        if m in (0xC0, 0xC1, 0xC2): sof = i + 4
+        if m == 0xDA: break
+        i += 2 + L
+    j = i + 2 + L
+    while not (d[j] == 0xFF and d[j + 1] not in (0x00, 0xFF) and not 0xD0 <= d[j + 1] <= 0xD7): j += 1
+    h = d[sof + 1] << 8 | d[sof + 2]
+    d[sof + 1] = d[sof + 2] = 0
+    d[j:j] = bytes([0xFF, 0xDC, 0, 4, h >> 8, h & 0xFF])
+    open(dst, 'wb').write(d)
+dnl('420.jpg', 'dnl.jpg')
+dnl('prog.jpg', 'dnl-prog.jpg')
+PY
 # CMYK (Adobe's, inverted), YCCK, and CMYK without the Adobe marker
 mkdir -p cmyk
 cc -O2 -I/opt/homebrew/include mkcmyk.c -L/opt/homebrew/lib -lturbojpeg -lm -o mkcmyk
