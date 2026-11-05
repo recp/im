@@ -28,6 +28,7 @@
 #define src_io_jpg_jpgint_h
 
 #include "../../common.h"
+#include "../../thread/pool.h"
 
 enum {
   J_COMPS   = 4,         /* components a frame; more aren't decoded */
@@ -101,7 +102,6 @@ typedef struct jcomp {
   uint32_t  bw, bh;           /* blocks across and down, every MCU's */
   uint32_t  cw, ch;           /* its samples across and down (downsampled) */
   uint32_t  sw, sh;           /* blocks a scan of it alone covers */
-  int32_t   dc;               /* the DC prediction */
   void     *plane;            /* bw × 8 by bh × 8 samples: uint8 or uint16 */
   size_t    stride;           /* samples a plane row */
   int16_t  *coefs;            /* multi-scan: 64 a block, natural order */
@@ -138,24 +138,25 @@ typedef struct jpg {
   uint32_t  scomp[J_COMPS], nscomp;
   uint32_t  ss, se, ah, al;
   jdata_t   sd;               /* its data, unstuffed */
-  bool      lacking;          /* data ran out: MCUs skipped to a restart */
-  uint32_t  eobrun, togo;     /* end-of-band run; MCUs to the next restart */
-  uint32_t  next_rst;         /* the restart marker expected next (0–7) */
   uint32_t  nscans;
   uint32_t  last_good;        /* the iMCU row a scan last decoded with data */
+
+  /* threads: at most `threads`, the pool's (NULL: the caller's alone) */
+  uint32_t   threads;
+  im_pool_t *pool;
 
   /* the IDCT's: 8- or 12-bit */
   void    (*idct)(const int16_t *in, const uint16_t *q, void *out, size_t stride);
 } jpg_t;
 
 /* jpg.c */
-IM_HIDE bool jpg_decode_mem(const uint8_t *data, size_t len, ImImage *im, ImByteOrder order);
+IM_HIDE bool jpg_decode_mem(const uint8_t *data, size_t len, ImImage *im, ImByteOrder order, uint32_t threads);
 
 /* huff.c */
 IM_HIDE bool jpg_huff_build(jhuff_t *h, const uint8_t counts[16], const uint8_t *vals, bool dc, bool lossless);
 IM_HIDE void jpg_huff_std(jpg_t *j);
 IM_HIDE bool jpg_unstuff(jdata_t *d, const uint8_t *p, const uint8_t *end);
-IM_HIDE bool jpg_scan_huff(jpg_t *j);
+IM_HIDE bool jpg_scan_huff(jpg_t *j, im_pool_t *pool);
 
 /* idct.c */
 IM_HIDE void jpg_idct8(const int16_t *in, const uint16_t *q, void *out, size_t stride);

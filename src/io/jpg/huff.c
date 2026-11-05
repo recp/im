@@ -346,28 +346,52 @@ block_seq(jbits_t *b, const jhuff_t *dct, const jhuff_t *act, int32_t *dc, int16
   }
 }
 
+/* a scan's state, one a thread decoding it: the DC predictions (by
+   component), the end-of-band run, its reader, whether data ran out */
+typedef struct jrd {
+  jbits_t        b;
+  const uint8_t *org;   /* where its bytes are counted from */
+  size_t         pre;   /* bytes taken before `org` */
+  size_t         len;   /* the segment's bytes */
+  const uint8_t *lim;   /* past it an MCU may run out: the tail */
+  bool           tail;
+} jrd_t;
+
+typedef struct jctx {
+  jpg_t   *j;
+  jrd_t    r;
+  uint8_t *tail;
+  size_t   margin;
+  int32_t  dc[J_COMPS];
+  uint32_t eobrun;
+  uint32_t last_good; /* the iMCU row last decoded with data */
+  bool     lacking;
+} jctx_t;
+
 /* a progressive scan's part of a block (G.1.2, as libjpeg's jdphuff.c) */
 static void
-block_dc_first(jpg_t *j, jbits_t *b, jcomp_t *c, int16_t *blk) {
-  uint32_t s = huff_sym(b, j->dc[c->td]) & 15u;
-  int32_t  diff = extend(get_bits(b, s), s);
+block_dc_first(jctx_t *x, jbits_t *b, uint32_t ci, int16_t *blk) {
+  const jpg_t *j = x->j;
+  uint32_t     s = huff_sym(b, j->dc[j->comp[ci].td]) & 15u;
+  int32_t      diff = extend(get_bits(b, s), s);
 
-  c->dc  = (int32_t)((uint32_t)c->dc + (uint32_t)diff);
-  blk[0] = (int16_t)((uint32_t)c->dc << j->al);
+  x->dc[ci] = (int32_t)((uint32_t)x->dc[ci] + (uint32_t)diff);
+  blk[0]    = (int16_t)((uint32_t)x->dc[ci] << j->al);
 }
 
 static void
-block_dc_refine(jpg_t *j, jbits_t *b, int16_t *blk) {
+block_dc_refine(const jpg_t *j, jbits_t *b, int16_t *blk) {
   if (get_bits(b, 1u)) blk[0] = (int16_t)(blk[0] | (1 << j->al));
 }
 
 static void
-block_ac_first(jpg_t *j, jbits_t *b, const jcomp_t *c, int16_t *blk) {
+block_ac_first(jctx_t *x, jbits_t *b, const jcomp_t *c, int16_t *blk) {
+  const jpg_t   *j = x->j;
   const jhuff_t *h = j->ac[c->ta];
   uint32_t       k;
 
-  if (j->eobrun) {
-    j->eobrun--;
+  if (x->eobrun) {
+    x->eobrun--;
     return;
   }
   for (k = j->ss; k <= j->se; k++) {
@@ -379,21 +403,22 @@ block_ac_first(jpg_t *j, jbits_t *b, const jcomp_t *c, int16_t *blk) {
     } else if (r == 15u) {
       k += 15u;
     } else {
-      j->eobrun = 1u << r;
-      if (r) j->eobrun += get_bits(b, r);
-      j->eobrun--;
+      x->eobrun = 1u << r;
+      if (r) x->eobrun += get_bits(b, r);
+      x->eobrun--;
       break;
     }
   }
 }
 
 static void
-block_ac_refine(jpg_t *j, jbits_t *b, const jcomp_t *c, int16_t *blk) {
+block_ac_refine(jctx_t *x, jbits_t *b, const jcomp_t *c, int16_t *blk) {
+  const jpg_t   *j  = x->j;
   const jhuff_t *h  = j->ac[c->ta];
   int32_t        p1 = 1 << j->al, m1 = -1 * (1 << j->al);
   uint32_t       k  = j->ss, se = j->se;
 
-  if (!j->eobrun) {
+  if (!x->eobrun) {
     for (; k <= se; k++) {
       uint32_t rs = huff_sym(b, h), s = rs & 15u;
       int32_t  r = (int32_t)(rs >> 4), v = 0;
@@ -401,8 +426,8 @@ block_ac_refine(jpg_t *j, jbits_t *b, const jcomp_t *c, int16_t *blk) {
       if (s) {
         v = get_bits(b, 1u) ? p1 : m1;
       } else if (r != 15) {
-        j->eobrun = 1u << r;
-        if (r) j->eobrun += get_bits(b, (uint32_t)r);
+        x->eobrun = 1u << r;
+        if (r) x->eobrun += get_bits(b, (uint32_t)r);
         break;
       }
       do {
@@ -418,54 +443,56 @@ block_ac_refine(jpg_t *j, jbits_t *b, const jcomp_t *c, int16_t *blk) {
       if (v) blk[jpg_natural[k]] = (int16_t)v;
     }
   }
-  if (j->eobrun) {
+  if (x->eobrun) {
     for (; k <= se; k++) {
       int16_t *coef = &blk[jpg_natural[k]];
 
       if (*coef && get_bits(b, 1u) && !(*coef & p1)) *coef = (int16_t)(*coef >= 0 ? *coef + p1 : *coef + m1);
     }
-    j->eobrun--;
+    x->eobrun--;
   }
 }
 
 /* -- a scan -------------------------------------------------------------------- */
 
-/* the block at (bx, by) of `c`: where a multi-scan image keeps it, or the
-   one-pass scan's scratch (zeros), to the plane once decoded */
-IM_INLINE int16_t*
-block_at(jpg_t *j, jcomp_t *c, uint32_t bx, uint32_t by, int16_t *scratch) {
-  if (j->multiscan) return c->coefs + ((size_t)by * c->bw + bx) * 64u;
-  memset(scratch, 0, 64u * sizeof(*scratch));
-  return scratch;
-}
-
-/* one MCU's blocks (or the one block of a single-component scan's) */
+/* one MCU's blocks (or the one block of a single-component scan's): where
+   a multi-scan image keeps them, or (one pass) decoded in scratch zeros
+   and put in the plane */
 static void
-mcu(jpg_t *j, jbits_t *b, uint32_t mx, uint32_t my, bool skip) {
+mcu(jctx_t *x, uint32_t mx, uint32_t my, bool skip) {
   IM_ALIGN(16) int16_t scratch[64];
+  jpg_t   *j = x->j;
+  jbits_t *b = &x->r.b;
   uint32_t i, h, v;
 
   for (i = 0; i < j->nscomp; i++) {
-    jcomp_t *c  = &j->comp[j->scomp[i]];
+    uint32_t ci = j->scomp[i];
+    jcomp_t *c  = &j->comp[ci];
     uint32_t nh = j->nscomp == 1u ? 1u : c->h, nv = j->nscomp == 1u ? 1u : c->v;
 
     for (v = 0; v < nv; v++) {
       for (h = 0; h < nh; h++) {
-        uint32_t bx  = mx * nh + h, by = my * nv + v;
-        int16_t *blk = block_at(j, c, bx, by, scratch);
+        uint32_t bx = mx * nh + h, by = my * nv + v;
+        int16_t *blk;
 
+        if (j->multiscan) {
+          blk = c->coefs + ((size_t)by * c->bw + bx) * 64u;
+        } else {
+          blk = scratch;
+          memset(scratch, 0, sizeof(scratch));
+        }
         if (!skip) {
           if (j->process == J_PROGRESSIVE) {
             if (j->ss == 0u) {
-              if (j->ah == 0u) block_dc_first(j, b, c, blk);
+              if (j->ah == 0u) block_dc_first(x, b, ci, blk);
               else block_dc_refine(j, b, blk);
             } else if (j->ah == 0u) {
-              block_ac_first(j, b, c, blk);
+              block_ac_first(x, b, c, blk);
             } else {
-              block_ac_refine(j, b, c, blk);
+              block_ac_refine(x, b, c, blk);
             }
           } else {
-            block_seq(b, j->dc[c->td], j->ac[c->ta], &c->dc, blk);
+            block_seq(b, j->dc[c->td], j->ac[c->ta], &x->dc[ci], blk);
           }
         }
         if (!j->multiscan) jpg_put(j, c, blk, bx, by);
@@ -475,17 +502,11 @@ mcu(jpg_t *j, jbits_t *b, uint32_t mx, uint32_t my, bool skip) {
 }
 
 /* a reader over segment `s` (or none: at a marker left unread, zeros) */
-typedef struct jrd {
-  jbits_t        b;
-  const uint8_t *org;   /* where its bytes are counted from */
-  size_t         pre;   /* bytes taken before `org` */
-  size_t         len;   /* the segment's bytes */
-  const uint8_t *lim;   /* past it an MCU may run out: the tail */
-  bool           tail;
-} jrd_t;
-
 static void
-rd_start(jrd_t *r, const jdata_t *d, uint32_t s, size_t margin, uint8_t *zeros) {
+rd_start(jctx_t *x, uint32_t s) {
+  const jdata_t *d = &x->j->sd;
+  jrd_t         *r = &x->r;
+
   r->b.buf = 0u;
   r->b.n   = 0u;
   r->pre   = 0u;
@@ -494,26 +515,27 @@ rd_start(jrd_t *r, const jdata_t *d, uint32_t s, size_t margin, uint8_t *zeros) 
     r->len  = d->seg[s].end - d->seg[s].start;
     r->tail = false;
   } else {
-    memset(zeros, 0, margin + 16u);
-    r->org  = zeros;
+    memset(x->tail, 0, x->margin + 16u);
+    r->org  = x->tail;
     r->len  = 0u;
     r->tail = true;
   }
   r->b.p = r->org;
-  r->lim = r->len > margin ? r->org + (r->len - margin) : r->org;
+  r->lim = r->len > x->margin ? r->org + (r->len - x->margin) : r->org;
 }
 
 /* near the segment's end: what's left copied, zeros after, so an MCU
    reads past it as libjpeg does (zeros) */
 static void
-rd_tail(jrd_t *r, uint8_t *tail, size_t margin) {
+rd_tail(jctx_t *x) {
+  jrd_t *r    = &x->r;
   size_t left = r->len - (size_t)(r->b.p - r->org);
 
-  memcpy(tail, r->b.p, left);
-  memset(tail + left, 0, margin + 16u);
+  memcpy(x->tail, r->b.p, left);
+  memset(x->tail + left, 0, x->margin + 16u);
   r->pre += (size_t)(r->b.p - r->org);
-  r->org  = tail;
-  r->b.p  = tail;
+  r->org  = x->tail;
+  r->b.p  = x->tail;
   r->len  = left;
   r->tail = true;
 }
@@ -524,14 +546,31 @@ rd_past(const jrd_t *r) {
   return ((size_t)(r->b.p - r->org) + r->pre) * 8u - r->b.n > (r->len + r->pre) * 8u;
 }
 
+/* MCU `n` of the scan's, decoded (or skipped where data ran out) */
+IM_INLINE void
+scan_mcu(jctx_t *x, uint32_t n, uint32_t w) {
+  uint32_t mx = n % w, my = n / w;
+
+  if (!x->lacking) {
+    const jpg_t *j = x->j;
+
+    x->last_good = j->nscomp == 1u ? my / j->comp[j->scomp[0]].v : my;
+    if (!x->r.tail && x->r.b.p >= x->r.lim) rd_tail(x);
+    mcu(x, mx, my, false);
+    if (rd_past(&x->r)) x->lacking = true;
+  } else {
+    mcu(x, mx, my, true);
+  }
+}
+
 /* a restart (libjpeg's process_restart, read_restart_marker and its
    resync): the expected RSTn taken; a marker before it skipped, its
    segment with it; one of the next two RSTs (or any other marker) left
    unread, the interval reading zeros; any other RST taken for it */
 static void
-restart(jpg_t *j, uint32_t *cur, bool *at_marker) {
-  const jdata_t *d = &j->sd;
-  uint32_t       want = j->next_rst, m, i;
+restart(jctx_t *x, uint32_t *next_rst, uint32_t *cur, bool *at_marker) {
+  const jdata_t *d = &x->j->sd;
+  uint32_t       want = *next_rst, m, i;
 
   for (;;) {
     int action;
@@ -558,38 +597,67 @@ restart(jpg_t *j, uint32_t *cur, bool *at_marker) {
     *at_marker = false;
     if (action == 1 || *cur >= d->nseg) break;
   }
-  j->next_rst = (j->next_rst + 1u) & 7u;
-  for (i = 0; i < j->nscomp; i++) j->comp[j->scomp[i]].dc = 0;
-  j->eobrun = 0u;
-  j->togo   = j->restart;
-  if (!*at_marker) j->lacking = false;
+  *next_rst = (*next_rst + 1u) & 7u;
+  for (i = 0; i < J_COMPS; i++) x->dc[i] = 0;
+  x->eobrun = 0u;
+  if (!*at_marker) x->lacking = false;
+  rd_start(x, *at_marker ? UINT32_MAX : *cur);
 }
 
-/* the scan whose data `j->sd` holds */
+static bool
+ctx_init(jctx_t *x, jpg_t *j, size_t margin) {
+  memset(x, 0, sizeof(*x));
+  x->j      = j;
+  x->margin = margin;
+  return (x->tail = malloc(margin * 2u + 32u)) != NULL;
+}
+
+/* restart intervals on the pool: each its own segment, the RSTs in order
+   (a valid stream's; any other is read in order, as libjpeg's resync goes) */
+typedef struct jpar {
+  jpg_t    *j;
+  jctx_t   *ctx;       /* a worker's */
+  uint32_t  w, total, per, step;
+  uint32_t  last_good; /* the last interval's */
+} jpar_t;
+
+static bool
+par_item(void *arg, uint32_t worker, uint32_t item) {
+  jpar_t  *pa = arg;
+  jctx_t  *x  = &pa->ctx[worker];
+  uint32_t k  = item * pa->step, end = k + pa->step, n, i;
+  uint32_t ints = (pa->total + pa->per - 1u) / pa->per;
+
+  for (; k < end && k < ints; k++) {
+    uint32_t last = (k + 1u) * pa->per < pa->total ? (k + 1u) * pa->per : pa->total;
+
+    for (i = 0; i < J_COMPS; i++) x->dc[i] = 0;
+    x->eobrun  = 0u;
+    x->lacking = false;
+    rd_start(x, k);
+    for (n = k * pa->per; n < last; n++) scan_mcu(x, n, pa->w);
+    if (k + 1u == ints) pa->last_good = x->last_good;
+  }
+  return true;
+}
+
+/* the scan whose data `j->sd` holds; `pool` its threads, if any */
 IM_HIDE bool
-jpg_scan_huff(jpg_t *j) {
-  jrd_t    r;
-  uint32_t mx, my, w, h, i, blocks = 0u, cur = 0u;
+jpg_scan_huff(jpg_t *j, im_pool_t *pool) {
+  jctx_t   x;
+  uint32_t w, h, i, blocks = 0u, n, total, cur = 0u, next_rst = 0u, togo;
   size_t   margin;
-  uint8_t *tail;
   bool     at_marker = false;
 
   for (i = 0; i < j->nscomp; i++) {
     const jcomp_t *c = &j->comp[j->scomp[i]];
 
-    j->comp[j->scomp[i]].dc = 0;
     blocks += j->nscomp == 1u ? 1u : (uint32_t)c->h * c->v;
   }
   /* what an MCU can take at most, zeros and damage included: per block a
      DC (17 + 16 bits) and 63 codes with their values (17 + 15 bits), or
      refinement's correction bits besides */
   margin = (size_t)blocks * 280u + 16u;
-  if (!(tail = malloc(margin * 2u + 32u))) return false;
-
-  j->lacking  = false;
-  j->eobrun   = 0u;
-  j->togo     = j->restart;
-  j->next_rst = 0u;
 
   if (j->nscomp == 1u) {
     w = j->comp[j->scomp[0]].sw;
@@ -598,26 +666,60 @@ jpg_scan_huff(jpg_t *j) {
     w = j->mcux;
     h = j->mcuy;
   }
-  rd_start(&r, &j->sd, 0u, margin, tail);
-  for (my = 0; my < h; my++) {
-    for (mx = 0; mx < w; mx++) {
-      if (j->restart) {
-        if (!j->togo) {
-          restart(j, &cur, &at_marker);
-          rd_start(&r, &j->sd, at_marker ? UINT32_MAX : cur, margin, tail);
+  total = w * h;
+
+  /* in parallel: where every interval has its segment, ended by the RST
+     the next restart expects */
+  if (pool && j->restart && total > j->restart) {
+    uint32_t ints = (total + j->restart - 1u) / j->restart, k;
+    bool     valid = j->sd.nseg >= ints;
+
+    for (k = 0; valid && k + 1u < ints; k++) valid = j->sd.seg[k].marker == 0xD0u + (k & 7u);
+    if (valid) {
+      jpar_t   pa;
+      jctx_t   ctx[IM_POOL_MAX];
+      uint32_t nw = im_pool_size(pool), items;
+      bool     ok;
+
+      for (i = 0; i < nw; i++) {
+        if (!ctx_init(&ctx[i], j, margin)) {
+          while (i--) free(ctx[i].tail);
+          return false;
         }
-        j->togo--;
       }
-      if (!j->lacking) {
-        j->last_good = j->nscomp == 1u ? my / j->comp[j->scomp[0]].v : my;
-        if (!r.tail && r.b.p >= r.lim) rd_tail(&r, tail, margin);
-        mcu(j, &r.b, mx, my, false);
-        if (rd_past(&r)) j->lacking = true;
-      } else {
-        mcu(j, &r.b, mx, my, true);
-      }
+      pa.j     = j;
+      pa.ctx   = ctx;
+      pa.w     = w;
+      pa.total = total;
+      pa.per   = j->restart;
+      items    = nw * 4u < ints ? nw * 4u : ints;
+      pa.step  = (ints + items - 1u) / items;
+      items    = (ints + pa.step - 1u) / pa.step;
+      pa.last_good = 0u;
+      ok       = im_pool_run(pool, par_item, &pa, items);
+      for (i = 0; i < nw; i++) free(ctx[i].tail);
+      /* as in order: each interval starts with data, so the last one's
+         last MCU read with it is the row */
+      j->last_good = pa.last_good;
+      return ok;
     }
   }
-  free(tail);
+
+  /* in order */
+  if (!ctx_init(&x, j, margin)) return false;
+  togo = j->restart;
+  rd_start(&x, 0u);
+  for (n = 0; n < total; n++) {
+    if (j->restart) {
+      if (!togo) {
+        restart(&x, &next_rst, &cur, &at_marker);
+        togo = j->restart;
+      }
+      togo--;
+    }
+    scan_mcu(&x, n, w);
+  }
+  j->last_good = x.last_good;
+  free(x.tail);
   return true;
 }

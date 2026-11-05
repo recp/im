@@ -305,75 +305,110 @@ pixels8(const uint8_t *const *row, uint32_t ncomp, jspace_t space, const jycc_t 
 #  define J_HOST_BIG false
 #endif
 
+/* the output's work: bands of rows on the pool, a worker's own rows */
+typedef struct jsout {
+  jpg_t   *j;
+  jupc_t   up[J_COMPS];
+  jycc_t   t;
+  jspace_t space;
+  uint8_t *px;
+  size_t   rowlen;
+  uint32_t band, max;
+  bool     wide, invert, swap;
+  uint8_t *rows[IM_POOL_MAX];
+  jrow_t   scratch[IM_POOL_MAX];
+} jsout_t;
+
+static bool
+out_band(void *arg, uint32_t worker, uint32_t item) {
+  jsout_t *o = arg;
+  jpg_t   *j = o->j;
+  uint32_t n = j->ncomp, w = j->width, y0 = item * o->band, y1 = y0 + o->band, y, i;
+  uint8_t *rows = o->rows[worker];
+
+  if (y1 > j->height) y1 = j->height;
+  for (y = y0; y < y1; y++) {
+    if (!o->wide) {
+      const uint8_t *row[J_COMPS];
+
+      for (i = 0; i < n; i++) row[i] = up_row8(j, &j->comp[i], &o->up[i], y, rows + o->rowlen * i, &o->scratch[worker]);
+      pixels8(row, n, o->space, &o->t, (int32_t)o->max, o->invert, w, o->px + (size_t)y * w * n);
+    } else {
+      const uint16_t *row[J_COMPS];
+      uint16_t       *p = (uint16_t *)o->px + (size_t)y * w * n;
+      size_t          k;
+
+      for (i = 0; i < n; i++) row[i] = up_row16(j, &j->comp[i], &o->up[i], y, (uint16_t *)rows + o->rowlen * i);
+      pixels16(row, n, o->space, &o->t, (int32_t)o->max, o->invert, w, p);
+      /* deeper samples to 16 bits, in the order asked */
+      for (k = 0; k < (size_t)w * n; k++) {
+        uint32_t v = j->prec == 16u ? p[k] : (uint32_t)(((uint64_t)p[k] * 65535u + o->max / 2u) / o->max);
+
+        p[k] = o->swap ? bswapu16((uint16_t)v) : (uint16_t)v;
+      }
+    }
+  }
+  return true;
+}
+
 /* the planes as `im`'s pixels: gray, RGB or CMYK; 8 bits a sample, or 16
-   (deeper samples spread over 0–65535) in `order` */
+   (deeper samples spread over 0–65535) in `order` (the host's if any) */
 IM_HIDE bool
 jpg_out(jpg_t *j, jspace_t space, ImImage *im, ImByteOrder order) {
-  jupc_t   up[J_COMPS];
-  jycc_t   t   = { 0 };
-  uint32_t n   = j->ncomp, w = j->width, h = j->height, y, i;
-  int32_t  max = (int32_t)((1u << j->prec) - 1u);
-  bool     wide = j->prec > 8u, invert = n == 4u && j->adobe, ok = false;
-  size_t   len = (size_t)w * h * n * (wide ? 2u : 1u), rowlen = (size_t)j->hmax * 8u * (j->mcux + 1u) + 16u;
-  uint8_t *px = NULL, *rows = NULL;
-  jrow_t   scratch = { NULL, NULL };
+  jsout_t *o;
+  uint32_t n = j->ncomp, w = j->width, h = j->height, i, nw = im_pool_size(j->pool);
+  size_t   len;
+  bool     ok = false;
 
   if (n == 2u || (n == 3u && space != J_RGB && space != J_YCC) || (n == 4u && space != J_CMYK && space != J_YCCK)) {
     return false;
   }
-  for (i = 0; i < n; i++) up[i] = up_method(j, &j->comp[i]);
-  if ((space == J_YCC || space == J_YCCK) && !ycc_tables(&t, (uint32_t)max)) goto done;
-  if (!(px = malloc(len)) || !(rows = malloc(rowlen * n * (wide ? 2u : 1u)))) goto done;
-  if (!(scratch.pad = malloc(rowlen + 2u)) || !(scratch.sums = malloc((rowlen + 2u) * sizeof(uint16_t)))) goto done;
-
-  for (y = 0; y < h; y++) {
-    if (!wide) {
-      const uint8_t *row[J_COMPS];
-
-      for (i = 0; i < n; i++) row[i] = up_row8(j, &j->comp[i], &up[i], y, rows + rowlen * i, &scratch);
-      pixels8(row, n, space, &t, max, invert, w, px + (size_t)y * w * n);
-    } else {
-      const uint16_t *row[J_COMPS];
-
-      for (i = 0; i < n; i++) row[i] = up_row16(j, &j->comp[i], &up[i], y, (uint16_t *)rows + rowlen * i);
-      pixels16(row, n, space, &t, max, invert, w, (uint16_t *)px + (size_t)y * w * n);
-    }
-  }
-
-  /* deeper samples to 16 bits, in the order asked (the host's if any) */
+  if (!(o = calloc(1, sizeof(*o)))) return false;
   if (order != IM_BYTEORDER_BIG && order != IM_BYTEORDER_LITTLE) order = IM_BYTEORDER_HOST;
-  if (wide) {
-    uint16_t *p = (uint16_t *)px;
-    size_t    k, total = (size_t)w * h * n;
-    bool      swap = order != IM_BYTEORDER_HOST && (order == IM_BYTEORDER_BIG) != J_HOST_BIG;
-
-    for (k = 0; k < total; k++) {
-      uint32_t v = j->prec == 16u ? p[k] : (uint32_t)(((uint64_t)p[k] * 65535u + (uint32_t)max / 2u) / (uint32_t)max);
-
-      p[k] = swap ? bswapu16((uint16_t)v) : (uint16_t)v;
+  o->j      = j;
+  o->space  = space;
+  o->max    = (1u << j->prec) - 1u;
+  o->wide   = j->prec > 8u;
+  o->invert = n == 4u && j->adobe;
+  o->swap   = order != IM_BYTEORDER_HOST && (order == IM_BYTEORDER_BIG) != J_HOST_BIG;
+  o->rowlen = (size_t)j->hmax * 8u * (j->mcux + 1u) + 16u;
+  o->band   = j->pool ? h / (nw * 8u) : h;
+  o->band   = o->band < 8u ? 8u : o->band;
+  len       = (size_t)w * h * n * (o->wide ? 2u : 1u);
+  for (i = 0; i < n; i++) o->up[i] = up_method(j, &j->comp[i]);
+  if ((space == J_YCC || space == J_YCCK) && !ycc_tables(&o->t, o->max)) goto done;
+  if (!(o->px = malloc(len))) goto done;
+  for (i = 0; i < nw; i++) {
+    if (!(o->rows[i] = malloc(o->rowlen * n * (o->wide ? 2u : 1u))) || !(o->scratch[i].pad = malloc(o->rowlen + 2u))
+        || !(o->scratch[i].sums = malloc((o->rowlen + 2u) * sizeof(uint16_t)))) {
+      goto done;
     }
   }
+  if (!im_pool_run(j->pool, out_band, o, (h + o->band - 1u) / o->band)) goto done;
 
   im->width              = w;
   im->height             = h;
-  im->data.data          = px;
+  im->data.data          = o->px;
   im->len                = len;
   im->componentsPerPixel = n;
-  im->bitsPerComponent   = wide ? 16u : 8u;
+  im->bitsPerComponent   = o->wide ? 16u : 8u;
   im->bitsPerPixel       = n * im->bitsPerComponent;
   im->bytesPerPixel      = im->bitsPerPixel / 8u;
   im->byteOrder          = order;
   im->alphaInfo          = IM_ALPHA_NONE;
   im->format             = n == 1u ? IM_FORMAT_GRAY : n == 3u ? IM_FORMAT_RGB : IM_FORMAT_CMYK;
   im->colorSpace         = n == 1u ? IM_COLORSPACE_GRAY : n == 3u ? IM_COLORSPACE_sRGB : IM_COLORSPACE_CMYK;
-  px                     = NULL;
+  o->px                  = NULL;
   ok                     = true;
 
 done:
-  free(px);
-  free(rows);
-  free(scratch.pad);
-  free(scratch.sums);
-  ycc_free(&t);
+  free(o->px);
+  for (i = 0; i < IM_POOL_MAX; i++) {
+    free(o->rows[i]);
+    free(o->scratch[i].pad);
+    free(o->scratch[i].sums);
+  }
+  ycc_free(&o->t);
+  free(o);
   return ok;
 }

@@ -92,14 +92,14 @@ guess(int64_t num, int64_t q, int al) {
 }
 
 static void
-smooth_comp(jpg_t *j, uint32_t ci, const int8_t *latch, const int8_t *prev) {
+smooth_comp(jpg_t *j, uint32_t ci, const int8_t *latch, const int8_t *prev, uint32_t by0, uint32_t by1) {
   jcomp_t       *c = &j->comp[ci];
   const uint16_t *qt = c->q;
   int64_t        Q00 = qt[0], Q01 = qt[1], Q10 = qt[8], Q20 = qt[16], Q11 = qt[9], Q02 = qt[2];
   int64_t        Q03 = qt[3], Q12 = qt[10], Q21 = qt[17], Q30 = qt[24];
   uint32_t       v = c->v, rows = j->mcuy, by, bx, last = c->sw - 1u;
 
-  for (by = 0; by < c->sh; by++) {
+  for (by = by0; by < by1; by++) {
     uint32_t       row = by / v, br = by % v, block_rows, ibr, nbr;
     const int8_t  *cb  = row > j->last_good ? prev : latch;
     bool           change_dc = true;
@@ -190,23 +190,50 @@ smooth_comp(jpg_t *j, uint32_t ci, const int8_t *latch, const int8_t *prev) {
   }
 }
 
-/* a multi-scan image's blocks, once its scans are read */
-static void
-idct_all(jpg_t *j) {
+/* a multi-scan image's blocks, once its scans are read: bands of block
+   rows (of each component) on the pool */
+typedef struct jidct {
+  jpg_t   *j;
+  bool     smooth;
   int8_t   latch[J_COMPS][10], prev[J_COMPS][10];
-  uint32_t i, bx, by;
+  uint32_t band, items[J_COMPS + 1]; /* items before component i */
+} jidct_t;
 
-  if (smoothing_ok(j, latch, prev)) {
-    for (i = 0; i < j->ncomp; i++) smooth_comp(j, i, latch[i], prev[i]);
-    return;
-  }
-  for (i = 0; i < j->ncomp; i++) {
-    jcomp_t *c = &j->comp[i];
+static bool
+idct_item(void *arg, uint32_t worker, uint32_t item) {
+  jidct_t *t = arg;
+  jpg_t   *j = t->j;
+  uint32_t ci = 0, by0, by1, bx, by;
+  jcomp_t *c;
 
-    for (by = 0; by < c->sh; by++) {
-      for (bx = 0; bx < c->sw; bx++) jpg_put(j, c, c->coefs + ((size_t)by * c->bw + bx) * 64u, bx, by);
-    }
+  (void)worker;
+  while (item >= t->items[ci + 1u]) ci++;
+  c   = &j->comp[ci];
+  by0 = (item - t->items[ci]) * t->band;
+  by1 = by0 + t->band < c->sh ? by0 + t->band : c->sh;
+  if (t->smooth) {
+    smooth_comp(j, ci, t->latch[ci], t->prev[ci], by0, by1);
+    return true;
   }
+  for (by = by0; by < by1; by++) {
+    for (bx = 0; bx < c->sw; bx++) jpg_put(j, c, c->coefs + ((size_t)by * c->bw + bx) * 64u, bx, by);
+  }
+  return true;
+}
+
+static bool
+idct_all(jpg_t *j) {
+  jidct_t  t;
+  uint32_t i, rows = 0u;
+
+  t.j      = j;
+  t.smooth = smoothing_ok(j, t.latch, t.prev);
+  for (i = 0; i < j->ncomp; i++) rows = j->comp[i].sh > rows ? j->comp[i].sh : rows;
+  t.band     = j->pool ? rows / (im_pool_size(j->pool) * 4u) : rows;
+  t.band     = t.band ? t.band : 1u;
+  t.items[0] = 0u;
+  for (i = 0; i < j->ncomp; i++) t.items[i + 1u] = t.items[i] + (j->comp[i].sh + t.band - 1u) / t.band;
+  return im_pool_run(j->pool, idct_item, &t, t.items[j->ncomp]);
 }
 
 /* -- markers ----------------------------------------------------------------------- */
@@ -524,6 +551,7 @@ decode_stream(jpg_t *j, ImImage *im, ImByteOrder order, uint8_t **padp) {
       if (first) {
         uint32_t i;
 
+        if (j->threads > 1u && (uint64_t)j->width * j->height >= (1u << 18)) j->pool = im_pool_new(j->threads);
         j->multiscan = j->process == J_PROGRESSIVE || j->nscomp < j->ncomp;
         for (i = 0; i < j->ncomp && j->multiscan; i++) {
           jcomp_t *c = &j->comp[i];
@@ -541,11 +569,11 @@ decode_stream(jpg_t *j, ImImage *im, ImByteOrder order, uint8_t **padp) {
       if (tail) {
         static const uint8_t fake[3] = { 0xD9u, 0xFFu, 0xD9u };
 
-        if (!jpg_unstuff(&j->sd, odd ? fake : fake + 1, fake + 3) || !jpg_scan_huff(j)) return false;
+        if (!jpg_unstuff(&j->sd, odd ? fake : fake + 1, fake + 3) || !jpg_scan_huff(j, j->pool)) return false;
         j->nscans++;
         break;
       }
-      if (!jpg_unstuff(&j->sd, p, end) || !jpg_scan_huff(j)) return false;
+      if (!jpg_unstuff(&j->sd, p, end) || !jpg_scan_huff(j, j->pool)) return false;
       j->nscans++;
       p = j->sd.next;
       break;
@@ -555,7 +583,7 @@ decode_stream(jpg_t *j, ImImage *im, ImByteOrder order, uint8_t **padp) {
     }
   }
   if (!j->nscans) return false;
-  if (j->multiscan) idct_all(j);
+  if (j->multiscan && !idct_all(j)) return false;
   if (!jpg_out(j, guess_space(j), im, order)) return false;
 
   /* the profile, the density (pixels a metre) */
@@ -577,14 +605,16 @@ decode_stream(jpg_t *j, ImImage *im, ImByteOrder order, uint8_t **padp) {
 
 /* `data` decoded into `im` */
 IM_HIDE bool
-jpg_decode_mem(const uint8_t *data, size_t len, ImImage *im, ImByteOrder order) {
+jpg_decode_mem(const uint8_t *data, size_t len, ImImage *im, ImByteOrder order, uint32_t threads) {
   jpg_t *j;
   bool   ok;
 
   if (!(j = calloc(1, sizeof(*j)))) return false;
-  j->data = data;
-  j->end  = data + len;
-  ok      = decode(j, im, order);
+  j->data    = data;
+  j->end     = data + len;
+  j->threads = threads ? threads : IM_POOL_MAX;
+  ok         = decode(j, im, order);
+  im_pool_free(j->pool);
   jpg_free(j);
   free(j);
   return ok;
@@ -607,7 +637,7 @@ jpg_dec(ImImage         ** __restrict dest,
   }
 
   im = calloc(1, sizeof(*im));
-  ok = im && jpg_decode_mem(fres.raw, fres.size, im, open_config->byteOrder);
+  ok = im && jpg_decode_mem(fres.raw, fres.size, im, open_config->byteOrder, 0u);
 
   /* the pixels don't point into the file: it goes now */
   if (fres.mmap) { im_unmap(fres.raw, fres.size); }
