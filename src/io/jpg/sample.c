@@ -25,6 +25,11 @@
 
 #include "jpgint.h"
 
+#if (defined(__ARM_NEON) || defined(_M_ARM64)) && defined(__aarch64__) && !defined(IM_NO_SIMD)
+#  define J_NEON 1
+#  include "sample_neon.h"
+#endif
+
 /* how a component comes to the image's size */
 typedef enum jup {
   UP_FULL,
@@ -134,8 +139,50 @@ NAME(const jpg_t *j, const jcomp_t *c, const jupc_t *u, uint32_t y, T *out) {  \
   }                                                                            \
 }
 
-UPSAMPLE_FN(up_row8, uint8_t, int32_t)
+UPSAMPLE_FN(up_row8_plain, uint8_t, int32_t)
 UPSAMPLE_FN(up_row16, uint16_t, int64_t)
+
+/* scratch a row's upsampling takes: a copy with room each side, sums */
+typedef struct jrow {
+  uint8_t  *pad;
+  uint16_t *sums;
+} jrow_t;
+
+static const uint8_t*
+up_row8(const jpg_t *j, const jcomp_t *c, const jupc_t *u, uint32_t y, uint8_t *out, const jrow_t *r) {
+#if J_NEON
+  const uint8_t *plane = c->plane, *near, *far;
+  size_t         st = c->stride;
+  uint32_t       n = c->cw, cy;
+
+  switch (u->how) {
+  case UP_H2V1_FANCY: {
+    const uint8_t *in = plane + (size_t)y * st;
+
+    memcpy(r->pad + 1, in, n);
+    r->pad[0]      = in[0];
+    r->pad[n + 1u] = in[n - 1u];
+    jn_h2v1(r->pad + 1, n, out);
+    return out;
+  }
+  case UP_H1V2_FANCY:
+  case UP_H2V2_FANCY:
+    cy   = y >> 1;
+    near = plane + (size_t)cy * st;
+    if (!(y & 1u)) far = cy ? near - st : near;
+    else far = cy + 1u < c->ch ? near + st : near;
+    jn_colsum(near, far, n, r->sums + 1);
+    if (u->how == UP_H2V2_FANCY) jn_h2v2(r->sums + 1, n, out);
+    else jn_h1v2(r->sums + 1, n, (y & 1u) ? 2u : 1u, out);
+    return out;
+  default:
+    break;
+  }
+#else
+  (void)r;
+#endif
+  return up_row8_plain(j, c, u, y, out);
+}
 
 /* libjpeg's YCbCr tables (jdcolor.c build_ycc_rgb_table), for samples up
    to `max` */
@@ -226,8 +273,31 @@ NAME(const T *const *row, uint32_t ncomp, jspace_t space, const jycc_t *t,     \
   }                                                                            \
 }
 
-PIXELS_FN(pixels8, uint8_t)
+PIXELS_FN(pixels8_plain, uint8_t)
 PIXELS_FN(pixels16, uint16_t)
+
+static void
+pixels8(const uint8_t *const *row, uint32_t ncomp, jspace_t space, const jycc_t *t, int32_t max, bool invert,
+        uint32_t w, uint8_t *o) {
+#if J_NEON
+  uint32_t done = 0, i;
+
+  if (ncomp == 3u && space == J_YCC) done = jn_ycc(row[0], row[1], row[2], NULL, o, w);
+  else if (ncomp == 4u && space == J_YCCK) done = jn_ycc(row[0], row[1], row[2], row[3], o, w);
+  else if (ncomp > 1u) done = jn_interleave(row, ncomp, o, w);
+  if (done) {
+    const uint8_t *rest[J_COMPS];
+
+    for (i = 0; i < ncomp; i++) rest[i] = row[i] + done;
+    if (done < w) pixels8_plain(rest, ncomp, space, t, max, false, w - done, o + (size_t)done * ncomp);
+    if (invert) {
+      for (i = 0; i < w * ncomp; i++) o[i] = (uint8_t)(255u - o[i]);
+    }
+    return;
+  }
+#endif
+  pixels8_plain(row, ncomp, space, t, max, invert, w, o);
+}
 
 #if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
 #  define J_HOST_BIG true
@@ -246,6 +316,7 @@ jpg_out(jpg_t *j, jspace_t space, ImImage *im, ImByteOrder order) {
   bool     wide = j->prec > 8u, invert = n == 4u && j->adobe, ok = false;
   size_t   len = (size_t)w * h * n * (wide ? 2u : 1u), rowlen = (size_t)j->hmax * 8u * (j->mcux + 1u) + 16u;
   uint8_t *px = NULL, *rows = NULL;
+  jrow_t   scratch = { NULL, NULL };
 
   if (n == 2u || (n == 3u && space != J_RGB && space != J_YCC) || (n == 4u && space != J_CMYK && space != J_YCCK)) {
     return false;
@@ -253,12 +324,13 @@ jpg_out(jpg_t *j, jspace_t space, ImImage *im, ImByteOrder order) {
   for (i = 0; i < n; i++) up[i] = up_method(j, &j->comp[i]);
   if ((space == J_YCC || space == J_YCCK) && !ycc_tables(&t, (uint32_t)max)) goto done;
   if (!(px = malloc(len)) || !(rows = malloc(rowlen * n * (wide ? 2u : 1u)))) goto done;
+  if (!(scratch.pad = malloc(rowlen + 2u)) || !(scratch.sums = malloc((rowlen + 2u) * sizeof(uint16_t)))) goto done;
 
   for (y = 0; y < h; y++) {
     if (!wide) {
       const uint8_t *row[J_COMPS];
 
-      for (i = 0; i < n; i++) row[i] = up_row8(j, &j->comp[i], &up[i], y, rows + rowlen * i);
+      for (i = 0; i < n; i++) row[i] = up_row8(j, &j->comp[i], &up[i], y, rows + rowlen * i, &scratch);
       pixels8(row, n, space, &t, max, invert, w, px + (size_t)y * w * n);
     } else {
       const uint16_t *row[J_COMPS];
@@ -300,6 +372,8 @@ jpg_out(jpg_t *j, jspace_t space, ImImage *im, ImByteOrder order) {
 done:
   free(px);
   free(rows);
+  free(scratch.pad);
+  free(scratch.sums);
   ycc_free(&t);
   return ok;
 }

@@ -148,6 +148,9 @@ typedef struct jpg {
   void    (*idct)(const int16_t *in, const uint16_t *q, void *out, size_t stride);
 } jpg_t;
 
+/* jpg.c */
+IM_HIDE bool jpg_decode_mem(const uint8_t *data, size_t len, ImImage *im, ImByteOrder order);
+
 /* huff.c */
 IM_HIDE bool jpg_huff_build(jhuff_t *h, const uint8_t counts[16], const uint8_t *vals, bool dc, bool lossless);
 IM_HIDE void jpg_huff_std(jpg_t *j);

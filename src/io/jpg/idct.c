@@ -25,6 +25,11 @@
 
 #include "jpgint.h"
 
+#if (defined(__ARM_NEON) || defined(_M_ARM64)) && defined(__aarch64__) && !defined(IM_NO_SIMD)
+#  define J_NEON 1
+#  include "idct_neon.h"
+#endif
+
 #define FIX_0_298631336 ((int64_t)2446)
 #define FIX_0_390180644 ((int64_t)3196)
 #define FIX_0_541196100 ((int64_t)4433)
@@ -157,9 +162,17 @@ limit(int64_t x, int32_t centre, int32_t max) {
   return v < 0 ? 0 : v > max ? max : v;
 }
 
+static void
+idct8_plain(const int16_t *in, const uint16_t *q, void *out, size_t stride) {
+  IDCT_BODY(uint8_t, 2, 128, 255)
+}
+
 IM_HIDE void
 jpg_idct8(const int16_t *in, const uint16_t *q, void *out, size_t stride) {
-  IDCT_BODY(uint8_t, 2, 128, 255)
+#if J_NEON
+  if (jpg_idct8_neon(in, q, out, stride)) return;
+#endif
+  idct8_plain(in, q, out, stride);
 }
 
 IM_HIDE void

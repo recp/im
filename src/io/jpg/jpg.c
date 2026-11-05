@@ -575,6 +575,21 @@ decode_stream(jpg_t *j, ImImage *im, ImByteOrder order, uint8_t **padp) {
   return true;
 }
 
+/* `data` decoded into `im` */
+IM_HIDE bool
+jpg_decode_mem(const uint8_t *data, size_t len, ImImage *im, ImByteOrder order) {
+  jpg_t *j;
+  bool   ok;
+
+  if (!(j = calloc(1, sizeof(*j)))) return false;
+  j->data = data;
+  j->end  = data + len;
+  ok      = decode(j, im, order);
+  jpg_free(j);
+  free(j);
+  return ok;
+}
+
 IM_HIDE
 ImResult
 jpg_dec(ImImage         ** __restrict dest,
@@ -582,8 +597,7 @@ jpg_dec(ImImage         ** __restrict dest,
         im_open_config_t * __restrict open_config) {
   ImImage     *im;
   ImFileResult fres;
-  jpg_t       *j;
-  bool         ok = false;
+  bool         ok;
 
   *dest = NULL;
   fres  = im_readfile(path, open_config->openIntent != IM_OPEN_INTENT_READWRITE);
@@ -593,16 +607,7 @@ jpg_dec(ImImage         ** __restrict dest,
   }
 
   im = calloc(1, sizeof(*im));
-  j  = calloc(1, sizeof(*j));
-  if (im && j) {
-    j->data = fres.raw;
-    j->end  = (const uint8_t *)fres.raw + fres.size;
-    ok      = decode(j, im, open_config->byteOrder);
-  }
-  if (j) {
-    jpg_free(j);
-    free(j);
-  }
+  ok = im && jpg_decode_mem(fres.raw, fres.size, im, open_config->byteOrder);
 
   /* the pixels don't point into the file: it goes now */
   if (fres.mmap) { im_unmap(fres.raw, fres.size); }
