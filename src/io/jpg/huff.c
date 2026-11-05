@@ -34,6 +34,9 @@
 #elif (defined(__x86_64__) || defined(__i386__)) && (defined(__GNUC__) || defined(__clang__)) && !defined(IM_NO_SIMD)
 #  define J_NZ_X86 1
 #  include <tmmintrin.h>
+#elif defined(__wasm_simd128__) && !defined(IM_NO_SIMD)
+#  define J_NZ_WASM 1
+#  include <wasm_simd128.h>
 #endif
 #if defined(_MSC_VER) && !defined(__clang__)
 #  include <intrin.h>
@@ -505,6 +508,7 @@ nonzero_zz(const jctx_t *x, const int16_t *blk) {
   return vgetq_lane_u64(vreinterpretq_u64_u8(sum), 0);
 }
 #else
+#  if !J_NZ_WASM
 static uint64_t
 nonzero_plain(const int16_t *blk) {
   uint64_t m = 0u;
@@ -513,8 +517,9 @@ nonzero_plain(const int16_t *blk) {
   for (k = 0; k < 64u; k++) m |= (uint64_t)(blk[jpg_natural[k]] != 0) << k;
   return m;
 }
+#  endif
 
-#  if J_NZ_X86
+#  if J_NZ_X86 || J_NZ_WASM
 /* zigzag position 16c + i from the zero bytes of natural 16s…16s+15:
    jpg_natural's low four bits where its high ones are s, else nothing */
 static const uint8_t zz_pick[4][4][16] = {
@@ -536,6 +541,32 @@ static const uint8_t zz_pick[4][4][16] = {
     { 0x0A, 0x0B, 0x04, 0x80, 0x80, 0x80, 0x80, 0x80, 0x05, 0x0C, 0x0D, 0x06, 0x80, 0x07, 0x0E, 0x0F } }
 };
 
+#  endif
+
+#  if J_NZ_WASM
+/* the tables' 0x80: past 16, swizzle's zero */
+static uint64_t
+nonzero_wasm(const int16_t *blk) {
+  const v128_t zero = wasm_i16x8_splat(0);
+  v128_t       src[4];
+  uint64_t     m = 0u;
+  uint32_t     c, k;
+
+  for (k = 0; k < 4u; k++) {
+    src[k] = wasm_i8x16_narrow_i16x8(wasm_i16x8_eq(wasm_v128_load(blk + 16u * k), zero),
+                                     wasm_i16x8_eq(wasm_v128_load(blk + 16u * k + 8u), zero));
+  }
+  for (c = 0; c < 4u; c++) {
+    v128_t acc = wasm_i8x16_splat(0);
+
+    for (k = 0; k < 4u; k++) acc = wasm_v128_or(acc, wasm_i8x16_swizzle(src[k], wasm_v128_load(zz_pick[c][k])));
+    m |= (uint64_t)wasm_i8x16_bitmask(acc) << (16u * c);
+  }
+  return ~m;
+}
+#  endif
+
+#  if J_NZ_X86
 __attribute__((target("ssse3"))) static uint64_t
 nonzero_ssse3(const int16_t *blk) {
   const __m128i zero = _mm_setzero_si128();
@@ -567,7 +598,11 @@ nonzero_zz(const jctx_t *x, const int16_t *blk) {
   if (x->ssse3) return nonzero_ssse3(blk);
 #  endif
   (void)x;
+#  if J_NZ_WASM
+  return nonzero_wasm(blk);
+#  else
   return nonzero_plain(blk);
+#  endif
 }
 #endif
 

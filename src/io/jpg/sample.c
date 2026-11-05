@@ -31,6 +31,9 @@
 #elif (defined(__x86_64__) || defined(__i386__)) && (defined(__GNUC__) || defined(__clang__)) && !defined(IM_NO_SIMD)
 #  define J_X86 1
 #  include "sample_x86.h"
+#elif defined(__wasm_simd128__) && !defined(IM_NO_SIMD)
+#  define J_WASM 1
+#  include "sample_wasm.h"
 #endif
 
 /* how a component comes to the image's size */
@@ -189,6 +192,34 @@ up_row8(const jpg_t *j, const jcomp_t *c, const jupc_t *u, uint32_t y, uint8_t *
   default:
     break;
   }
+#elif J_WASM
+  const uint8_t *plane = c->plane, *near, *far;
+  size_t         st = c->stride;
+  uint32_t       n = c->cw, cy;
+
+  switch (u->how) {
+  case UP_H2V1_FANCY: {
+    const uint8_t *in = plane + (size_t)y * st;
+
+    memcpy(r->pad + 1, in, n);
+    r->pad[0]      = in[0];
+    r->pad[n + 1u] = in[n - 1u];
+    jw_h2v1(r->pad + 1, n, out);
+    return out;
+  }
+  case UP_H1V2_FANCY:
+  case UP_H2V2_FANCY:
+    cy   = y >> 1;
+    near = plane + (size_t)cy * st;
+    if (!(y & 1u)) far = cy ? near - st : near;
+    else far = cy + 1u < c->ch ? near + st : near;
+    jw_colsum(near, far, n, r->sums + 1);
+    if (u->how == UP_H2V2_FANCY) jw_h2v2(r->sums + 1, n, out);
+    else jw_h1v2(r->sums + 1, n, (y & 1u) ? 2u : 1u, out);
+    return out;
+  default:
+    break;
+  }
 #elif J_X86
   const uint8_t *plane = c->plane, *near, *far;
   size_t         st = c->stride;
@@ -322,7 +353,7 @@ PIXELS_FN(pixels16, uint16_t)
 static void
 pixels8(const uint8_t *const *row, uint32_t ncomp, jspace_t space, const jycc_t *t, int32_t max, bool invert,
         uint32_t w, uint8_t *o, bool x86) {
-#if J_NEON || J_X86
+#if J_NEON || J_X86 || J_WASM
   uint32_t done = 0, i;
 
   /* YCbCr's SIMD is 8-bit samples' (lossless shallower ones: the plain loop) */
@@ -331,6 +362,11 @@ pixels8(const uint8_t *const *row, uint32_t ncomp, jspace_t space, const jycc_t 
   if (ncomp == 3u && space == J_YCC && max == 255) done = jn_ycc(row[0], row[1], row[2], NULL, o, w);
   else if (ncomp == 4u && space == J_YCCK && max == 255) done = jn_ycc(row[0], row[1], row[2], row[3], o, w);
   else if (ncomp > 1u) done = jn_interleave(row, ncomp, o, w);
+#  elif J_WASM
+  (void)x86;
+  if (ncomp == 3u && space == J_YCC && max == 255) done = jw_ycc(row[0], row[1], row[2], NULL, o, w);
+  else if (ncomp == 4u && space == J_YCCK && max == 255) done = jw_ycc(row[0], row[1], row[2], row[3], o, w);
+  else if (ncomp > 1u) done = jw_interleave(row, ncomp, o, w);
 #  else
   if (!x86) done = 0;
   else if (ncomp == 3u && space == J_YCC && max == 255) done = jx_ycc(row[0], row[1], row[2], NULL, o, w);
@@ -388,6 +424,8 @@ pad8(const uint8_t *in, uint32_t w, uint8_t *out) {
 
     vst4q_u8(out + 4u * i, b);
   }
+#elif J_WASM
+  i = jw_pad(in, w, out);
 #endif
   for (; i < w; i++) {
     out[4u * i]      = in[3u * i];
