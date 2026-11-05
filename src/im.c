@@ -30,7 +30,7 @@
 #include "color.h"
 #include "sampler.h"
 
-#include "io/jpg/dec/dec.h"
+#include "io/jpg/jpg.h"
 #include "io/apple/coreimg.h"
 #include "io/ppm/ppm.h"
 #include "io/ppm/pgm.h"

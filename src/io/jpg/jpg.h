@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Recep Aslantas
+ * Copyright (C) 2026 Recep Aslantas
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,21 +14,15 @@
  * limitations under the License.
  */
 
-#ifndef src_jpg_idct_h
-#define src_jpg_idct_h
+#ifndef src_jpg_h
+#define src_jpg_h
 
 #include "../common.h"
 
 IM_HIDE
-void
-jpg_idct(int16_t * __restrict blk);
+ImResult
+jpg_dec(ImImage         ** __restrict dest,
+        const char       * __restrict path,
+        im_open_config_t * __restrict open_config);
 
-IM_HIDE
-void
-jpg_idct2(int16_t blk[3][64]);
-
-IM_HIDE
-void
-jpg_idct3(int16_t blk[64]);
-
-#endif /* src_jpg_idct_h */
+#endif /* src_jpg_h */

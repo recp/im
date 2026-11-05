@@ -1,0 +1,305 @@
+/*
+ * Copyright (C) 2026 Recep Aslantas
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * The planes to pixels: each component brought to the image's size, then
+ * its colours. libjpeg's choices (jdsample.c, jdcolor.c): "fancy"
+ * upsampling, a triangle filter, where a component is half as wide (more
+ * than two samples), half as tall, or both; each sample repeated for any
+ * other whole ratio; the row above the first and below the last the edge
+ * one. YCbCr to RGB and YCCK to CMYK in 16-bit fixed point by tables.
+ */
+
+#include "jpgint.h"
+
+/* how a component comes to the image's size */
+typedef enum jup {
+  UP_FULL,
+  UP_H2V1_FANCY,
+  UP_H1V2_FANCY,
+  UP_H2V2_FANCY,
+  UP_INT,      /* each sample repeated: hx across, vx down */
+  UP_ANY       /* a ratio libjpeg refuses: the nearest sample */
+} jup_t;
+
+typedef struct jupc {
+  jup_t    how;
+  uint32_t hx, vx;
+} jupc_t;
+
+static jupc_t
+up_method(const jpg_t *j, const jcomp_t *c) {
+  jupc_t   u = { UP_ANY, 1u, 1u };
+  bool     fancy = j->process != J_LOSSLESS; /* libjpeg: no context rows where a block is a sample */
+  uint32_t hi = c->h, vi = c->v, ho = j->hmax, vo = j->vmax;
+
+  if (hi == ho && vi == vo) {
+    u.how = UP_FULL;
+  } else if (hi * 2u == ho && vi == vo) {
+    if (fancy && c->cw > 2u) u.how = UP_H2V1_FANCY;
+    else u.how = UP_INT, u.hx = 2u;
+  } else if (hi == ho && vi * 2u == vo && fancy) {
+    u.how = UP_H1V2_FANCY;
+  } else if (hi * 2u == ho && vi * 2u == vo) {
+    if (fancy && c->cw > 2u) u.how = UP_H2V2_FANCY;
+    else u.how = UP_INT, u.hx = 2u, u.vx = 2u;
+  } else if (ho % hi == 0u && vo % vi == 0u) {
+    u.how = UP_INT;
+    u.hx  = ho / hi;
+    u.vx  = vo / vi;
+  }
+  return u;
+}
+
+/* `T` a sample: uint8_t or uint16_t; `W` the int its sums need */
+#define UPSAMPLE_FN(NAME, T, W)                                                \
+static const T*                                                                \
+NAME(const jpg_t *j, const jcomp_t *c, const jupc_t *u, uint32_t y, T *out) {  \
+  const T *plane = c->plane, *near, *far;                                      \
+  size_t   st    = c->stride;                                                  \
+  uint32_t n     = c->cw, x, cy;                                               \
+                                                                               \
+  switch (u->how) {                                                            \
+  case UP_FULL:                                                                \
+    return plane + (size_t)y * st;                                             \
+  case UP_H2V1_FANCY: {                                                        \
+    const T *in = plane + (size_t)y * st;                                      \
+                                                                               \
+    out[0] = in[0];                                                            \
+    out[1] = (T)((in[0] * 3 + in[1] + 2) >> 2);                                \
+    for (x = 1; x + 1u < n; x++) {                                             \
+      W v = (W)in[x] * 3;                                                      \
+                                                                               \
+      out[2u * x]      = (T)((v + in[x - 1u] + 1) >> 2);                       \
+      out[2u * x + 1u] = (T)((v + in[x + 1u] + 2) >> 2);                       \
+    }                                                                          \
+    out[2u * x]      = (T)((in[x] * 3 + in[x - 1u] + 1) >> 2);                 \
+    out[2u * x + 1u] = in[x];                                                  \
+    return out;                                                                \
+  }                                                                            \
+  case UP_H1V2_FANCY:                                                          \
+  case UP_H2V2_FANCY: {                                                        \
+    W bias = (y & 1u) ? 2 : 1;                                                 \
+                                                                               \
+    cy   = y >> 1;                                                             \
+    near = plane + (size_t)cy * st;                                            \
+    if (!(y & 1u)) far = cy ? near - st : near;                                \
+    else far = cy + 1u < c->ch ? near + st : near;                             \
+    if (u->how == UP_H1V2_FANCY) {                                             \
+      for (x = 0; x < n; x++) out[x] = (T)(((W)near[x] * 3 + far[x] + bias) >> 2); \
+      return out;                                                              \
+    } else {                                                                   \
+      W this = (W)near[0] * 3 + far[0], next = (W)near[1] * 3 + far[1], last;  \
+                                                                               \
+      out[0] = (T)((this * 4 + 8) >> 4);                                       \
+      out[1] = (T)((this * 3 + next + 7) >> 4);                                \
+      for (x = 1; x + 1u < n; x++) {                                           \
+        last = this;                                                           \
+        this = next;                                                           \
+        next = (W)near[x + 1u] * 3 + far[x + 1u];                              \
+        out[2u * x]      = (T)((this * 3 + last + 8) >> 4);                    \
+        out[2u * x + 1u] = (T)((this * 3 + next + 7) >> 4);                    \
+      }                                                                        \
+      out[2u * x]      = (T)((next * 3 + this + 8) >> 4);                      \
+      out[2u * x + 1u] = (T)((next * 4 + 7) >> 4);                             \
+      return out;                                                              \
+    }                                                                          \
+  }                                                                            \
+  case UP_INT: {                                                               \
+    const T *in = plane + (size_t)(y / u->vx) * st;                            \
+                                                                               \
+    if (u->hx == 1u) return in;                                                \
+    for (x = 0; x < j->width; x++) out[x] = in[x / u->hx];                     \
+    return out;                                                                \
+  }                                                                            \
+  default: {                                                                   \
+    const T *in = plane + (size_t)(((uint64_t)y * c->v) / j->vmax) * st;       \
+                                                                               \
+    for (x = 0; x < j->width; x++) out[x] = in[((uint64_t)x * c->h) / j->hmax]; \
+    return out;                                                                \
+  }                                                                            \
+  }                                                                            \
+}
+
+UPSAMPLE_FN(up_row8, uint8_t, int32_t)
+UPSAMPLE_FN(up_row16, uint16_t, int64_t)
+
+/* libjpeg's YCbCr tables (jdcolor.c build_ycc_rgb_table), for samples up
+   to `max` */
+typedef struct jycc {
+  int32_t *cr_r, *cb_b;
+  int64_t *cr_g, *cb_g;
+} jycc_t;
+
+#define SCALEBITS 16
+#define ONE_HALF  ((int64_t)1 << (SCALEBITS - 1))
+#define FIX(x)    ((int64_t)((x) * (1L << SCALEBITS) + 0.5))
+
+static bool
+ycc_tables(jycc_t *t, uint32_t max) {
+  uint32_t i, centre = (max + 1u) / 2u;
+
+  t->cr_r = malloc((max + 1u) * sizeof(*t->cr_r));
+  t->cb_b = malloc((max + 1u) * sizeof(*t->cb_b));
+  t->cr_g = malloc((max + 1u) * sizeof(*t->cr_g));
+  t->cb_g = malloc((max + 1u) * sizeof(*t->cb_g));
+  if (!t->cr_r || !t->cb_b || !t->cr_g || !t->cb_g) return false;
+  for (i = 0; i <= max; i++) {
+    int64_t x = (int64_t)i - centre;
+
+    t->cr_r[i] = (int32_t)((FIX(1.40200) * x + ONE_HALF) >> SCALEBITS);
+    t->cb_b[i] = (int32_t)((FIX(1.77200) * x + ONE_HALF) >> SCALEBITS);
+    t->cr_g[i] = (-FIX(0.71414)) * x;
+    t->cb_g[i] = (-FIX(0.34414)) * x + ONE_HALF;
+  }
+  return true;
+}
+
+static void
+ycc_free(jycc_t *t) {
+  free(t->cr_r);
+  free(t->cb_b);
+  free(t->cr_g);
+  free(t->cb_g);
+}
+
+IM_INLINE int32_t
+clampi(int32_t v, int32_t max) {
+  return v < 0 ? 0 : v > max ? max : v;
+}
+
+/* a row of pixels from the components' rows: `n` components to `ncol`
+   out (a 4th after colour conversion), `invert` Adobe's CMYK */
+#define PIXELS_FN(NAME, T)                                                     \
+static void                                                                    \
+NAME(const T *const *row, uint32_t ncomp, jspace_t space, const jycc_t *t,     \
+     int32_t max, bool invert, uint32_t w, T *o) {                             \
+  uint32_t x;                                                                  \
+                                                                               \
+  if (ncomp == 1u) {                                                           \
+    memcpy(o, row[0], (size_t)w * sizeof(T));                                  \
+  } else if (space == J_YCC || space == J_YCCK) {                              \
+    const T *y0 = row[0], *cb = row[1], *cr = row[2], *k = row[3];             \
+    uint32_t step = ncomp;                                                     \
+                                                                               \
+    for (x = 0; x < w; x++, o += step) {                                       \
+      int32_t Y = y0[x], r, g, b;                                              \
+                                                                               \
+      r = Y + t->cr_r[cr[x]];                                                  \
+      g = Y + (int32_t)((t->cb_g[cb[x]] + t->cr_g[cr[x]]) >> SCALEBITS);       \
+      b = Y + t->cb_b[cb[x]];                                                  \
+      if (space == J_YCC) {                                                    \
+        o[0] = (T)clampi(r, max);                                              \
+        o[1] = (T)clampi(g, max);                                              \
+        o[2] = (T)clampi(b, max);                                              \
+      } else {                                                                 \
+        o[0] = (T)clampi(max - r, max);                                        \
+        o[1] = (T)clampi(max - g, max);                                        \
+        o[2] = (T)clampi(max - b, max);                                        \
+        o[3] = k[x];                                                           \
+      }                                                                        \
+    }                                                                          \
+    o -= (size_t)w * step;                                                     \
+  } else {                                                                     \
+    uint32_t c;                                                                \
+                                                                               \
+    for (x = 0; x < w; x++, o += ncomp) {                                      \
+      for (c = 0; c < ncomp; c++) o[c] = row[c][x];                            \
+    }                                                                          \
+    o -= (size_t)w * ncomp;                                                    \
+  }                                                                            \
+  if (invert) {                                                                \
+    for (x = 0; x < w * ncomp; x++) o[x] = (T)(max - o[x]);                    \
+  }                                                                            \
+}
+
+PIXELS_FN(pixels8, uint8_t)
+PIXELS_FN(pixels16, uint16_t)
+
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+#  define J_HOST_BIG true
+#else
+#  define J_HOST_BIG false
+#endif
+
+/* the planes as `im`'s pixels: gray, RGB or CMYK; 8 bits a sample, or 16
+   (deeper samples spread over 0–65535) in `order` */
+IM_HIDE bool
+jpg_out(jpg_t *j, jspace_t space, ImImage *im, ImByteOrder order) {
+  jupc_t   up[J_COMPS];
+  jycc_t   t   = { 0 };
+  uint32_t n   = j->ncomp, w = j->width, h = j->height, y, i;
+  int32_t  max = (int32_t)((1u << j->prec) - 1u);
+  bool     wide = j->prec > 8u, invert = n == 4u && j->adobe, ok = false;
+  size_t   len = (size_t)w * h * n * (wide ? 2u : 1u), rowlen = (size_t)j->hmax * 8u * (j->mcux + 1u) + 16u;
+  uint8_t *px = NULL, *rows = NULL;
+
+  if (n == 2u || (n == 3u && space != J_RGB && space != J_YCC) || (n == 4u && space != J_CMYK && space != J_YCCK)) {
+    return false;
+  }
+  for (i = 0; i < n; i++) up[i] = up_method(j, &j->comp[i]);
+  if ((space == J_YCC || space == J_YCCK) && !ycc_tables(&t, (uint32_t)max)) goto done;
+  if (!(px = malloc(len)) || !(rows = malloc(rowlen * n * (wide ? 2u : 1u)))) goto done;
+
+  for (y = 0; y < h; y++) {
+    if (!wide) {
+      const uint8_t *row[J_COMPS];
+
+      for (i = 0; i < n; i++) row[i] = up_row8(j, &j->comp[i], &up[i], y, rows + rowlen * i);
+      pixels8(row, n, space, &t, max, invert, w, px + (size_t)y * w * n);
+    } else {
+      const uint16_t *row[J_COMPS];
+
+      for (i = 0; i < n; i++) row[i] = up_row16(j, &j->comp[i], &up[i], y, (uint16_t *)rows + rowlen * i);
+      pixels16(row, n, space, &t, max, invert, w, (uint16_t *)px + (size_t)y * w * n);
+    }
+  }
+
+  /* deeper samples to 16 bits, in the order asked (the host's if any) */
+  if (order != IM_BYTEORDER_BIG && order != IM_BYTEORDER_LITTLE) order = IM_BYTEORDER_HOST;
+  if (wide) {
+    uint16_t *p = (uint16_t *)px;
+    size_t    k, total = (size_t)w * h * n;
+    bool      swap = order != IM_BYTEORDER_HOST && (order == IM_BYTEORDER_BIG) != J_HOST_BIG;
+
+    for (k = 0; k < total; k++) {
+      uint32_t v = j->prec == 16u ? p[k] : (uint32_t)(((uint64_t)p[k] * 65535u + (uint32_t)max / 2u) / (uint32_t)max);
+
+      p[k] = swap ? bswapu16((uint16_t)v) : (uint16_t)v;
+    }
+  }
+
+  im->width              = w;
+  im->height             = h;
+  im->data.data          = px;
+  im->len                = len;
+  im->componentsPerPixel = n;
+  im->bitsPerComponent   = wide ? 16u : 8u;
+  im->bitsPerPixel       = n * im->bitsPerComponent;
+  im->bytesPerPixel      = im->bitsPerPixel / 8u;
+  im->byteOrder          = order;
+  im->alphaInfo          = IM_ALPHA_NONE;
+  im->format             = n == 1u ? IM_FORMAT_GRAY : n == 3u ? IM_FORMAT_RGB : IM_FORMAT_CMYK;
+  im->colorSpace         = n == 1u ? IM_COLORSPACE_GRAY : n == 3u ? IM_COLORSPACE_sRGB : IM_COLORSPACE_CMYK;
+  px                     = NULL;
+  ok                     = true;
+
+done:
+  free(px);
+  free(rows);
+  ycc_free(&t);
+  return ok;
+}
