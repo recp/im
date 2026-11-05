@@ -132,6 +132,9 @@ typedef struct jpg {
   uint8_t   transform;        /* Adobe's */
   uint8_t  *icc;              /* APP2's chunks, joined */
   size_t    icc_len;
+  const uint8_t *icc_part[256]; /* the chunks by sequence number (in the data) */
+  uint32_t  icc_part_len[256], icc_count;
+  bool      icc_bad;
   uint16_t  density[2];       /* JFIF's, and its unit */
   uint8_t   density_unit;
 

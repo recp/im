@@ -338,14 +338,38 @@ read_app(jpg_t *j, uint32_t m, const uint8_t *s, uint32_t len) {
     j->adobe     = true;
     j->transform = s[11];
   } else if (m == 0xE2u && len >= 14u && !memcmp(s, "ICC_PROFILE", 12)) {
-    /* its chunks in order: seq_no (1-based) of count; joined as they come */
-    uint8_t *grown;
+    /* a chunk of the profile: kept by its sequence number, joined at the
+       end (libjpeg's jpeg_read_icc_profile and its checks) */
+    uint32_t seq = s[12], count = s[13];
 
-    if (!s[12] || s[12] > s[13] || !(grown = realloc(j->icc, j->icc_len + len - 14u))) return;
-    memcpy(grown + j->icc_len, s + 14, len - 14u);
-    j->icc = grown;
-    j->icc_len += len - 14u;
+    if (j->icc_bad) return;
+    if (!j->icc_count) j->icc_count = count;
+    if (count != j->icc_count || !seq || seq > count || j->icc_part[seq]) {
+      j->icc_bad = true;
+      return;
+    }
+    j->icc_part[seq]     = s + 14;
+    j->icc_part_len[seq] = len - 14u;
   }
+}
+
+/* the profile's chunks in order; none if one is missing */
+static void
+join_icc(jpg_t *j) {
+  uint32_t k;
+  size_t   total = 0u, at = 0u;
+
+  if (j->icc_bad || !j->icc_count) return;
+  for (k = 1; k <= j->icc_count; k++) {
+    if (!j->icc_part[k]) return;
+    total += j->icc_part_len[k];
+  }
+  if (!total || !(j->icc = malloc(total))) return;
+  for (k = 1; k <= j->icc_count; k++) {
+    memcpy(j->icc + at, j->icc_part[k], j->icc_part_len[k]);
+    at += j->icc_part_len[k];
+  }
+  j->icc_len = total;
 }
 
 /* SOS, libjpeg's checks (get_sos, start_pass): the components there and
@@ -653,6 +677,7 @@ decode_stream(jpg_t *j, ImImage *im, ImByteOrder order, uint8_t **padp) {
   if (!jpg_out(j, guess_space(j), im, order)) return false;
 
   /* the profile, the density (pixels a metre) */
+  join_icc(j);
   if (j->icc && j->icc_len) {
     im->iccProfile     = j->icc;
     im->iccProfileSize = j->icc_len;
