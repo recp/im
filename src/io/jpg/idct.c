@@ -170,6 +170,15 @@ idct8_plain(const int16_t *in, const uint16_t *q, void *out, size_t stride) {
   IDCT_BODY(uint8_t, 2, 128, 255)
 }
 
+/* a block with only its DC: every sample this (the shortcuts' sums above,
+   which are what the whole computation gives) */
+IM_HIDE uint8_t
+jpg_dc8(int16_t dc, uint16_t q) {
+  int32_t ws = (int32_t)LSHIFT((int32_t)dc * (int16_t)q, 2);
+
+  return (uint8_t)LIMIT(DESCALE((int64_t)ws, 5), 128, 255);
+}
+
 IM_HIDE void
 jpg_idct8(const int16_t *in, const uint16_t *q, void *out, size_t stride) {
 #if J_NEON
