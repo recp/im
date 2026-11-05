@@ -49,6 +49,7 @@ TEST_DECLARE(jpg_options)
 TEST_DECLARE(jp2_options)
 TEST_DECLARE(info_mem)
 TEST_DECLARE(runner)
+TEST_DECLARE(dest)
 #endif
 
 /*****************************************************************************/
@@ -78,6 +79,7 @@ TEST_LIST {
   TEST_ENTRY(jp2_options)
   TEST_ENTRY(info_mem)
   TEST_ENTRY(runner)
+  TEST_ENTRY(dest)
 #endif
 };
 

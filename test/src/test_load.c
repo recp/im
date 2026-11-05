@@ -550,3 +550,51 @@ TEST_IMPL(runner) {
 
   TEST_SUCCESS
 }
+
+/* into the caller's memory: each row there at its stride, the gaps left
+   as they were, too little of it a failure */
+TEST_IMPL(dest) {
+  static const struct { const char *dir, *name; bool pad; } files[] = {
+    { "jpg", "420.jpg", false }, { "jpg", "420.jpg", true }, { "jpg", "p12.jpg", false }, { "jpg", "threads.jpg", true },
+    { "jp2", "rct.jp2", true }, { "jp2", "rgb10.jp2", false }, { "jp2", "alpha.jp2", false },
+  };
+  size_t i;
+
+  for (i = 0; i < sizeof(files) / sizeof(files[0]); i++) {
+    im_option_bool_t pad = im_option_bool(IM_OPTION_RGB_PADDED, true);
+    ImImage         *a = mem(files[i].dir, files[i].name, files[i].pad ? &pad.base : NULL, NULL), *b;
+    size_t           row, stride, size, y, k;
+    uint8_t         *buf;
+
+    ASSERT(a && a->data.data);
+    row    = (size_t)a->width * a->bytesPerPixel;
+    stride = row + 14u;
+    size   = stride * (a->height - 1u) + row;
+    ASSERT((buf = malloc(size + 64u)));
+    memset(buf, 0xAB, size + 64u);
+    {
+      im_option_dest_t d = im_option_dest(buf, stride, size);
+
+      b = mem(files[i].dir, files[i].name, &d.base, files[i].pad ? &pad.base : NULL);
+    }
+    ASSERT(b && !b->data.data && b->row_pad_last == 14u && b->len == size);
+    ASSERT(b->width == a->width && b->format == a->format && b->bitsPerComponent == a->bitsPerComponent);
+    for (y = 0; y < a->height; y++) {
+      ASSERT(!memcmp(buf + y * stride, (const uint8_t *)a->data.data + y * row, row));
+      for (k = row; k < stride && y + 1u < a->height; k++) ASSERT(buf[y * stride + k] == 0xABu);
+    }
+    for (k = size; k < size + 64u; k++) ASSERT(buf[k] == 0xABu);
+    im_free(b);
+    /* a byte short: no image */
+    {
+      im_option_dest_t d = im_option_dest(buf, stride, size - 1u);
+
+      b = mem(files[i].dir, files[i].name, &d.base, files[i].pad ? &pad.base : NULL);
+      ASSERT(!b);
+    }
+    free(buf);
+    im_free(a);
+  }
+
+  TEST_SUCCESS
+}
