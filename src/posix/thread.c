@@ -16,6 +16,8 @@
 
 #include "thread.h"
 
+#include <unistd.h>
+
 typedef struct th_thread_entry {
   void *arg;
   void (*func)(void *);
@@ -42,18 +44,31 @@ thread_new(void (func)(void *), void *obj) {
   th_thread_entry *entry;
   pthread_attr_t   attr;
 
-  th          = calloc(1, sizeof(*th));
-  entry       = calloc(1, sizeof(*entry));
+  th    = calloc(1, sizeof(*th));
+  entry = calloc(1, sizeof(*entry));
+
+  if (!th || !entry)
+    goto err;
+
   entry->func = func;
   entry->arg  = obj;
 
   pthread_attr_init(&attr);
   pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
 
-  pthread_create(&th->id, &attr, thread_entry, entry);
+  if (pthread_create(&th->id, &attr, thread_entry, entry) != 0) {
+    pthread_attr_destroy(&attr);
+    goto err;
+  }
+
   pthread_attr_destroy(&attr);
 
   return th;
+
+err:
+  free(entry);
+  free(th);
+  return NULL;
 }
 
 TH_HIDE
@@ -75,6 +90,16 @@ thread_exit(void) {
 }
 
 TH_HIDE
+uint32_t
+thread_ncpu(void) {
+  long n;
+
+  n = sysconf(_SC_NPROCESSORS_ONLN);
+
+  return n > 0 ? (uint32_t)n : 1;
+}
+
+TH_HIDE
 void
 thread_cond_init(th_thread_cond *cond) {
   pthread_cond_init(&cond->cond, NULL);
@@ -84,6 +109,12 @@ TH_HIDE
 void
 thread_cond_signal(th_thread_cond *cond) {
   pthread_cond_signal(&cond->cond);
+}
+
+TH_HIDE
+void
+thread_cond_broadcast(th_thread_cond *cond) {
+  pthread_cond_broadcast(&cond->cond);
 }
 
 TH_HIDE

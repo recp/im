@@ -48,14 +48,24 @@ thread_new(void (*func)(void *), void *obj) {
   th_thread       *th;
   th_thread_entry *entry;
 
-  th          = calloc(1, sizeof(*th));
-  entry       = calloc(1, sizeof(*entry));
+  th    = calloc(1, sizeof(*th));
+  entry = calloc(1, sizeof(*entry));
+
+  if (!th || !entry)
+    goto err;
+
   entry->func = func;
   entry->arg  = obj;
 
-  th->id = CreateThread(NULL, 0, thread_entry, entry, 0, NULL);
+  if (!(th->id = CreateThread(NULL, 0, thread_entry, entry, 0, NULL)))
+    goto err;
 
   return th;
+
+err:
+  free(entry);
+  free(th);
+  return NULL;
 }
 
 TH_HIDE
@@ -78,6 +88,16 @@ thread_exit(void) {
 }
 
 TH_HIDE
+uint32_t
+thread_ncpu(void) {
+  SYSTEM_INFO info;
+
+  GetSystemInfo(&info);
+
+  return info.dwNumberOfProcessors > 0 ? (uint32_t)info.dwNumberOfProcessors : 1;
+}
+
+TH_HIDE
 void
 thread_cond_init(th_thread_cond *cond) {
   InitializeConditionVariable(&cond->cond);
@@ -87,6 +107,12 @@ TH_HIDE
 void
 thread_cond_signal(th_thread_cond *cond) {
   WakeConditionVariable(&cond->cond);
+}
+
+TH_HIDE
+void
+thread_cond_broadcast(th_thread_cond *cond) {
+  WakeAllConditionVariable(&cond->cond);
 }
 
 TH_HIDE

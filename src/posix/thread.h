@@ -54,12 +54,20 @@ void
 thread_exit(void);
 
 TH_HIDE
+uint32_t
+thread_ncpu(void);
+
+TH_HIDE
 void
 thread_cond_init(th_thread_cond *cond);
 
 TH_HIDE
 void
 thread_cond_signal(th_thread_cond *cond);
+
+TH_HIDE
+void
+thread_cond_broadcast(th_thread_cond *cond);
 
 TH_HIDE
 void
