@@ -25,42 +25,54 @@
  *   2. use TEST_ENTRY() to add test to list
  */
 
+#if IM_WITH_JP2
 /* jp2 */
 TEST_DECLARE(jp2_fixtures)
 TEST_DECLARE(jp2_16bit)
 TEST_DECLARE(jp2_threads)
 TEST_DECLARE(jp2_truncated)
+#endif
 
+#if IM_WITH_JPG
 /* jpg */
 TEST_DECLARE(jpg_fixtures)
 TEST_DECLARE(jpg_16bit)
 TEST_DECLARE(jpg_icc)
 TEST_DECLARE(jpg_truncated)
+#endif
 
+#if IM_WITH_JPG && IM_WITH_JP2
 /* load */
 TEST_DECLARE(load_mem)
 TEST_DECLARE(jpg_options)
 TEST_DECLARE(jp2_options)
+#endif
 
 /*****************************************************************************/
 
 TEST_LIST {
+#if IM_WITH_JP2
   /* jp2 */
   TEST_ENTRY(jp2_fixtures)
   TEST_ENTRY(jp2_16bit)
   TEST_ENTRY(jp2_threads)
   TEST_ENTRY(jp2_truncated)
+#endif
 
+#if IM_WITH_JPG
   /* jpg */
   TEST_ENTRY(jpg_fixtures)
   TEST_ENTRY(jpg_16bit)
   TEST_ENTRY(jpg_icc)
   TEST_ENTRY(jpg_truncated)
+#endif
 
+#if IM_WITH_JPG && IM_WITH_JP2
   /* load */
   TEST_ENTRY(load_mem)
   TEST_ENTRY(jpg_options)
   TEST_ENTRY(jp2_options)
+#endif
 };
 
 #endif /* tests_h */

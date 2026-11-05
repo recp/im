@@ -31,15 +31,6 @@
 #  define IM_TEST_DATA "data"
 #endif
 
-static uint32_t
-fnv(const uint8_t *p, size_t n) {
-  uint32_t h = 2166136261u;
-  size_t   i;
-
-  for (i = 0; i < n; i++) h = (h ^ p[i]) * 16777619u;
-  return h;
-}
-
 static uint8_t*
 read_all(const char *dir, const char *name, size_t *len) {
   char     path[1024];

@@ -18,6 +18,12 @@ target_compile_definitions(${TEST_MAIN} PRIVATE
   )
 
 target_link_libraries(${TEST_MAIN} PRIVATE ${PROJECT_NAME})
+
+# a format's tests where it's built in
+foreach(f ${IM_ON})
+  string(TOUPPER ${f} F)
+  target_compile_definitions(${TEST_MAIN} PRIVATE IM_WITH_${F}=1)
+endforeach()
 target_include_directories(${TEST_MAIN} PRIVATE
   ${CMAKE_CURRENT_LIST_DIR}/include
   ${CMAKE_CURRENT_LIST_DIR}/src
