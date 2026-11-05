@@ -29,6 +29,11 @@
 
 #include "../include/common.h"
 
+#if !defined(_WIN32) && !defined(__wasi__)
+#  include <pthread.h>
+#  define TEST_THREADS 1
+#endif
+
 #ifndef IM_TEST_DATA
 #  define IM_TEST_DATA "data"
 #endif
@@ -426,6 +431,122 @@ TEST_IMPL(info_mem) {
     free(d);
   }
   ASSERT(im_info_mem(&info, junk, sizeof(junk)) == IM_EBADF);
+
+  TEST_SUCCESS
+}
+
+/* a caller's runner: in order on the caller's thread, or on threads of
+   its own (items taken in order, each thread its worker number) */
+typedef struct trun {
+  uint32_t  calls, items;
+  im_job_fn job;
+  void     *arg;
+  uint32_t  n, next;
+  bool      ok;
+#if TEST_THREADS
+  pthread_mutex_t m;
+#endif
+} trun_t;
+
+static bool
+run_inline(void *ctx, im_job_fn job, void *arg, uint32_t n) {
+  trun_t  *t  = ctx;
+  bool     ok = true;
+  uint32_t i;
+
+  t->calls++;
+  t->items += n;
+  for (i = 0; i < n; i++) ok = job(arg, i % 4u, i) && ok;
+  return ok;
+}
+
+#if TEST_THREADS
+typedef struct tworker {
+  trun_t  *t;
+  uint32_t id;
+} tworker_t;
+
+static void*
+run_main(void *p) {
+  tworker_t *w = p;
+  trun_t    *t = w->t;
+
+  for (;;) {
+    uint32_t i;
+
+    pthread_mutex_lock(&t->m);
+    i = t->next < t->n ? t->next++ : UINT32_MAX;
+    pthread_mutex_unlock(&t->m);
+    if (i == UINT32_MAX) break;
+    if (!t->job(t->arg, w->id, i)) {
+      pthread_mutex_lock(&t->m);
+      t->ok = false;
+      pthread_mutex_unlock(&t->m);
+    }
+  }
+  return NULL;
+}
+
+static bool
+run_threads(void *ctx, im_job_fn job, void *arg, uint32_t n) {
+  trun_t   *t = ctx;
+  pthread_t th[3];
+  tworker_t w[4];
+  uint32_t  i;
+
+  t->calls++;
+  t->items += n;
+  t->job  = job;
+  t->arg  = arg;
+  t->n    = n;
+  t->next = 0;
+  t->ok   = true;
+  for (i = 0; i < 4u; i++) {
+    w[i].t  = t;
+    w[i].id = i;
+  }
+  for (i = 0; i < 3u; i++) pthread_create(&th[i], NULL, run_main, &w[i + 1u]);
+  run_main(&w[0]);
+  for (i = 0; i < 3u; i++) pthread_join(th[i], NULL);
+  return t->ok;
+}
+#endif
+
+TEST_IMPL(runner) {
+  static const struct { const char *dir, *name; } files[] = { { "jpg", "threads.jpg" }, { "jp2", "imageio.jp2" } };
+  size_t i, k;
+
+  for (i = 0; i < 2u; i++) {
+    for (k = 0; k < 2u; k++) {
+      trun_t             t;
+      im_runner_t        r;
+      im_option_runner_t opt;
+      ImImage           *a, *b;
+
+#if !TEST_THREADS
+      if (k) continue;
+#endif
+      memset(&t, 0, sizeof(t));
+#if TEST_THREADS
+      pthread_mutex_init(&t.m, NULL);
+      r.run = k ? run_threads : run_inline;
+#else
+      r.run = run_inline;
+#endif
+      r.ctx     = &t;
+      r.workers = 4u;
+      opt       = im_option_runner(r);
+      a         = mem(files[i].dir, files[i].name, NULL, NULL);
+      b         = mem(files[i].dir, files[i].name, &opt.base, NULL);
+      ASSERT(a && b && a->len == b->len && !memcmp(a->data.data, b->data.data, a->len));
+      ASSERT(t.calls > 0u && t.items >= t.calls);
+      im_free(a);
+      im_free(b);
+#if TEST_THREADS
+      pthread_mutex_destroy(&t.m);
+#endif
+    }
+  }
 
   TEST_SUCCESS
 }
