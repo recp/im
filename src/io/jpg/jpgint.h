@@ -35,6 +35,12 @@
 #  define J_POOL_MIN (1u << 18)
 #endif
 
+/* a frame's pixels a byte of its data past which the stream is read through
+   first, its scans' data passed over (a test build can lower it, 0: always) */
+#ifndef J_DRY
+#  define J_DRY 64u
+#endif
+
 enum {
   J_COMPS   = 4,         /* components a frame; more aren't decoded */
   J_HBITS   = 11,        /* bits a Huffman table's one look takes */
@@ -129,6 +135,7 @@ typedef struct jpg {
 
   /* tables */
   uint16_t  quant[4][64];     /* natural order */
+  uint8_t   qdef;             /* those a DQT gave (a mask) */
   jhuff_t  *dc[4], *ac[4];    /* NULL: not defined */
   uint32_t  restart;          /* DRI's interval in MCUs; 0 none */
   uint8_t   dc_l[16], dc_u[16], ac_k[16]; /* DAC's conditioning */
@@ -150,6 +157,7 @@ typedef struct jpg {
   jdata_t   sd;               /* its data, unstuffed */
   uint32_t  nscans;
   uint32_t  last_good;        /* the iMCU row a scan last decoded with data */
+  bool      dry;              /* the stream read through, no data decoded */
 
   /* the caller's: the colour transform (-1 as the file says, 0, 1), an
      Adobe CMYK left inverted, RGB as RGB0 */
@@ -193,6 +201,7 @@ IM_HIDE bool jpg_decode_mem(const uint8_t *data, size_t len, ImImage *im, const 
 IM_HIDE bool jpg_huff_build(jhuff_t *h, const uint8_t counts[16], const uint8_t *vals, bool dc, bool lossless);
 IM_HIDE void jpg_huff_std(jpg_t *j);
 IM_HIDE bool jpg_unstuff(jdata_t *d, const uint8_t *p, const uint8_t *end);
+IM_HIDE const uint8_t *jpg_scan_end(const uint8_t *p, const uint8_t *end);
 IM_HIDE bool jpg_scan_huff(jpg_t *j, im_pool_t *pool);
 IM_HIDE bool jpg_resync(const jdata_t *d, uint32_t *next_rst, uint32_t *cur);
 
@@ -212,6 +221,7 @@ IM_HIDE jpg_idct_fn jpg_idct8_best(void);
 IM_HIDE void jpg_idct12(const int16_t *in, const uint16_t *q, void *out, size_t stride);
 
 /* sample.c */
+IM_HIDE bool jpg_out_ok(const jpg_t *j, jspace_t space);
 IM_HIDE bool jpg_out(jpg_t *j, jspace_t space, ImImage *im, ImByteOrder order);
 
 /* a block of the scan's component `c` at (bx, by) done: into its plane

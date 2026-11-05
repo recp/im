@@ -124,6 +124,25 @@ jpg_unstuff(jdata_t *d, const uint8_t *p, const uint8_t *end) {
   return true;
 }
 
+/* where the scan's data from `p` ends, as jpg_unstuff finds it: the marker
+   that ends it (its last fill 0xFF), or the data's end; nothing copied */
+IM_HIDE const uint8_t*
+jpg_scan_end(const uint8_t *p, const uint8_t *end) {
+  for (;;) {
+    const uint8_t *ff = memchr(p, 0xFF, (size_t)(end - p)), *q;
+
+    if (!ff) return end;
+    for (q = ff + 1; q < end && *q == 0xFFu; q++) {
+    }
+    if (q >= end) return end;
+    if (*q == 0x00u || (*q >= 0xD0u && *q <= 0xD7u) || *q < 0xC0u) {
+      p = q + 1;
+      continue;
+    }
+    return q - 1;
+  }
+}
+
 /* -- the bits ------------------------------------------------------------------ */
 
 IM_INLINE uint64_t

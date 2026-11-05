@@ -293,7 +293,8 @@ read_sof(jpg_t *j, uint32_t m, const uint8_t *s, uint32_t len) {
   return j->height ? frame_size(j) : true;
 }
 
-/* the frame's MCUs and planes, its size known */
+/* the frame's MCUs and planes' sizes, its size known; past J_SAMPLES a
+   component, refused (nothing made: the planes at the first scan) */
 static bool
 frame_size(jpg_t *j) {
   uint32_t i, unit;
@@ -314,8 +315,24 @@ frame_size(jpg_t *j) {
     c->sh     = (c->ch + unit - 1u) / unit;
     c->stride = (size_t)c->bw * unit;
     samples   = (uint64_t)c->bw * unit * c->bh * unit;
-    if (samples > J_SAMPLES || !(c->plane = malloc((size_t)samples * (j->prec > 8u ? 2u : 1u)))) return false;
+    if (samples > J_SAMPLES) return false;
     memset(c->bits, -1, sizeof(c->bits));
+  }
+  return true;
+}
+
+/* the planes, and a multi-scan image's coefficients */
+static bool
+frame_alloc(jpg_t *j) {
+  uint32_t i;
+
+  for (i = 0; i < j->ncomp; i++) {
+    jcomp_t *c = &j->comp[i];
+
+    if (!(c->plane = malloc(c->stride * c->bh * (j->process == J_LOSSLESS ? 1u : 8u) * (j->prec > 8u ? 2u : 1u)))) {
+      return false;
+    }
+    if (j->multiscan && !(c->coefs = calloc((size_t)c->bw * c->bh * 64u, sizeof(int16_t)))) return false;
   }
   return true;
 }
@@ -345,6 +362,7 @@ read_dqt(jpg_t *j, const uint8_t *s, uint32_t len) {
 
     if (tq > 3u || at + size > len) return false;
     for (i = 0; i < 64u; i++) j->quant[tq][jpg_natural[i]] = (uint16_t)(pq ? be16(s + at + 1u + i * 2u) : s[at + 1u + i]);
+    j->qdef |= (uint8_t)(1u << tq);
     at += size;
   }
   return true;
@@ -439,6 +457,9 @@ read_sos(jpg_t *j, const uint8_t *s, uint32_t len) {
     jcomp_t *c = &j->comp[j->scomp[i]];
 
     if (!c->latched) {
+      /* its table there by the first scan it's in, as libjpeg wants
+         (lossless has none) */
+      if (j->process != J_LOSSLESS && !(j->qdef >> c->tq & 1u)) return false;
       memcpy(c->q, j->quant[c->tq], sizeof(c->q));
       c->latched = true;
     }
@@ -817,6 +838,30 @@ space_of(const jpg_t *j) {
 
 static bool decode_stream(jpg_t *j, ImImage *im, ImByteOrder order, uint8_t **pad);
 
+/* `j`'s stream read through on its own, its scans' data passed over and
+   nothing frame-sized made: whether its decode would be refused */
+static bool
+dry_run(const jpg_t *j) {
+  jpg_t   *d   = calloc(1, sizeof(*d));
+  uint8_t *pad = NULL;
+  bool     ok;
+
+  if (!d) return false;
+  d->data           = j->data;
+  d->end            = j->end;
+  d->want_transform = j->want_transform;
+  d->rgb_pad        = j->rgb_pad;
+  d->dest           = j->dest;
+  d->dest_stride    = j->dest_stride;
+  d->dest_size      = j->dest_size;
+  d->dry            = true;
+  ok                = decode_stream(d, NULL, IM_BYTEORDER_ANY, &pad);
+  free(pad);
+  jpg_free(d);
+  free(d);
+  return ok;
+}
+
 static bool
 decode(jpg_t *j, ImImage *im, ImByteOrder order) {
   uint8_t *pad = NULL;
@@ -914,20 +959,27 @@ decode_stream(jpg_t *j, ImImage *im, ImByteOrder order, uint8_t **padp) {
         /* the height a DNL gives, where the frame gave none */
         if (!j->height && (tail || !(j->height = dnl_height(p, end)) || !frame_size(j))) return false;
       }
-      if (!read_sos(j, s, len)) return false;
+      if (!read_sos(j, s, len) || (first && !jpg_out_ok(j, space_of(j)))) return false;
+      if (j->dry) {
+        /* the structure alone: the data passed over */
+        if (!tail) p = jpg_scan_end(p, end);
+        first = false;
+        j->nscans++;
+        break;
+      }
       if (first) {
-        uint32_t i;
-
+        /* little data for so many pixels: the stream read through first, so
+           one refused further on is refused before anything frame-sized is
+           made or decoded (as for a big frame cut or damaged early) */
+        if ((uint64_t)j->width * j->height > (uint64_t)J_DRY * (uint64_t)(j->end - j->data) && !dry_run(j)) {
+          return false;
+        }
         if ((uint64_t)j->width * j->height >= J_POOL_MIN) {
           if (j->runner.run) j->pool = im_pool_wrap(&j->runner);
           else if (j->threads > 1u) j->pool = im_pool_new(j->threads);
         }
         j->multiscan = j->process != J_LOSSLESS && (j->process == J_PROGRESSIVE || j->nscomp < j->ncomp);
-        for (i = 0; i < j->ncomp && j->multiscan; i++) {
-          jcomp_t *c = &j->comp[i];
-
-          if (!(c->coefs = calloc((size_t)c->bw * c->bh * 64u, sizeof(int16_t)))) return false;
-        }
+        if (!frame_alloc(j)) return false;
         first = false;
       } else if (!j->multiscan && j->process != J_LOSSLESS) {
         /* one pass: later scans aren't read */
@@ -963,6 +1015,7 @@ decode_stream(jpg_t *j, ImImage *im, ImByteOrder order, uint8_t **padp) {
     }
   }
   if (!j->nscans) return false;
+  if (j->dry) return true;
   if (j->ndefer && !run_deferred(j)) return false;
   if (j->multiscan && !idct_all(j)) return false;
   if (!jpg_out(j, space_of(j), im, order)) return false;

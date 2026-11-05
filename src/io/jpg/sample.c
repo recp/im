@@ -497,6 +497,22 @@ out_band(void *arg, uint32_t worker, uint32_t item) {
   return true;
 }
 
+/* whether the frame is one jpg_out gives: its colours (two components
+   none), the caller's memory enough for it */
+IM_HIDE bool
+jpg_out_ok(const jpg_t *j, jspace_t space) {
+  uint32_t n = j->ncomp;
+  size_t   unit = j->prec > 8u ? 2u : 1u, pitch;
+
+  if (n == 2u || (n == 3u && space != J_RGB && space != J_YCC) || (n == 4u && space != J_CMYK && space != J_YCCK)) {
+    return false;
+  }
+  if (!j->dest) return true;
+  pitch = (size_t)j->width * (n == 3u && j->rgb_pad ? 4u : n) * unit;
+  return j->dest_stride >= pitch && j->dest_size >= j->dest_stride * (j->height - 1u) + pitch
+         && !(unit == 2u && (((uintptr_t)j->dest | j->dest_stride) & 1u));
+}
+
 /* the planes as `im`'s pixels: gray, RGB or CMYK; 8 bits a sample, or 16
    (deeper samples spread over 0–65535) in `order` (the host's if any) */
 IM_HIDE bool
@@ -506,10 +522,7 @@ jpg_out(jpg_t *j, jspace_t space, ImImage *im, ImByteOrder order) {
   size_t   len;
   bool     ok = false;
 
-  if (n == 2u || (n == 3u && space != J_RGB && space != J_YCC) || (n == 4u && space != J_CMYK && space != J_YCCK)) {
-    return false;
-  }
-  if (!(o = calloc(1, sizeof(*o)))) return false;
+  if (!jpg_out_ok(j, space) || !(o = calloc(1, sizeof(*o)))) return false;
   if (order != IM_BYTEORDER_BIG && order != IM_BYTEORDER_LITTLE) order = IM_BYTEORDER_HOST;
   o->j      = j;
   o->space  = space;
@@ -528,10 +541,6 @@ jpg_out(jpg_t *j, jspace_t space, ImImage *im, ImByteOrder order) {
   /* the caller's memory, where given: its rows' stride, enough of it */
   o->pitch = (size_t)w * o->on * (o->wide ? 2u : 1u);
   if (j->dest) {
-    if (j->dest_stride < o->pitch || j->dest_size < j->dest_stride * (h - 1u) + o->pitch
-        || (o->wide && (((uintptr_t)j->dest | j->dest_stride) & 1u))) {
-      goto done;
-    }
     o->px    = j->dest;
     o->pitch = j->dest_stride;
   } else if (!(o->px = malloc(len))) {
