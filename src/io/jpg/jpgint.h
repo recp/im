@@ -151,6 +151,10 @@ typedef struct jpg {
   uint32_t  nscans;
   uint32_t  last_good;        /* the iMCU row a scan last decoded with data */
 
+  /* the caller's: the colour transform (-1 as the file says, 0, 1), an
+     Adobe CMYK left inverted, RGB as RGB0 */
+  int32_t    want_transform;
+  bool       cmyk_stored, rgb_pad;
   /* threads: at most `threads`, the pool's (NULL: the caller's alone) */
   uint32_t   threads;
   im_pool_t *pool;
@@ -167,7 +171,16 @@ typedef struct jpg {
 } jpg_t;
 
 /* jpg.c */
-IM_HIDE bool jpg_decode_mem(const uint8_t *data, size_t len, ImImage *im, ImByteOrder order, uint32_t threads);
+/* what a caller asks of a decode */
+typedef struct jopts {
+  ImByteOrder order;
+  uint32_t    threads;     /* 0: as many as help */
+  int32_t     transform;   /* -1: as the file says; 0 none; 1 YCbCr/YCCK to RGB/CMYK */
+  bool        cmyk_stored; /* an Adobe CMYK left inverted */
+  bool        rgb_pad;     /* RGB as RGB0 */
+} jopts_t;
+
+IM_HIDE bool jpg_decode_mem(const uint8_t *data, size_t len, ImImage *im, const jopts_t *o);
 
 /* huff.c */
 IM_HIDE bool jpg_huff_build(jhuff_t *h, const uint8_t counts[16], const uint8_t *vals, bool dc, bool lossless);

@@ -771,6 +771,15 @@ guess_space(const jpg_t *j) {
   }
 }
 
+/* the colours: as guessed, or the caller's word (a PDF's /ColorTransform)
+   on whether three or four components are transformed */
+static jspace_t
+space_of(const jpg_t *j) {
+  if (j->want_transform >= 0 && j->ncomp == 3u) return j->want_transform ? J_YCC : J_RGB;
+  if (j->want_transform >= 0 && j->ncomp == 4u) return j->want_transform ? J_YCCK : J_CMYK;
+  return guess_space(j);
+}
+
 static bool decode_stream(jpg_t *j, ImImage *im, ImByteOrder order, uint8_t **pad);
 
 static bool
@@ -912,7 +921,7 @@ decode_stream(jpg_t *j, ImImage *im, ImByteOrder order, uint8_t **padp) {
   if (!j->nscans) return false;
   if (j->ndefer && !run_deferred(j)) return false;
   if (j->multiscan && !idct_all(j)) return false;
-  if (!jpg_out(j, guess_space(j), im, order)) return false;
+  if (!jpg_out(j, space_of(j), im, order)) return false;
 
   /* the profile, the density (pixels a metre) */
   join_icc(j);
@@ -934,19 +943,65 @@ decode_stream(jpg_t *j, ImImage *im, ImByteOrder order, uint8_t **padp) {
 
 /* `data` decoded into `im` */
 IM_HIDE bool
-jpg_decode_mem(const uint8_t *data, size_t len, ImImage *im, ImByteOrder order, uint32_t threads) {
+jpg_decode_mem(const uint8_t *data, size_t len, ImImage *im, const jopts_t *o) {
   jpg_t *j;
   bool   ok;
 
   if (!(j = calloc(1, sizeof(*j)))) return false;
-  j->data    = data;
-  j->end     = data + len;
-  j->threads = threads ? threads : IM_POOL_MAX;
-  ok         = decode(j, im, order);
+  j->data           = data;
+  j->end            = data + len;
+  j->threads        = o->threads ? o->threads : IM_POOL_MAX;
+  j->want_transform = o->transform;
+  j->cmyk_stored    = o->cmyk_stored;
+  j->rgb_pad        = o->rgb_pad;
+  ok                = decode(j, im, o->order);
   im_pool_free(j->pool);
   jpg_free(j);
   free(j);
   return ok;
+}
+
+static jopts_t
+opts_of(const im_open_config_t *c) {
+  jopts_t o;
+
+  o.order       = c->byteOrder;
+  o.threads     = c->threads;
+  o.transform   = c->jpegTransform < 0 ? -1 : c->jpegTransform != 0;
+  o.cmyk_stored = c->cmykAsStored;
+  o.rgb_pad     = c->rgbPadded;
+  return o;
+}
+
+/* decoded into a new image; NULL where it won't */
+static ImImage*
+dec(const uint8_t *data, size_t len, const im_open_config_t *conf) {
+  jopts_t  o  = opts_of(conf);
+  ImImage *im = calloc(1, sizeof(*im));
+
+  if (im && !jpg_decode_mem(data, len, im, &o)) {
+    free(im->data.data);
+    free(im->iccProfile);
+    free(im->physicalDim);
+    free(im);
+    return NULL;
+  }
+  if (im) {
+    im->openIntent     = conf->openIntent;
+    im->ori            = IM_ORIENTATION_UP;
+    im->fileFormatType = IM_FILEFORMATTYPE_JPEG;
+  }
+  return im;
+}
+
+IM_HIDE
+ImResult
+jpg_dec_mem(ImImage               ** __restrict dest,
+            const uint8_t          * __restrict data,
+            size_t                              len,
+            const im_open_config_t * __restrict open_config) {
+  *dest = dec(data, len, open_config);
+  return *dest ? IM_OK : IM_EBADF;
 }
 
 IM_HIDE
@@ -954,9 +1009,7 @@ ImResult
 jpg_dec(ImImage         ** __restrict dest,
         const char       * __restrict path,
         im_open_config_t * __restrict open_config) {
-  ImImage     *im;
   ImFileResult fres;
-  bool         ok;
 
   *dest = NULL;
   fres  = im_readfile(path, open_config->openIntent != IM_OPEN_INTENT_READWRITE);
@@ -965,21 +1018,13 @@ jpg_dec(ImImage         ** __restrict dest,
     return IM_ERR;
   }
 
-  im = calloc(1, sizeof(*im));
-  ok = im && jpg_decode_mem(fres.raw, fres.size, im, open_config->byteOrder, 0u);
+  *dest = dec(fres.raw, fres.size, open_config);
 
   /* the pixels don't point into the file: it goes now */
   if (fres.mmap) { im_unmap(fres.raw, fres.size); }
   else           { free(fres.raw);                }
 
-  if (!ok) {
-    if (im) {
-      free(im->data.data);
-      free(im->iccProfile);
-      free(im->physicalDim);
-      free(im);
-    }
-
+  if (!*dest) {
 #ifdef __APPLE__
     /* what isn't read here Core Image may read */
     {
@@ -996,11 +1041,6 @@ jpg_dec(ImImage         ** __restrict dest,
     return IM_ERR;
 #endif
   }
-
-  im->openIntent     = open_config->openIntent;
-  im->ori            = IM_ORIENTATION_UP;
-  im->fileFormatType = IM_FILEFORMATTYPE_JPEG;
-  *dest              = im;
 
   return IM_OK;
 }

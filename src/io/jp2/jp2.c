@@ -293,6 +293,7 @@ typedef struct jpx {
   xpool_t    pool;
   xworker_t  worker[X_THREADS - 1];
   uint32_t   workers; /* threads besides the caller's */
+  uint32_t   threads; /* at most, the caller's among them; 0 as many as help */
   uint8_t    zc[4][512], sc[256];
 } jpx_t;
 
@@ -1929,6 +1930,8 @@ pool_start(jpx_t *j) {
   uint32_t cpus = thread_ncpu();
   uint32_t n    = cpus > X_THREADS ? X_THREADS - 1u : cpus > 1u ? cpus - 1u : 0u, i;
 
+  if (j->threads && n > j->threads - 1u) n = j->threads - 1u;
+
   if (!n || (uint64_t)(j->x1 - j->x0) * (j->y1 - j->y0) < (1u << 18)) return;
   thread_mutex_init(&j->pool.m);
   thread_cond_init(&j->pool.go);
@@ -2423,10 +2426,20 @@ sycc(int32_t offset, int32_t upb, int32_t y, int32_t cb, int32_t cr, int32_t *r,
 #  define X_HOST_BIG false
 #endif
 
+/* what a caller asks of a decode: threads, a palette's indexes as they
+   are (one gray channel, the first component's samples unscaled), RGB as
+   RGB0 */
+typedef struct jxopts {
+  ImByteOrder order;
+  uint32_t    threads;
+  bool        raw, pad;
+} jxopts_t;
+
 /* the planes as `im`'s pixels: the colours then the opacity, a sample 8
    bits or (any channel deeper) 16 in `order` */
 static bool
-compose(jpx_t *j, const jp2_t *x, ImImage *im, ImByteOrder order) {
+compose(jpx_t *j, const jp2_t *x, ImImage *im, const jxopts_t *o) {
+  ImByteOrder order = o->order;
   xchan_t   ch[X_COMPS];
   uint32_t  nch = 0, ncol, space, colour[4], use[5], nuse, k, u, w = j->x1 - j->x0, h = j->y1 - j->y0, X, Y, step;
   int32_t   opacity = -1;
@@ -2436,7 +2449,7 @@ compose(jpx_t *j, const jp2_t *x, ImImage *im, ImByteOrder order) {
   size_t    n = (size_t)w * h, len, i;
 
   /* the channels: through a palette where the JP2 maps one */
-  if (x->nmap && x->pal) {
+  if (!o->raw && x->nmap && x->pal) {
     for (k = 0; k < x->nmap; k++) {
       if (x->map[k].cmp >= j->ncomp || (x->map[k].palette && x->map[k].col >= x->pal_cols)) return false;
       ch[nch].comp = x->map[k].cmp;
@@ -2453,8 +2466,12 @@ compose(jpx_t *j, const jp2_t *x, ImImage *im, ImByteOrder order) {
     }
   }
 
-  /* which are colour, which opacity */
-  {
+  /* which are colour, which opacity; the indexes asked for: the first */
+  if (o->raw) {
+    space     = 1u;
+    ncol      = 1u;
+    colour[0] = 0u;
+  } else {
     uint32_t found = 0;
 
     space = x->enumcs == 17u ? 1u : x->enumcs == 12u ? 4u
@@ -2578,7 +2595,13 @@ compose(jpx_t *j, const jp2_t *x, ImImage *im, ImByteOrder order) {
 
         sycc(1 << (prec - 1), (1 << prec) - 1, v[0], v[1], v[2], &v[0], &v[1], &v[2]);
       }
-      if (wide) {
+      if (o->raw) {
+        /* indexes: as they are */
+        int32_t s = v[0] < 0 ? 0 : v[0];
+
+        if (wide) ((uint16_t *)px)[at] = (uint16_t)(s > 65535 ? 65535 : s);
+        else px[at] = (uint8_t)(s > 255 ? 255 : s);
+      } else if (wide) {
         for (u = 0; u < nuse; u++) ((uint16_t *)px)[at + u] = sixteen(v[u], ch[use[u]].bits);
       } else {
         for (u = 0; u < nuse; u++) px[at + u] = eight(v[u], ch[use[u]].bits);
@@ -2596,8 +2619,39 @@ made:
     for (i = 0; i < n * step; i++) p[i] = bswapu16(p[i]);
   }
 
-  /* the colours' profile, where the JP2 gives one for them (not sYCC's) */
-  if (!ycc && x->icc_data && x->icc_len) {
+  /* RGB as RGB0: each pixel spread to four, from the last (in place) */
+  if (o->pad && step == 3u) {
+    uint8_t *q = realloc(px, n * 4u * (wide ? 2u : 1u));
+
+    if (!q) {
+      free(px);
+      return false;
+    }
+    px = q;
+    if (wide) {
+      uint16_t *p = (uint16_t *)(void *)px;
+
+      for (i = n; i-- > 0u;) {
+        p[4u * i + 3u] = 0xFFFFu;
+        p[4u * i + 2u] = p[3u * i + 2u];
+        p[4u * i + 1u] = p[3u * i + 1u];
+        p[4u * i]      = p[3u * i];
+      }
+    } else {
+      for (i = n; i-- > 0u;) {
+        px[4u * i + 3u] = 0xFFu;
+        px[4u * i + 2u] = px[3u * i + 2u];
+        px[4u * i + 1u] = px[3u * i + 1u];
+        px[4u * i]      = px[3u * i];
+      }
+    }
+    step = 4u;
+    len  = n * 4u * (wide ? 2u : 1u);
+  }
+
+  /* the colours' profile, where the JP2 gives one for them (not sYCC's,
+     nor for indexes) */
+  if (!o->raw && !ycc && x->icc_data && x->icc_len) {
     if (!(icc = malloc(x->icc_len))) {
       free(px);
       return false;
@@ -2614,16 +2668,18 @@ made:
   im->bitsPerPixel       = step * im->bitsPerComponent;
   im->bytesPerPixel      = im->bitsPerPixel / 8u;
   im->byteOrder          = order;
-  im->alphaInfo          = opacity < 0 ? IM_ALPHA_NONE : premult ? IM_ALPHA_PREMUL_LAST : IM_ALPHA_LAST;
+  im->alphaInfo          = opacity >= 0 ? (premult ? IM_ALPHA_PREMUL_LAST : IM_ALPHA_LAST)
+                         : ncol == 3u && step == 4u ? IM_ALPHA_NONE_SKIP_LAST : IM_ALPHA_NONE;
   im->format             = ncol == 1u ? (opacity < 0 ? IM_FORMAT_GRAY : IM_FORMAT_GRAY_ALPHA)
-                         : ncol == 3u ? (opacity < 0 ? IM_FORMAT_RGB : IM_FORMAT_RGBA)
+                         : ncol == 3u ? (opacity >= 0 ? IM_FORMAT_RGBA : step == 4u ? IM_FORMAT_RGB0 : IM_FORMAT_RGB)
                          : IM_FORMAT_CMYK;
   im->iccProfile         = icc;
   im->iccProfileSize     = icc ? x->icc_len : 0u;
 
   /* the colour space as colr says, where it fits the colours (a profile
      may say more); by the colours where there's no colr or it doesn't */
-  if (!x->colr || space != ncol)          im->colorSpace = ncol == 1u ? IM_COLORSPACE_GRAY
+  if (o->raw)                             im->colorSpace = IM_COLORSPACE_UNKNOWN; /* indexes */
+  else if (!x->colr || space != ncol)     im->colorSpace = ncol == 1u ? IM_COLORSPACE_GRAY
                                                          : ncol == 3u ? IM_COLORSPACE_sRGB
                                                          : IM_COLORSPACE_CMYK;
   else if (ycc || x->enumcs == 16u)       im->colorSpace = IM_COLORSPACE_sRGB;
@@ -2638,7 +2694,7 @@ made:
 
 /* `data`, a JP2 or a bare codestream, into `im` */
 static bool
-jpx_decode(const uint8_t *data, size_t len, ImImage *im, ImByteOrder order) {
+jpx_decode(const uint8_t *data, size_t len, ImImage *im, const jxopts_t *o) {
   jpx_t         *j;
   jp2_t          x;
   const uint8_t *cs     = NULL;
@@ -2650,6 +2706,7 @@ jpx_decode(const uint8_t *data, size_t len, ImImage *im, ImByteOrder order) {
   memset(&x, 0, sizeof(x));
   if (!(j = calloc(1, sizeof(*j)))) return false;
   j->arena.limit = X_ARENA;
+  j->threads     = o->threads;
 
   if (be32(data) == 12u && be32(data + 4) == 0x6A502020u) {
     if (!read_boxes(j, &x, data, len, &cs, &cs_len, 0u) || !cs) goto done;
@@ -2673,7 +2730,7 @@ jpx_decode(const uint8_t *data, size_t len, ImImage *im, ImByteOrder order) {
   for (tile = 0; tile < j->ntx * j->nty; tile++) {
     if (!tile_decode(j, tile)) goto done;
   }
-  ok = compose(j, &x, im, order);
+  ok = compose(j, &x, im, o);
 
 done:
   pool_stop(j);
@@ -2689,14 +2746,50 @@ done:
   return ok;
 }
 
+static jxopts_t
+opts_of(const im_open_config_t *c) {
+  jxopts_t o;
+
+  o.order   = c->byteOrder;
+  o.threads = c->threads;
+  o.raw     = c->paletteIndexes;
+  o.pad     = c->rgbPadded;
+  return o;
+}
+
+/* decoded into a new image; NULL where it won't */
+static ImImage*
+dec(const uint8_t *data, size_t len, const im_open_config_t *conf) {
+  jxopts_t o  = opts_of(conf);
+  ImImage *im = calloc(1, sizeof(*im));
+
+  if (im && !jpx_decode(data, len, im, &o)) {
+    free(im);
+    return NULL;
+  }
+  if (im) {
+    im->openIntent = conf->openIntent;
+    im->ori        = IM_ORIENTATION_UP;
+  }
+  return im;
+}
+
+IM_HIDE
+ImResult
+jp2_dec_mem(ImImage               ** __restrict dest,
+            const uint8_t          * __restrict data,
+            size_t                              len,
+            const im_open_config_t * __restrict open_config) {
+  *dest = dec(data, len, open_config);
+  return *dest ? IM_OK : IM_EBADF;
+}
+
 IM_HIDE
 ImResult
 jp2_dec(ImImage         ** __restrict dest,
         const char       * __restrict path,
         im_open_config_t * __restrict open_config) {
-  ImImage     *im;
   ImFileResult fres;
-  bool         ok;
 
   *dest = NULL;
   fres  = im_readfile(path, open_config->openIntent != IM_OPEN_INTENT_READWRITE);
@@ -2705,15 +2798,13 @@ jp2_dec(ImImage         ** __restrict dest,
     return IM_ERR;
   }
 
-  ok = (im = calloc(1, sizeof(*im))) && jpx_decode(fres.raw, fres.size, im, open_config->byteOrder);
+  *dest = dec(fres.raw, fres.size, open_config);
 
   /* the pixels don't point into the file: it goes now */
   if (fres.mmap) { im_unmap(fres.raw, fres.size); }
   else           { free(fres.raw);                }
 
-  if (!ok) {
-    free(im);
-
+  if (!*dest) {
 #ifdef __APPLE__
     /* what isn't read here (HT code-blocks, JPX's extensions) Core Image
        may read */
@@ -2731,10 +2822,6 @@ jp2_dec(ImImage         ** __restrict dest,
     return IM_ERR;
 #endif
   }
-
-  im->openIntent = open_config->openIntent;
-  im->ori        = IM_ORIENTATION_UP;
-  *dest          = im;
 
   return IM_OK;
 }

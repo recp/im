@@ -25,4 +25,12 @@ jp2_dec(ImImage         ** __restrict dest,
         const char       * __restrict path,
         im_open_config_t * __restrict open_config);
 
+/* `data`, `len` bytes, decoded: what the file would give */
+IM_HIDE
+ImResult
+jp2_dec_mem(ImImage               ** __restrict dest,
+           const uint8_t          * __restrict data,
+           size_t                              len,
+           const im_open_config_t * __restrict open_config);
+
 #endif /* src_jp2_h */

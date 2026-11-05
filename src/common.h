@@ -70,6 +70,11 @@ typedef struct im_open_config_t {
   bool              releaseFile;
   bool              bgr2rgb;
   im_option_base_t **options;
+  uint32_t          threads;        /* 0: a decoder's own choice */
+  int32_t           jpegTransform;  /* -1: as the file says */
+  bool              cmykAsStored;
+  bool              rgbPadded;
+  bool              paletteIndexes;
 } im_open_config_t;
 
 IM_INLINE

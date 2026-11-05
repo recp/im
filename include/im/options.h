@@ -47,6 +47,27 @@ typedef enum im_option_type_t {
    STATUS: TODO.
    */
   IM_OPTION_BMP_SKIPPED_MODE,
+
+  /* threads a decoder may use (uint): 0 as many as it finds useful (the
+     default), 1 the caller's alone */
+  IM_OPTION_THREADS,
+
+  /* JPEG: whether its YCbCr (YCCK) becomes RGB (CMYK), over what the file
+     says (int): -1 as the file says (the default), 0 no, 1 yes. A PDF's
+     DCTDecode /ColorTransform is this */
+  IM_OPTION_JPEG_COLOR_TRANSFORM,
+
+  /* CMYK as the file stores it (bool): an Adobe JPEG's inverted CMYK left
+     inverted (as a PDF expects, its /Decode inverts it); false: 0 no ink */
+  IM_OPTION_CMYK_AS_STORED,
+
+  /* RGB as RGB0 (bool): a 4th sample after each pixel's three, its
+     maximum (IM_FORMAT_RGB0); false */
+  IM_OPTION_RGB_PADDED,
+
+  /* JPEG 2000: a palette's indexes as they are (bool), one gray channel,
+     not its colours; false */
+  IM_OPTION_PALETTE_INDEXES,
 } im_option_type_t;
 
 typedef struct im_option_base_t {
@@ -59,6 +80,11 @@ typedef struct im_option_bool_t {
   im_option_base_t base;
   bool             on;
 } im_option_bool_t;
+
+typedef struct im_option_int_t {
+  im_option_base_t base;
+  int32_t          value;
+} im_option_int_t;
 
 typedef struct im_option_rowpadding_t {
   im_option_base_t base;
@@ -89,6 +115,18 @@ im_option_bool(im_option_type_t optype, bool on) {
   opt.base.type = optype;
   opt.on        = on;
   
+  return opt;
+}
+
+/* an option with a number: IM_OPTION_THREADS, IM_OPTION_JPEG_COLOR_TRANSFORM */
+IM_INLINE
+im_option_int_t
+im_option_int(im_option_type_t optype, int32_t value) {
+  im_option_int_t opt;
+
+  opt.base.type = optype;
+  opt.value     = value;
+
   return opt;
 }
 

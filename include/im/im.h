@@ -256,6 +256,17 @@ im_load(ImImage         ** __restrict dest,
         im_option_base_t *            options[],
         ImOpenIntent                  openIntent);
 
+/* an image in memory: JPEG, JPEG 2000 (a JP2 file or a codestream).
+   `data` is read, not kept: the image owns nothing of it. IM_EBADF where
+   it isn't one of those or doesn't decode */
+IM_EXPORT
+ImResult
+im_load_mem(ImImage         ** __restrict dest,
+            const void       * __restrict data,
+            size_t                        len,
+            im_option_base_t *            options[],
+            ImOpenIntent                  openIntent);
+
 IM_EXPORT
 ImImage*
 im_load_hex(const char * __restrict hexdata);
