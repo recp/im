@@ -105,7 +105,10 @@ typedef struct jcomp {
   void     *plane;            /* bw × 8 by bh × 8 samples: uint8 or uint16 */
   size_t    stride;           /* samples a plane row */
   int16_t  *coefs;            /* multi-scan: 64 a block, natural order */
+  uint16_t  q[64];            /* its quantization table, as at its first scan */
+  bool      latched;
   int8_t    bits[64];         /* progressive: a coefficient's last Al; -1 none */
+  int8_t    prev[10];         /* bits[1–9] before the last scan of it */
 } jcomp_t;
 
 typedef struct jpg {
@@ -139,6 +142,7 @@ typedef struct jpg {
   uint32_t  eobrun, togo;     /* end-of-band run; MCUs to the next restart */
   uint32_t  next_rst;         /* the restart marker expected next (0–7) */
   uint32_t  nscans;
+  uint32_t  last_good;        /* the iMCU row a scan last decoded with data */
 
   /* the IDCT's: 8- or 12-bit */
   void    (*idct)(const int16_t *in, const uint16_t *q, void *out, size_t stride);

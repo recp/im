@@ -42,15 +42,164 @@ jpg_put(jpg_t *j, jcomp_t *c, int16_t *blk, uint32_t bx, uint32_t by) {
 
   if (bx >= c->sw || by >= c->sh) return; /* an MCU's padding: never shown */
   at = (size_t)by * 8u * c->stride + (size_t)bx * 8u;
-  if (j->prec <= 8u) j->idct(blk, j->quant[c->tq], (uint8_t *)c->plane + at, c->stride);
-  else j->idct(blk, j->quant[c->tq], (uint16_t *)c->plane + at, c->stride);
+  if (j->prec <= 8u) j->idct(blk, c->q, (uint8_t *)c->plane + at, c->stride);
+  else j->idct(blk, c->q, (uint16_t *)c->plane + at, c->stride);
+}
+
+/* -- block smoothing (libjpeg's, jdcoefct.c) ------------------------------------- */
+
+/* where a progressive image's first coefficients never all came, libjpeg
+   guesses them from the 5 × 5 blocks' DCs round each (and the DC too where
+   none of them came); smoothing_ok's conditions */
+static bool
+smoothing_ok(const jpg_t *j, int8_t latch[J_COMPS][10], int8_t prev[J_COMPS][10]) {
+  static const uint8_t qpos[10] = { 0, 1, 8, 16, 9, 2, 3, 10, 17, 24 };
+  bool     useful = false;
+  uint32_t i, k;
+
+  if (j->process != J_PROGRESSIVE) return false;
+  for (i = 0; i < j->ncomp; i++) {
+    const jcomp_t *c = &j->comp[i];
+
+    for (k = 0; k < 10u; k++) {
+      if (!c->q[qpos[k]]) return false;
+    }
+    if (c->bits[0] < 0) return false;
+    latch[i][0] = c->bits[0];
+    for (k = 1; k < 10u; k++) {
+      prev[i][k]  = j->nscans > 1u ? c->prev[k] : -1;
+      latch[i][k] = c->bits[k];
+      if (c->bits[k] != 0) useful = true;
+    }
+  }
+  return useful;
+}
+
+/* one coefficient's guess: num / (Q << 8), rounded, held below 2^Al */
+IM_INLINE int16_t
+guess(int64_t num, int64_t q, int al) {
+  int32_t pred;
+
+  if (num >= 0) {
+    pred = (int32_t)(((q << 7) + num) / (q << 8));
+    if (al > 0 && pred >= (1 << al)) pred = (1 << al) - 1;
+  } else {
+    pred = (int32_t)(((q << 7) - num) / (q << 8));
+    if (al > 0 && pred >= (1 << al)) pred = (1 << al) - 1;
+    pred = -pred;
+  }
+  return (int16_t)pred;
+}
+
+static void
+smooth_comp(jpg_t *j, uint32_t ci, const int8_t *latch, const int8_t *prev) {
+  jcomp_t       *c = &j->comp[ci];
+  const uint16_t *qt = c->q;
+  int64_t        Q00 = qt[0], Q01 = qt[1], Q10 = qt[8], Q20 = qt[16], Q11 = qt[9], Q02 = qt[2];
+  int64_t        Q03 = qt[3], Q12 = qt[10], Q21 = qt[17], Q30 = qt[24];
+  uint32_t       v = c->v, rows = j->mcuy, by, bx, last = c->sw - 1u;
+
+  for (by = 0; by < c->sh; by++) {
+    uint32_t       row = by / v, br = by % v, block_rows, ibr, nbr;
+    const int8_t  *cb  = row > j->last_good ? prev : latch;
+    bool           change_dc = true;
+    const int16_t *cur, *pr, *ppr, *nx, *nnx;
+    int            DC01, DC02, DC03, DC04, DC05, DC06, DC07, DC08, DC09, DC10, DC11, DC12, DC13;
+    int            DC14, DC15, DC16, DC17, DC18, DC19, DC20, DC21, DC22, DC23, DC24, DC25, al;
+    uint32_t       k;
+
+    for (k = 1; k < 10u; k++) change_dc = change_dc && cb[k] == -1;
+    /* libjpeg's block-row count: the last iMCU row's own */
+    block_rows = row + 1u < rows ? v : (c->sh % v ? c->sh % v : v);
+    ibr        = row * block_rows + br;
+    nbr        = block_rows * rows;
+    cur        = c->coefs + (size_t)by * c->bw * 64u;
+    pr         = ibr > 0u ? cur - (size_t)c->bw * 64u : cur;
+    ppr        = ibr > 1u ? pr - (size_t)c->bw * 64u : pr;
+    nx         = ibr + 1u < nbr ? cur + (size_t)c->bw * 64u : cur;
+    nnx        = ibr + 2u < nbr ? nx + (size_t)c->bw * 64u : nx;
+
+    DC01 = DC02 = DC03 = DC04 = DC05 = ppr[0];
+    DC06 = DC07 = DC08 = DC09 = DC10 = pr[0];
+    DC11 = DC12 = DC13 = DC14 = DC15 = cur[0];
+    DC16 = DC17 = DC18 = DC19 = DC20 = nx[0];
+    DC21 = DC22 = DC23 = DC24 = DC25 = nnx[0];
+    for (bx = 0; bx <= last; bx++) {
+      IM_ALIGN(16) int16_t ws[64];
+      size_t               o = (size_t)bx * 64u;
+
+      memcpy(ws, cur + o, sizeof(ws));
+      if (bx == 0u && bx < last) {
+        DC04 = DC05 = ppr[o + 64u];
+        DC09 = DC10 = pr[o + 64u];
+        DC14 = DC15 = cur[o + 64u];
+        DC19 = DC20 = nx[o + 64u];
+        DC24 = DC25 = nnx[o + 64u];
+      }
+      if (bx + 1u < last) {
+        DC05 = ppr[o + 128u];
+        DC10 = pr[o + 128u];
+        DC15 = cur[o + 128u];
+        DC20 = nx[o + 128u];
+        DC25 = nnx[o + 128u];
+      }
+      if ((al = cb[1]) != 0 && ws[1] == 0) {
+        ws[1] = guess(Q00 * (change_dc ? (-DC01 - DC02 + DC04 + DC05 - 3 * DC06 + 13 * DC07 - 13 * DC09 + 3 * DC10 - 3 * DC11
+                                          + 38 * DC12 - 38 * DC14 + 3 * DC15 - 3 * DC16 + 13 * DC17 - 13 * DC19 + 3 * DC20
+                                          - DC21 - DC22 + DC24 + DC25)
+                                       : (-7 * DC11 + 50 * DC12 - 50 * DC14 + 7 * DC15)), Q01, al);
+      }
+      if ((al = cb[2]) != 0 && ws[8] == 0) {
+        ws[8] = guess(Q00 * (change_dc ? (-DC01 - 3 * DC02 - 3 * DC03 - 3 * DC04 - DC05 - DC06 + 13 * DC07 + 38 * DC08
+                                          + 13 * DC09 - DC10 + DC16 - 13 * DC17 - 38 * DC18 - 13 * DC19 + DC20 + DC21
+                                          + 3 * DC22 + 3 * DC23 + 3 * DC24 + DC25)
+                                       : (-7 * DC03 + 50 * DC08 - 50 * DC18 + 7 * DC23)), Q10, al);
+      }
+      if ((al = cb[3]) != 0 && ws[16] == 0) {
+        ws[16] = guess(Q00 * (change_dc ? (DC03 + 2 * DC07 + 7 * DC08 + 2 * DC09 - 5 * DC12 - 14 * DC13 - 5 * DC14
+                                           + 2 * DC17 + 7 * DC18 + 2 * DC19 + DC23)
+                                        : (-DC03 + 13 * DC08 - 24 * DC13 + 13 * DC18 - DC23)), Q20, al);
+      }
+      if ((al = cb[4]) != 0 && ws[9] == 0) {
+        ws[9] = guess(Q00 * (change_dc ? (-DC01 + DC05 + 9 * DC07 - 9 * DC09 - 9 * DC17 + 9 * DC19 + DC21 - DC25)
+                                       : (DC10 + DC16 - 10 * DC17 + 10 * DC19 - DC02 - DC20 + DC22 - DC24 + DC04
+                                          - DC06 + 10 * DC07 - 10 * DC09)), Q11, al);
+      }
+      if ((al = cb[5]) != 0 && ws[2] == 0) {
+        ws[2] = guess(Q00 * (change_dc ? (2 * DC07 - 5 * DC08 + 2 * DC09 + DC11 + 7 * DC12 - 14 * DC13 + 7 * DC14
+                                          + DC15 + 2 * DC17 - 5 * DC18 + 2 * DC19)
+                                       : (-DC11 + 13 * DC12 - 24 * DC13 + 13 * DC14 - DC15)), Q02, al);
+      }
+      if (change_dc) {
+        if ((al = cb[6]) != 0 && ws[3] == 0) ws[3] = guess(Q00 * (DC07 - DC09 + 2 * DC12 - 2 * DC14 + DC17 - DC19), Q03, al);
+        if ((al = cb[7]) != 0 && ws[10] == 0) ws[10] = guess(Q00 * (DC07 - 3 * DC08 + DC09 - DC17 + 3 * DC18 - DC19), Q12, al);
+        if ((al = cb[8]) != 0 && ws[17] == 0) ws[17] = guess(Q00 * (DC07 - DC09 - 3 * DC12 + 3 * DC14 + DC17 - DC19), Q21, al);
+        if ((al = cb[9]) != 0 && ws[24] == 0) ws[24] = guess(Q00 * (DC07 + 2 * DC08 + DC09 - DC17 - 2 * DC18 - DC19), Q30, al);
+        ws[0] = guess(Q00 * (-2 * DC01 - 6 * DC02 - 8 * DC03 - 6 * DC04 - 2 * DC05 - 6 * DC06 + 6 * DC07 + 42 * DC08
+                             + 6 * DC09 - 6 * DC10 - 8 * DC11 + 42 * DC12 + 152 * DC13 + 42 * DC14 - 8 * DC15
+                             - 6 * DC16 + 6 * DC17 + 42 * DC18 + 6 * DC19 - 6 * DC20 - 2 * DC21 - 6 * DC22
+                             - 8 * DC23 - 6 * DC24 - 2 * DC25), Q00, 0);
+      }
+      jpg_put(j, c, ws, bx, by);
+      DC01 = DC02, DC02 = DC03, DC03 = DC04, DC04 = DC05;
+      DC06 = DC07, DC07 = DC08, DC08 = DC09, DC09 = DC10;
+      DC11 = DC12, DC12 = DC13, DC13 = DC14, DC14 = DC15;
+      DC16 = DC17, DC17 = DC18, DC18 = DC19, DC19 = DC20;
+      DC21 = DC22, DC22 = DC23, DC23 = DC24, DC24 = DC25;
+    }
+  }
 }
 
 /* a multi-scan image's blocks, once its scans are read */
 static void
 idct_all(jpg_t *j) {
+  int8_t   latch[J_COMPS][10], prev[J_COMPS][10];
   uint32_t i, bx, by;
 
+  if (smoothing_ok(j, latch, prev)) {
+    for (i = 0; i < j->ncomp; i++) smooth_comp(j, i, latch[i], prev[i]);
+    return;
+  }
   for (i = 0; i < j->ncomp; i++) {
     jcomp_t *c = &j->comp[i];
 
@@ -191,6 +340,14 @@ read_sos(jpg_t *j, const uint8_t *s, uint32_t len) {
     j->comp[k].ta  = s[2u + i * 2u] & 15u;
   }
   j->nscomp = n;
+  for (i = 0; i < n; i++) {
+    jcomp_t *c = &j->comp[j->scomp[i]];
+
+    if (!c->latched) {
+      memcpy(c->q, j->quant[c->tq], sizeof(c->q));
+      c->latched = true;
+    }
+  }
   j->ss     = s[1u + n * 2u];
   j->se     = s[2u + n * 2u];
   j->ah     = s[3u + n * 2u] >> 4;
@@ -208,6 +365,9 @@ read_sos(jpg_t *j, const uint8_t *s, uint32_t len) {
 
       if (dc && !j->ah && (c->td > 3u || !j->dc[c->td] || !j->dc[c->td]->ok || j->dc[c->td]->maxsym > 15u)) return false;
       if (!dc && (c->ta > 3u || !j->ac[c->ta] || !j->ac[c->ta]->ok)) return false;
+      for (k = j->ss < 1u ? j->ss : 1u; k <= (j->se > 9u ? j->se : 9u) && k < 10u; k++) {
+        if (k) c->prev[k] = j->nscans + 1u > 1u ? c->bits[k] : 0;
+      }
       for (k = j->ss; k <= j->se; k++) c->bits[k] = (int8_t)j->al;
     }
   } else {
@@ -261,6 +421,13 @@ jpg_free(jpg_t *j) {
   free(j->sd.seg);
 }
 
+/* the stream's byte `k` from `p` (`have` there): past its end libjpeg's
+   fake EOIs, FF D9 again and again */
+IM_INLINE uint8_t
+virt(const uint8_t *p, size_t have, size_t k) {
+  return k < have ? p[k] : ((k - have) & 1u) ? 0xD9u : 0xFFu;
+}
+
 /* the colour space as libjpeg guesses it (jdapimin.c) */
 static jspace_t
 guess_space(const jpg_t *j) {
@@ -281,10 +448,21 @@ guess_space(const jpg_t *j) {
   }
 }
 
+static bool decode_stream(jpg_t *j, ImImage *im, ImByteOrder order, uint8_t **pad);
+
 static bool
 decode(jpg_t *j, ImImage *im, ImByteOrder order) {
+  uint8_t *pad = NULL;
+  bool     ok  = decode_stream(j, im, order, &pad);
+
+  free(pad);
+  return ok;
+}
+
+static bool
+decode_stream(jpg_t *j, ImImage *im, ImByteOrder order, uint8_t **padp) {
   const uint8_t *p = j->data, *end = j->end;
-  bool           first = true, done = false;
+  bool           first = true, done = false, tail = false, odd = false;
 
   if (end - p < 4 || p[0] != 0xFFu || p[1] != 0xD8u) return false;
   p += 2;
@@ -294,12 +472,31 @@ decode(jpg_t *j, ImImage *im, ImByteOrder order) {
 
     if (m == 0xD9u) break;
     if ((m >= 0xD0u && m <= 0xD7u) || m == 0x01u) continue; /* parameterless */
-    if (end - p < 2) break;
-    len = be16(p);
-    if (len < 2u || (size_t)(end - p) < len) break; /* cut short: as far as it went */
-    s = p + 2;
+    {
+      size_t have = (size_t)(end - p);
+
+      len = (uint32_t)virt(p, have, 0u) << 8 | virt(p, have, 1u);
+      if (len < 2u) break;
+      if (have < len) {
+        /* cut short: read on as libjpeg does, its fake EOIs' bytes (FF D9
+           FF D9 ...) for the rest; an odd count of them leaves a D9 for
+           what comes next (a scan's one byte of data) */
+        size_t   k;
+        uint8_t *pad;
+
+        free(*padp);
+        if (!(*padp = pad = malloc(len))) return false;
+        for (k = 0; k < len; k++) pad[k] = virt(p, have, k);
+        s    = pad + 2;
+        odd  = (len - have) & 1u;
+        p    = end;
+        tail = true;
+      } else {
+        s = p + 2;
+        p += len;
+      }
+    }
     len -= 2u;
-    p += len + 2u;
 
     switch (m) {
     case 0xC0: case 0xC1: case 0xC2: case 0xC3:
@@ -336,8 +533,16 @@ decode(jpg_t *j, ImImage *im, ImByteOrder order) {
         first = false;
       } else if (!j->multiscan) {
         /* one pass: later scans aren't read */
+        if (tail) break;
         if (!jpg_unstuff(&j->sd, p, end)) return false;
         p = j->sd.next;
+        break;
+      }
+      if (tail) {
+        static const uint8_t fake[3] = { 0xD9u, 0xFFu, 0xD9u };
+
+        if (!jpg_unstuff(&j->sd, odd ? fake : fake + 1, fake + 3) || !jpg_scan_huff(j)) return false;
+        j->nscans++;
         break;
       }
       if (!jpg_unstuff(&j->sd, p, end) || !jpg_scan_huff(j)) return false;

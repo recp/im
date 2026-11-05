@@ -609,6 +609,7 @@ jpg_scan_huff(jpg_t *j) {
         j->togo--;
       }
       if (!j->lacking) {
+        j->last_good = j->nscomp == 1u ? my / j->comp[j->scomp[0]].v : my;
         if (!r.tail && r.b.p >= r.lim) rd_tail(&r, tail, margin);
         mcu(j, &r.b, mx, my, false);
         if (rd_past(&r)) j->lacking = true;
