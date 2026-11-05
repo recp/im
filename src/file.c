@@ -45,8 +45,10 @@ im_readfile(const char * __restrict file, bool readonly) {
   
   infile_no = fileno(infile);
   
-  if (fstat(infile_no, &infile_st) != 0)
+  if (fstat(infile_no, &infile_st) != 0) {
+    fclose(infile);
     goto err;
+  }
   
   fsize          = infile_st.st_size;
   fcontents_size = sizeof(char) * fsize;
@@ -56,6 +58,8 @@ im_readfile(const char * __restrict file, bool readonly) {
   if (readonly
       && fcontents_size > 1024 * 16 /* > 16K */
       && (res.raw = im_mmap_rdonly(infile_no, fsize))) {
+    /* the mapping outlives the file's descriptor */
+    fclose(infile);
     res.mmap = true;
     res.ret  = IM_OK;
     return res;
