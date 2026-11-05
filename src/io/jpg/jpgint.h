@@ -159,6 +159,8 @@ typedef struct jpg {
      the caller's runner */
   uint32_t   threads;
   im_runner_t runner;
+  uint8_t   *dest;              /* the caller's memory for the pixels, or NULL */
+  size_t     dest_stride, dest_size;
   im_pool_t *pool;
   /* a multi-scan image's scans on threads: those kept; a kept one's
      place among them, the earlier ones it waits for (a mask) */
@@ -181,6 +183,8 @@ typedef struct jopts {
   bool        cmyk_stored; /* an Adobe CMYK left inverted */
   bool        rgb_pad;     /* RGB as RGB0 */
   im_runner_t runner;      /* the caller's threads (run NULL: none) */
+  uint8_t    *dest;        /* the caller's memory, `stride` a row; NULL: im's */
+  size_t      dest_stride, dest_size;
 } jopts_t;
 
 IM_HIDE bool jpg_decode_mem(const uint8_t *data, size_t len, ImImage *im, const jopts_t *o);

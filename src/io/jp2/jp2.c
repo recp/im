@@ -2556,6 +2556,8 @@ typedef struct jxopts {
   bool        eight;   /* deeper samples in 8 bits, OpenJPEG's way */
   int32_t     opacity; /* ImOpacity */
   im_runner_t runner;  /* the caller's threads */
+  uint8_t    *dest;    /* the caller's memory, `dest_stride` a row; NULL: im's */
+  size_t      dest_stride, dest_size;
 } jxopts_t;
 
 /* the planes as `im`'s pixels: the colours then the opacity, a sample 8
@@ -2828,6 +2830,24 @@ made:
     memcpy(icc, x->icc_data, x->icc_len);
   }
 
+  /* the caller's memory: the rows there, at its stride */
+  if (o->dest) {
+    size_t row = (size_t)w * step * (wide ? 2u : 1u), y;
+
+    if (o->dest_stride < row || o->dest_size < o->dest_stride * (h - 1u) + row
+        || (wide && (((uintptr_t)o->dest | o->dest_stride) & 1u))) {
+      free(px);
+      free(alpha);
+      free(icc);
+      return false;
+    }
+    for (y = 0; y < h; y++) memcpy(o->dest + y * o->dest_stride, px + y * row, row);
+    free(px);
+    px                = NULL;
+    len               = o->dest_stride * (h - 1u) + row;
+    im->row_pad_last  = (uint32_t)(o->dest_stride - row);
+  }
+
   im->width              = w;
   im->height             = h;
   im->data.data          = px;
@@ -2993,6 +3013,9 @@ opts_of(const im_open_config_t *c) {
   o.eight   = c->eightBits;
   o.opacity = c->opacity;
   o.runner  = c->runner;
+  o.dest        = c->dest;
+  o.dest_stride = c->destStride;
+  o.dest_size   = c->destSize;
   return o;
 }
 

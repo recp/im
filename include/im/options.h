@@ -81,6 +81,12 @@ typedef enum im_option_type_t {
   /* the caller's threads for a decode's parallel work (im_option_runner);
      im starts none of its own then */
   IM_OPTION_RUNNER,
+
+  /* the pixels into the caller's memory (im_option_dest): rows `stride`
+     bytes apart from `pixels`, `size` bytes there in all (too few: the
+     load fails); im->data.data stays NULL, row_pad_last the rows' gap.
+     16-bit samples: `pixels` and `stride` even */
+  IM_OPTION_DEST,
 } im_option_type_t;
 
 
@@ -114,6 +120,12 @@ typedef struct im_option_runner_t {
   im_option_base_t base;
   im_runner_t      runner;
 } im_option_runner_t;
+
+typedef struct im_option_dest_t {
+  im_option_base_t base;
+  void            *pixels;
+  size_t           stride, size;
+} im_option_dest_t;
 
 #define IM_OPTIONS (im_option_base_t *[])
 
@@ -178,6 +190,19 @@ im_option_runner(im_runner_t runner) {
 
   opt.base.type = IM_OPTION_RUNNER;
   opt.runner    = runner;
+
+  return opt;
+}
+
+IM_INLINE
+im_option_dest_t
+im_option_dest(void *pixels, size_t stride, size_t size) {
+  im_option_dest_t opt;
+
+  opt.base.type = IM_OPTION_DEST;
+  opt.pixels    = pixels;
+  opt.stride    = stride;
+  opt.size      = size;
 
   return opt;
 }

@@ -1041,6 +1041,9 @@ jpg_decode_mem(const uint8_t *data, size_t len, ImImage *im, const jopts_t *o) {
   j->cmyk_stored    = o->cmyk_stored;
   j->rgb_pad        = o->rgb_pad;
   j->runner         = o->runner;
+  j->dest           = o->dest;
+  j->dest_stride    = o->dest_stride;
+  j->dest_size      = o->dest_size;
   ok                = decode(j, im, o->order);
   im_pool_free(j->pool);
   jpg_free(j);
@@ -1058,6 +1061,9 @@ opts_of(const im_open_config_t *c) {
   o.cmyk_stored = c->cmykAsStored;
   o.rgb_pad     = c->rgbPadded;
   o.runner      = c->runner;
+  o.dest        = c->dest;
+  o.dest_stride = c->destStride;
+  o.dest_size   = c->destSize;
   return o;
 }
 

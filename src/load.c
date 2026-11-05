@@ -58,6 +58,11 @@ im_config(im_option_base_t *options[], ImOpenIntent openIntent) {
         case IM_OPTION_EIGHT_BITS:           conf.eightBits      = ((im_option_bool_t*)opt)->on;         break;
         case IM_OPTION_OPACITY:              conf.opacity        = ((im_option_int_t*)opt)->value;       break;
         case IM_OPTION_RUNNER:               conf.runner         = ((im_option_runner_t*)opt)->runner;   break;
+        case IM_OPTION_DEST:
+          conf.dest       = ((im_option_dest_t*)opt)->pixels;
+          conf.destStride = ((im_option_dest_t*)opt)->stride;
+          conf.destSize   = ((im_option_dest_t*)opt)->size;
+          break;
         default: break;
       }
     }

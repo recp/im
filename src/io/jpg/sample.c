@@ -402,6 +402,8 @@ typedef struct jsout {
   jycc_t   t;
   jspace_t space;
   uint8_t *px;
+  size_t   pitch;    /* bytes a row of px */
+  bool     own;      /* px im's (else the caller's) */
   size_t   rowlen;
   uint32_t band, max;
   bool     wide, invert, swap;
@@ -458,7 +460,7 @@ out_band(void *arg, uint32_t worker, uint32_t item) {
   for (y = y0; y < y1; y++) {
     if (!o->wide) {
       const uint8_t *row[J_COMPS];
-      uint8_t       *dst = o->pad ? o->rgb[worker] : o->px + (size_t)y * w * n;
+      uint8_t       *dst = o->pad ? o->rgb[worker] : o->px + (size_t)y * o->pitch;
 
       for (i = 0; i < n; i++) row[i] = up_row8(j, &j->comp[i], &o->up[i], y, rows + o->rowlen * i, &o->scratch[worker]);
       pixels8(row, n, o->space, &o->t, (int32_t)o->max, o->invert, w, dst, o->scratch[worker].x86);
@@ -473,10 +475,10 @@ out_band(void *arg, uint32_t worker, uint32_t item) {
           p[k] = (uint8_t)((v * 255u + o->max / 2u) / o->max);
         }
       }
-      if (o->pad) pad8(dst, w, o->px + (size_t)y * w * 4u);
+      if (o->pad) pad8(dst, w, o->px + (size_t)y * o->pitch);
     } else {
       const uint16_t *row[J_COMPS];
-      uint16_t       *p = o->pad ? (uint16_t *)(void *)o->rgb[worker] : (uint16_t *)o->px + (size_t)y * w * n;
+      uint16_t       *p = o->pad ? (uint16_t *)(void *)o->rgb[worker] : (uint16_t *)(void *)(o->px + (size_t)y * o->pitch);
       size_t          k;
 
       for (i = 0; i < n; i++) row[i] = up_row16(j, &j->comp[i], &o->up[i], y, (uint16_t *)rows + o->rowlen * i);
@@ -489,7 +491,7 @@ out_band(void *arg, uint32_t worker, uint32_t item) {
 
         p[k] = o->swap ? bswapu16((uint16_t)v) : (uint16_t)v;
       }
-      if (o->pad) pad16(p, w, (uint16_t *)o->px + (size_t)y * w * 4u);
+      if (o->pad) pad16(p, w, (uint16_t *)(void *)(o->px + (size_t)y * o->pitch));
     }
   }
   return true;
@@ -523,7 +525,20 @@ jpg_out(jpg_t *j, jspace_t space, ImImage *im, ImByteOrder order) {
   len       = (size_t)w * h * o->on * (o->wide ? 2u : 1u);
   for (i = 0; i < n; i++) o->up[i] = up_method(j, &j->comp[i]);
   if ((space == J_YCC || space == J_YCCK) && !ycc_tables(&o->t, o->max, o->wide ? 65536u : 256u)) goto done;
-  if (!(o->px = malloc(len))) goto done;
+  /* the caller's memory, where given: its rows' stride, enough of it */
+  o->pitch = (size_t)w * o->on * (o->wide ? 2u : 1u);
+  if (j->dest) {
+    if (j->dest_stride < o->pitch || j->dest_size < j->dest_stride * (h - 1u) + o->pitch
+        || (o->wide && (((uintptr_t)j->dest | j->dest_stride) & 1u))) {
+      goto done;
+    }
+    o->px    = j->dest;
+    o->pitch = j->dest_stride;
+  } else if (!(o->px = malloc(len))) {
+    goto done;
+  } else {
+    o->own = true;
+  }
   for (i = 0; i < nw; i++) {
 #if J_X86
     o->scratch[i].x86 = __builtin_cpu_supports("ssse3") && __builtin_cpu_supports("sse4.1");
@@ -538,8 +553,9 @@ jpg_out(jpg_t *j, jspace_t space, ImImage *im, ImByteOrder order) {
 
   im->width              = w;
   im->height             = h;
-  im->data.data          = o->px;
-  im->len                = len;
+  im->data.data          = o->own ? o->px : NULL;
+  im->len                = o->own ? len : o->pitch * (h - 1u) + (size_t)w * o->on * (o->wide ? 2u : 1u);
+  im->row_pad_last       = o->own ? 0u : (uint32_t)(o->pitch - (size_t)w * o->on * (o->wide ? 2u : 1u));
   im->componentsPerPixel = o->on;
   im->bitsPerComponent   = o->wide ? 16u : 8u;
   im->bitsPerPixel       = o->on * im->bitsPerComponent;
@@ -552,7 +568,7 @@ jpg_out(jpg_t *j, jspace_t space, ImImage *im, ImByteOrder order) {
   ok                     = true;
 
 done:
-  free(o->px);
+  if (o->own) free(o->px);
   for (i = 0; i < IM_POOL_MAX; i++) {
     free(o->rows[i]);
     free(o->scratch[i].pad);
