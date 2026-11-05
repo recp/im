@@ -20,14 +20,14 @@ TODO
       transform (DCTDecode's /ColorTransform), CMYK as stored, RGB padded to RGB0, a palette's indexes
 - [x] Formats picked at build time: `-DIM_FORMATS="jpg;jp2"` (default `all`); only png needs the
       defl and huff submodules
-- [x] WebAssembly (WASI): wasi-sdk's toolchain file, `-DIM_STATIC=ON`; one thread, files read
-      (no mmap)
+- [x] WebAssembly (WASI): wasi-sdk's toolchain file, `-DIM_STATIC=ON` (`-msimd128` for SIMD128);
+      one thread, files read (no mmap)
 - [x] JPEG (libjpeg-turbo's pixels, to the byte)
   - [x] baseline, extended (8 and 12 bits), progressive; Huffman and arithmetic coding
   - [x] lossless, 2 to 16 bits
   - [x] every sampling, restarts, Adobe/JFIF, CMYK and YCCK, ICC profile
   - [x] cut streams and damage as libjpeg reads them, block smoothing
-  - [x] NEON and SSE4.1/AVX2 IDCT, upsampling, colour
+  - [x] NEON, SSE4.1/AVX2 and WebAssembly SIMD128 IDCT, upsampling, colour
   - [x] on threads: restart intervals, speculative Huffman, progressive scans row by row
   - [ ] hierarchical, lossless arithmetic, DNL
 - [x] PNG (In Progress)
