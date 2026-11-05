@@ -195,16 +195,18 @@ typedef struct jycc {
 #define ONE_HALF  ((int64_t)1 << (SCALEBITS - 1))
 #define FIX(x)    ((int64_t)((x) * (1L << SCALEBITS) + 0.5))
 
+/* `n` entries: every value a sample's type holds (damage can put a
+   sample past its depth), centred on the depth's */
 static bool
-ycc_tables(jycc_t *t, uint32_t max) {
+ycc_tables(jycc_t *t, uint32_t max, uint32_t n) {
   uint32_t i, centre = (max + 1u) / 2u;
 
-  t->cr_r = malloc((max + 1u) * sizeof(*t->cr_r));
-  t->cb_b = malloc((max + 1u) * sizeof(*t->cb_b));
-  t->cr_g = malloc((max + 1u) * sizeof(*t->cr_g));
-  t->cb_g = malloc((max + 1u) * sizeof(*t->cb_g));
+  t->cr_r = malloc(n * sizeof(*t->cr_r));
+  t->cb_b = malloc(n * sizeof(*t->cb_b));
+  t->cr_g = malloc(n * sizeof(*t->cr_g));
+  t->cb_g = malloc(n * sizeof(*t->cb_g));
   if (!t->cr_r || !t->cb_b || !t->cr_g || !t->cb_g) return false;
-  for (i = 0; i <= max; i++) {
+  for (i = 0; i < n; i++) {
     int64_t x = (int64_t)i - centre;
 
     t->cr_r[i] = (int32_t)((FIX(1.40200) * x + ONE_HALF) >> SCALEBITS);
@@ -282,8 +284,9 @@ pixels8(const uint8_t *const *row, uint32_t ncomp, jspace_t space, const jycc_t 
 #if J_NEON
   uint32_t done = 0, i;
 
-  if (ncomp == 3u && space == J_YCC) done = jn_ycc(row[0], row[1], row[2], NULL, o, w);
-  else if (ncomp == 4u && space == J_YCCK) done = jn_ycc(row[0], row[1], row[2], row[3], o, w);
+  /* YCbCr's NEON is 8-bit samples' (lossless shallower ones: the plain loop) */
+  if (ncomp == 3u && space == J_YCC && max == 255) done = jn_ycc(row[0], row[1], row[2], NULL, o, w);
+  else if (ncomp == 4u && space == J_YCCK && max == 255) done = jn_ycc(row[0], row[1], row[2], row[3], o, w);
   else if (ncomp > 1u) done = jn_interleave(row, ncomp, o, w);
   if (done) {
     const uint8_t *rest[J_COMPS];
@@ -389,7 +392,7 @@ jpg_out(jpg_t *j, jspace_t space, ImImage *im, ImByteOrder order) {
   o->band   = o->band < 8u ? 8u : o->band;
   len       = (size_t)w * h * n * (o->wide ? 2u : 1u);
   for (i = 0; i < n; i++) o->up[i] = up_method(j, &j->comp[i]);
-  if ((space == J_YCC || space == J_YCCK) && !ycc_tables(&o->t, o->max)) goto done;
+  if ((space == J_YCC || space == J_YCCK) && !ycc_tables(&o->t, o->max, o->wide ? 65536u : 256u)) goto done;
   if (!(o->px = malloc(len))) goto done;
   for (i = 0; i < nw; i++) {
     if (!(o->rows[i] = malloc(o->rowlen * n * (o->wide ? 2u : 1u))) || !(o->scratch[i].pad = malloc(o->rowlen + 2u))
