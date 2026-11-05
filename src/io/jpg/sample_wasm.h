@@ -132,15 +132,6 @@ jw_h1v2(const uint16_t *s, uint32_t n, uint32_t bias, uint8_t *out) {
   for (; i < n; i++) out[i] = (uint8_t)((s[i] + bias) >> 2);
 }
 
-/* (a · k + 2^15) >> 16 for eight int16 a, eight int16 out */
-IM_INLINE v128_t
-jw_mulr16(v128_t a, int16_t k) {
-  const v128_t kk = wasm_i16x8_splat(k), half = wasm_i32x4_splat(32768);
-
-  return wasm_i16x8_narrow_i32x4(wasm_i32x4_shr(wasm_i32x4_add(wasm_i32x4_extmul_low_i16x8(a, kk), half), 16),
-                                 wasm_i32x4_shr(wasm_i32x4_add(wasm_i32x4_extmul_high_i16x8(a, kk), half), 16));
-}
-
 /* libjpeg's R, G and B offsets from Cb and Cr (centred), as jn_ycc_terms */
 IM_INLINE void
 jw_ycc_terms(v128_t cb, v128_t cr, v128_t *tr, v128_t *tg, v128_t *tb) {
@@ -148,8 +139,10 @@ jw_ycc_terms(v128_t cb, v128_t cr, v128_t *tr, v128_t *tg, v128_t *tb) {
   v128_t       gl = wasm_i32x4_add(wasm_i32x4_extmul_low_i16x8(cb, kb), wasm_i32x4_extmul_low_i16x8(cr, kr));
   v128_t       gh = wasm_i32x4_add(wasm_i32x4_extmul_high_i16x8(cb, kb), wasm_i32x4_extmul_high_i16x8(cr, kr));
 
-  *tr = wasm_i16x8_add(cr, jw_mulr16(cr, 26345));
-  *tb = wasm_i16x8_add(wasm_i16x8_shl(cb, 1), jw_mulr16(cb, -14942));
+  /* (k x + 2^15) >> 16 as q15mulr by k/2: 26346 is 26345 for every
+     centred 8-bit x, -14942 itself */
+  *tr = wasm_i16x8_add(cr, wasm_i16x8_q15mulr_sat(cr, wasm_i16x8_splat(13173)));
+  *tb = wasm_i16x8_add(wasm_i16x8_shl(cb, 1), wasm_i16x8_q15mulr_sat(cb, wasm_i16x8_splat(-7471)));
   *tg = wasm_i16x8_sub(wasm_i16x8_narrow_i32x4(wasm_i32x4_shr(wasm_i32x4_add(gl, half), 16),
                                                wasm_i32x4_shr(wasm_i32x4_add(gh, half), 16)),
                        cr);

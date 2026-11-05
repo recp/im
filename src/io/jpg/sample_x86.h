@@ -111,14 +111,6 @@ jx_h1v2(const uint16_t *s, uint32_t n, uint32_t bias, uint8_t *out) {
   for (; i < n; i++) out[i] = (uint8_t)((s[i] + bias) >> 2);
 }
 
-/* (x c + 32768) >> 16, exactly, a 16-bit lane at a time */
-JX_SSSE3 static inline __m128i
-jx_round16(__m128i x, short c) {
-  __m128i k = _mm_set1_epi16(c);
-
-  return _mm_add_epi16(_mm_mulhi_epi16(x, k), _mm_srli_epi16(_mm_mullo_epi16(x, k), 15));
-}
-
 /* 16 R, G, B (and K) bytes to 48 (64) interleaved */
 JX_SSSE3 static inline void
 jx_store3(uint8_t *o, __m128i r, __m128i g, __m128i b) {
@@ -156,8 +148,10 @@ jx_terms(__m128i cb, __m128i cr, __m128i *tr, __m128i *tg, __m128i *tb) {
   __m128i       gl = _mm_srai_epi32(_mm_add_epi32(_mm_madd_epi16(_mm_unpacklo_epi16(cb, cr), gk), half), 16);
   __m128i       gh = _mm_srai_epi32(_mm_add_epi32(_mm_madd_epi16(_mm_unpackhi_epi16(cb, cr), gk), half), 16);
 
-  *tr = _mm_add_epi16(cr, jx_round16(cr, 26345));
-  *tb = _mm_add_epi16(_mm_slli_epi16(cb, 1), jx_round16(cb, -14942));
+  /* (k x + 2^15) >> 16 as pmulhrsw by k/2: 26346 is 26345 for every
+     centred 8-bit x, -14942 itself */
+  *tr = _mm_add_epi16(cr, _mm_mulhrs_epi16(cr, _mm_set1_epi16(13173)));
+  *tb = _mm_add_epi16(_mm_slli_epi16(cb, 1), _mm_mulhrs_epi16(cb, _mm_set1_epi16(-7471)));
   *tg = _mm_sub_epi16(_mm_packs_epi32(gl, gh), cr);
 }
 

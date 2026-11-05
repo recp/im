@@ -23,7 +23,8 @@
  * YCbCr to RGB is libjpeg's tables computed in 16-bit lanes, each constant
  * split so its products fit: (91881 x + 32768) >> 16 = x + ((26345 x +
  * 32768) >> 16), (116130 x + 32768) >> 16 = 2x + ((-14942 x + 32768) >>
- * 16), and green's -46802 cr = -65536 cr + 18734 cr.
+ * 16) (both one rounding multiply-high each: 26346 gives 26345's for every
+ * centred x), and green's -46802 cr = -65536 cr + 18734 cr.
  */
 
 #ifndef src_io_jpg_sample_neon_h
@@ -108,10 +109,10 @@ jn_ycc_terms(int16x8_t cb, int16x8_t cr, int16x8_t *tr, int16x8_t *tg, int16x8_t
   int32x4_t gl = vmlal_n_s16(vmull_n_s16(vget_low_s16(cb), -22554), vget_low_s16(cr), 18734);
   int32x4_t gh = vmlal_high_n_s16(vmull_high_n_s16(cb, -22554), cr, 18734);
 
-  *tr = vaddq_s16(cr, vcombine_s16(vrshrn_n_s32(vmull_n_s16(vget_low_s16(cr), 26345), 16),
-                                   vrshrn_n_s32(vmull_high_n_s16(cr, 26345), 16)));
-  *tb = vaddq_s16(vshlq_n_s16(cb, 1), vcombine_s16(vrshrn_n_s32(vmull_n_s16(vget_low_s16(cb), -14942), 16),
-                                                   vrshrn_n_s32(vmull_high_n_s16(cb, -14942), 16)));
+  /* (k x + 2^15) >> 16 in one rounding doubling multiply (k/2): 26346 is
+     26345 for every centred 8-bit x, -14942 itself */
+  *tr = vaddq_s16(cr, vqrdmulhq_n_s16(cr, 13173));
+  *tb = vaddq_s16(vshlq_n_s16(cb, 1), vqrdmulhq_n_s16(cb, -7471));
   *tg = vsubq_s16(vcombine_s16(vrshrn_n_s32(gl, 16), vrshrn_n_s32(gh, 16)), cr);
 }
 
