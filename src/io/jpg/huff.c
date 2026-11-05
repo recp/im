@@ -28,6 +28,17 @@
 
 #include "jpgint.h"
 
+#if (defined(__ARM_NEON) || defined(_M_ARM64)) && defined(__aarch64__) && !defined(IM_NO_SIMD)
+#  define J_NZ_NEON 1
+#  include <arm_neon.h>
+#elif (defined(__x86_64__) || defined(__i386__)) && (defined(__GNUC__) || defined(__clang__)) && !defined(IM_NO_SIMD)
+#  define J_NZ_X86 1
+#  include <tmmintrin.h>
+#endif
+#if defined(_MSC_VER) && !defined(__clang__)
+#  include <intrin.h>
+#endif
+
 IM_HIDE const uint8_t jpg_natural[64 + 16] = {
   0,  1,  8,  16, 9,  2,  3,  10, 17, 24, 32, 25, 18, 11, 4,  5,
   12, 19, 26, 33, 40, 48, 41, 34, 27, 20, 13, 6,  7,  14, 21, 28,
@@ -378,6 +389,7 @@ typedef struct jctx {
   uint32_t eobrun;
   uint32_t last_good; /* the iMCU row last decoded with data */
   bool     lacking;
+  bool     ssse3;     /* x86: the masks by shuffles */
 } jctx_t;
 
 /* a progressive scan's part of a block (G.1.2, as libjpeg's jdphuff.c) */
@@ -423,44 +435,193 @@ block_ac_first(jctx_t *x, jbits_t *b, const jcomp_t *c, int16_t *blk) {
   }
 }
 
+/* -- refinement by masks ---------------------------------------------------- */
+
+/* An AC refinement walks the band: a correction bit for each coefficient
+   already nonzero, a symbol's run counting the zeros. On a mask of the
+   nonzero ones (bit k: zigzag position k) a run's end is the (r+1)th zero
+   bit and the corrections on the way one read, so no branch on what each
+   coefficient holds (in a detailed image, a coin's toss) */
+
+IM_INLINE uint32_t
+ctz64(uint64_t v) {
+#if defined(__GNUC__) || defined(__clang__)
+  return (uint32_t)__builtin_ctzll(v);
+#elif defined(_MSC_VER) && defined(_WIN64)
+  unsigned long i;
+
+  _BitScanForward64(&i, v);
+  return (uint32_t)i;
+#else
+  uint32_t n = 0u;
+
+  while (!(v & 1u)) {
+    v >>= 1;
+    n++;
+  }
+  return n;
+#endif
+}
+
+IM_INLINE uint32_t
+popcount64(uint64_t v) {
+#if defined(__GNUC__) || defined(__clang__)
+  return (uint32_t)__builtin_popcountll(v);
+#else
+  v = v - ((v >> 1) & 0x5555555555555555ull);
+  v = (v & 0x3333333333333333ull) + ((v >> 2) & 0x3333333333333333ull);
+  v = (v + (v >> 4)) & 0x0F0F0F0F0F0F0F0Full;
+  return (uint32_t)((v * 0x0101010101010101ull) >> 56);
+#endif
+}
+
+/* the block's nonzero coefficients, bit k for zigzag position k */
+#if J_NZ_NEON
+IM_INLINE uint64_t
+nonzero_zz(const jctx_t *x, const int16_t *blk) {
+  static const uint8_t wb[16] = { 1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128 };
+  const uint8x16_t     w      = vld1q_u8(wb);
+  uint8x16x4_t         t;
+  uint8x16_t           z0, z1, z2, z3, sum;
+  uint32_t             k;
+
+  (void)x;
+  for (k = 0; k < 4u; k++) {
+    int16x8_t a = vld1q_s16(blk + 16u * k), b = vld1q_s16(blk + 16u * k + 8u);
+
+    t.val[k] = vcombine_u8(vmovn_u16(vtstq_s16(a, a)), vmovn_u16(vtstq_s16(b, b)));
+  }
+  z0  = vandq_u8(vqtbl4q_u8(t, vld1q_u8(jpg_natural)), w);
+  z1  = vandq_u8(vqtbl4q_u8(t, vld1q_u8(jpg_natural + 16)), w);
+  z2  = vandq_u8(vqtbl4q_u8(t, vld1q_u8(jpg_natural + 32)), w);
+  z3  = vandq_u8(vqtbl4q_u8(t, vld1q_u8(jpg_natural + 48)), w);
+  sum = vpaddq_u8(vpaddq_u8(z0, z1), vpaddq_u8(z2, z3));
+  sum = vpaddq_u8(sum, sum);
+  return vgetq_lane_u64(vreinterpretq_u64_u8(sum), 0);
+}
+#else
+static uint64_t
+nonzero_plain(const int16_t *blk) {
+  uint64_t m = 0u;
+  uint32_t k;
+
+  for (k = 0; k < 64u; k++) m |= (uint64_t)(blk[jpg_natural[k]] != 0) << k;
+  return m;
+}
+
+#  if J_NZ_X86
+/* zigzag position 16c + i from the zero bytes of natural 16s…16s+15:
+   jpg_natural's low four bits where its high ones are s, else nothing */
+static const uint8_t zz_pick[4][4][16] = {
+  { { 0x00, 0x01, 0x08, 0x80, 0x09, 0x02, 0x03, 0x0A, 0x80, 0x80, 0x80, 0x80, 0x80, 0x0B, 0x04, 0x05 },
+    { 0x80, 0x80, 0x80, 0x00, 0x80, 0x80, 0x80, 0x80, 0x01, 0x08, 0x80, 0x09, 0x02, 0x80, 0x80, 0x80 },
+    { 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x00, 0x80, 0x80, 0x80, 0x80, 0x80 },
+    { 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80 } },
+  { { 0x0C, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x0D, 0x06, 0x07, 0x0E, 0x80, 0x80 },
+    { 0x80, 0x03, 0x0A, 0x80, 0x80, 0x80, 0x80, 0x80, 0x0B, 0x04, 0x80, 0x80, 0x80, 0x80, 0x05, 0x0C },
+    { 0x80, 0x80, 0x80, 0x01, 0x08, 0x80, 0x09, 0x02, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80 },
+    { 0x80, 0x80, 0x80, 0x80, 0x80, 0x00, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80 } },
+  { { 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x0F, 0x80, 0x80, 0x80, 0x80, 0x80 },
+    { 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x0D, 0x06, 0x80, 0x07, 0x0E, 0x80, 0x80, 0x80 },
+    { 0x03, 0x0A, 0x80, 0x80, 0x80, 0x80, 0x0B, 0x04, 0x80, 0x80, 0x80, 0x80, 0x80, 0x05, 0x0C, 0x80 },
+    { 0x80, 0x80, 0x01, 0x08, 0x09, 0x02, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x03 } },
+  { { 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80 },
+    { 0x80, 0x80, 0x80, 0x80, 0x80, 0x0F, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80 },
+    { 0x80, 0x80, 0x80, 0x0D, 0x06, 0x80, 0x07, 0x0E, 0x80, 0x80, 0x80, 0x80, 0x0F, 0x80, 0x80, 0x80 },
+    { 0x0A, 0x0B, 0x04, 0x80, 0x80, 0x80, 0x80, 0x80, 0x05, 0x0C, 0x0D, 0x06, 0x80, 0x07, 0x0E, 0x0F } }
+};
+
+__attribute__((target("ssse3"))) static uint64_t
+nonzero_ssse3(const int16_t *blk) {
+  const __m128i zero = _mm_setzero_si128();
+  __m128i       src[4];
+  uint64_t      m = 0u;
+  uint32_t      c, k;
+
+  for (k = 0; k < 4u; k++) {
+    __m128i a = _mm_loadu_si128((const __m128i *)(const void *)(blk + 16u * k));
+    __m128i b = _mm_loadu_si128((const __m128i *)(const void *)(blk + 16u * k + 8u));
+
+    src[k] = _mm_packs_epi16(_mm_cmpeq_epi16(a, zero), _mm_cmpeq_epi16(b, zero));
+  }
+  for (c = 0; c < 4u; c++) {
+    __m128i acc = zero;
+
+    for (k = 0; k < 4u; k++) {
+      acc = _mm_or_si128(acc, _mm_shuffle_epi8(src[k], _mm_loadu_si128((const __m128i *)(const void *)zz_pick[c][k])));
+    }
+    m |= (uint64_t)(uint32_t)_mm_movemask_epi8(acc) << (16u * c);
+  }
+  return ~m;
+}
+#  endif
+
+IM_INLINE uint64_t
+nonzero_zz(const jctx_t *x, const int16_t *blk) {
+#  if J_NZ_X86
+  if (x->ssse3) return nonzero_ssse3(blk);
+#  endif
+  (void)x;
+  return nonzero_plain(blk);
+}
+#endif
+
+IM_INLINE void
+corr_now(jbits_t *b, int16_t *blk, uint64_t m, uint32_t left, int32_t p1) {
+  while (left) {
+    uint32_t take = left > 32u ? 32u : left, bits = get_bits(b, take), i;
+
+    left -= take;
+    for (i = take; i--;) {
+      int16_t *q  = &blk[jpg_natural[ctz64(m)]];
+      int32_t  cv = *q;
+      uint32_t on = ((bits >> i) & 1u) & (uint32_t)((cv & p1) == 0);
+
+      *q = (int16_t)(cv + ((cv >= 0 ? p1 : -p1) & -(int32_t)on));
+      m &= m - 1u;
+    }
+  }
+}
+
 static void
 block_ac_refine(jctx_t *x, jbits_t *b, const jcomp_t *c, int16_t *blk) {
-  const jpg_t   *j  = x->j;
-  const jhuff_t *h  = j->ac[c->ta];
-  int32_t        p1 = 1 << j->al, m1 = -1 * (1 << j->al);
-  uint32_t       k  = j->ss, se = j->se;
+  const jpg_t   *j    = x->j;
+  const jhuff_t *h    = j->ac[c->ta];
+  int32_t        p1   = 1 << j->al;
+  uint32_t       k    = j->ss, se = j->se;
+  uint64_t       band = (~0ull << k) & (~0ull >> (63u - se));
+  uint64_t       nz   = nonzero_zz(x, blk) & band;
 
   if (!x->eobrun) {
-    for (; k <= se; k++) {
-      uint32_t rs = huff_sym(b, h), s = rs & 15u;
-      int32_t  r = (int32_t)(rs >> 4), v = 0;
+    while (k <= se) {
+      uint32_t rs = huff_sym(b, h), s = rs & 15u, r = rs >> 4, r0 = r, t;
+      int32_t  v = 0;
+      uint64_t zeros;
 
       if (s) {
-        v = get_bits(b, 1u) ? p1 : m1;
-      } else if (r != 15) {
+        v = get_bits(b, 1u) ? p1 : -p1;
+      } else if (r != 15u) {
         x->eobrun = 1u << r;
-        if (r) x->eobrun += get_bits(b, (uint32_t)r);
+        if (r) x->eobrun += get_bits(b, r);
         break;
       }
-      do {
-        int16_t *coef = &blk[jpg_natural[k]];
+      zeros = ~nz & band & (~0ull << k);
+      while (r--) zeros &= zeros - 1u;
+      if (likely(zeros)) {
+        t = ctz64(zeros);
+        corr_now(b, blk, nz & (~0ull << k) & ((1ull << t) - 1u), t - k - r0, p1);
+      } else {
+        uint64_t m = nz & (~0ull << k);
 
-        if (*coef) {
-          if (get_bits(b, 1u) && !(*coef & p1)) *coef = (int16_t)(*coef >= 0 ? *coef + p1 : *coef + m1);
-        } else if (--r < 0) {
-          break;
-        }
-        k++;
-      } while (k <= se);
-      if (v) blk[jpg_natural[k]] = (int16_t)v;
+        t = se + 1u;
+        corr_now(b, blk, m, popcount64(m), p1);
+      }
+      if (v) blk[jpg_natural[t]] = (int16_t)v;
+      k = t + 1u;
     }
   }
   if (x->eobrun) {
-    for (; k <= se; k++) {
-      int16_t *coef = &blk[jpg_natural[k]];
-
-      if (*coef && get_bits(b, 1u) && !(*coef & p1)) *coef = (int16_t)(*coef >= 0 ? *coef + p1 : *coef + m1);
-    }
+    if (k <= se) corr_now(b, blk, nz & (~0ull << k), popcount64(nz & (~0ull << k)), p1);
     x->eobrun--;
   }
 }
@@ -631,6 +792,9 @@ ctx_init(jctx_t *x, jpg_t *j, size_t margin) {
   memset(x, 0, sizeof(*x));
   x->j      = j;
   x->margin = margin;
+#if J_NZ_X86
+  x->ssse3 = __builtin_cpu_supports("ssse3");
+#endif
   return (x->tail = malloc(margin * 2u + 32u)) != NULL;
 }
 
