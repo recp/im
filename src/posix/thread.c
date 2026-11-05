@@ -14,15 +14,14 @@
  * limitations under the License.
  */
 
+#include "../thread/common.h"
+
+/* without threads (thread/none.h's stand-ins): nothing here */
+#if !IM_NO_THREADS
+
 #include "thread.h"
 
 #include <unistd.h>
-
-/* WASI built without threads (no -pthread): libc's pthread stubs, one CPU,
-   so no pool starts one */
-#if defined(__wasi__) && !defined(_REENTRANT)
-#  define TH_NONE 1
-#endif
 
 typedef struct th_thread_entry {
   void *arg;
@@ -92,9 +91,7 @@ thread_join(th_thread *th) {
 TH_HIDE
 void
 thread_exit(void) {
-#if !TH_NONE
   pthread_exit(NULL);
-#endif
 }
 
 TH_HIDE
@@ -102,9 +99,6 @@ uint32_t
 thread_ncpu(void) {
   long n;
 
-#if TH_NONE
-  return 1;
-#endif
   n = sysconf(_SC_NPROCESSORS_ONLN);
 
   return n > 0 ? (uint32_t)n : 1;
@@ -193,3 +187,5 @@ void
 thread_wrlock(th_thread_rwlock *rwlock) {
   pthread_rwlock_wrlock(&rwlock->rwlock);
 }
+
+#endif /* !IM_NO_THREADS */

@@ -19,7 +19,9 @@
 
 #include "common.h"
 
-#if defined(_WIN32) || defined(_MSC_VER)
+#if IM_NO_THREADS
+#include "none.h"
+#elif defined(_WIN32) || defined(_MSC_VER)
 #include "../win/thread.h"
 #else
 #include "../posix/thread.h"

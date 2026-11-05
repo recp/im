@@ -42,6 +42,11 @@
 
 #define TH__UNUSED(X) (void)X
 
+/* no threads: asked for, or WASI built without them (no -pthread) */
+#if defined(__wasi__) && !defined(_REENTRANT) && !defined(IM_NO_THREADS)
+#  define IM_NO_THREADS 1
+#endif
+
 #if defined(_WIN32) || defined(WIN32)
 
  /* Exclude rarely-used stuff from Windows headers */

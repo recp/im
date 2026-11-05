@@ -14,6 +14,10 @@
  * limitations under the License.
  */
 
+#include "../thread/common.h"
+
+#if !IM_NO_THREADS
+
 #include "thread.h"
 
 /*
@@ -190,3 +194,5 @@ void
 thread_wrlock(th_thread_rwlock *rwlock) {
   AcquireSRWLockExclusive(&rwlock->rwlock);
 }
+
+#endif /* !IM_NO_THREADS */
