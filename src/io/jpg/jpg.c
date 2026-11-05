@@ -23,10 +23,11 @@
 
 #include "jpg.h"
 #include "jpgint.h"
-#include "../../file.h"
-
-#ifdef __APPLE__
-#  include "../apple/coreimg.h"
+#if !IM_CODECS_ONLY
+#  include "../../file.h"
+#  ifdef __APPLE__
+#    include "../apple/coreimg.h"
+#  endif
 #endif
 
 IM_INLINE uint32_t
@@ -973,6 +974,48 @@ decode_stream(jpg_t *j, ImImage *im, ImByteOrder order, uint8_t **padp) {
   return true;
 }
 
+/* the frame header's word, and the DNL's where it gives no height */
+IM_HIDE bool
+jpg_info(const uint8_t *data, size_t len, ImInfo *info) {
+  const uint8_t *p = data, *end = data + len;
+  bool           sof = false;
+
+  memset(info, 0, sizeof(*info));
+  if (len < 4u || p[0] != 0xFFu || p[1] != 0xD8u) return false;
+  p += 2;
+  for (;;) {
+    uint32_t m = marker_at(&p, end), l;
+
+    if (m == 0xD9u || end - p < 2) return false;
+    if ((m >= 0xD0u && m <= 0xD7u) || m == 0x01u) continue;
+    l = be16(p);
+    if (l < 2u || (size_t)(end - p) < l) return false;
+    if (m >= 0xC0u && m <= 0xCFu && m != 0xC4u && m != 0xC8u && m != 0xCCu && !sof) {
+      const uint8_t *s = p + 2;
+      uint32_t       kind = m & 3u;
+
+      if (l < 8u) return false;
+      info->fileFormatType   = IM_FILEFORMATTYPE_JPEG;
+      info->bitsPerComponent = s[0];
+      info->height           = be16(s + 1);
+      info->width            = be16(s + 3);
+      info->components       = s[5];
+      info->arithmetic       = m >= 0xC8u;
+      info->coding           = (m & 4u) ? IM_CODING_HIERARCHICAL
+                             : kind == 3u ? IM_CODING_LOSSLESS
+                             : kind == 2u ? IM_CODING_PROGRESSIVE
+                             : m == 0xC0u ? IM_CODING_BASELINE : IM_CODING_EXTENDED;
+      sof = true;
+    } else if (m == 0xDAu) {
+      if (!sof) return false;
+      /* no height: the DNL after the first scan */
+      if (!info->height) info->height = dnl_height(p + l, end);
+      return info->height != 0u && info->width != 0u;
+    }
+    p += l;
+  }
+}
+
 /* `data` decoded into `im` */
 IM_HIDE bool
 jpg_decode_mem(const uint8_t *data, size_t len, ImImage *im, const jopts_t *o) {
@@ -1036,6 +1079,7 @@ jpg_dec_mem(ImImage               ** __restrict dest,
   return *dest ? IM_OK : IM_EBADF;
 }
 
+#if !IM_CODECS_ONLY
 IM_HIDE
 ImResult
 jpg_dec(ImImage         ** __restrict dest,
@@ -1076,3 +1120,4 @@ jpg_dec(ImImage         ** __restrict dest,
 
   return IM_OK;
 }
+#endif /* !IM_CODECS_ONLY */

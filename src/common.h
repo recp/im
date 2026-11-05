@@ -77,6 +77,9 @@ typedef struct im_open_config_t {
   bool              paletteIndexes;
 } im_open_config_t;
 
+/* the options as a decoder reads them (load.c) */
+IM_HIDE im_open_config_t im_config(im_option_base_t *options[], ImOpenIntent openIntent);
+
 IM_INLINE
 uint8_t
 im_maxiu8(uint8_t a, uint8_t b) {

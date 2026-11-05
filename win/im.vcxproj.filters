@@ -125,6 +125,9 @@
     <ClInclude Include="..\src\thread\common.h">
       <Filter>src\thread</Filter>
     </ClInclude>
+    <ClInclude Include="..\src\thread\none.h">
+      <Filter>src\thread</Filter>
+    </ClInclude>
     <ClInclude Include="..\src\thread\thread.h">
       <Filter>src\thread</Filter>
     </ClInclude>
@@ -236,6 +239,9 @@
       <Filter>src</Filter>
     </ClCompile>
     <ClCompile Include="..\src\im.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\load.c">
       <Filter>src</Filter>
     </ClCompile>
     <ClCompile Include="..\src\win\dllmain.c">

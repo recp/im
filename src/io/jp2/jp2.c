@@ -32,14 +32,15 @@
  */
 
 #include "jp2.h"
-#include "../../file.h"
-
 #if defined(_MSC_VER) && !defined(__clang__)
 #  include <intrin.h>
 #endif
 
-#ifdef __APPLE__
-#  include "../apple/coreimg.h"
+#if !IM_CODECS_ONLY
+#  include "../../file.h"
+#  ifdef __APPLE__
+#    include "../apple/coreimg.h"
+#  endif
 #endif
 
 #include <math.h>
@@ -2818,6 +2819,71 @@ done:
   return ok;
 }
 
+/* the headers' word: the JP2's boxes, the codestream's SIZ and COD */
+IM_HIDE bool
+jp2_info(const uint8_t *data, size_t len, ImInfo *info) {
+  jpx_t         *j;
+  jp2_t          x;
+  const uint8_t *cs = data;
+  size_t         cs_len = len, pos = 2u;
+  bool           ok = false, siz = false;
+  uint32_t       c;
+
+  memset(info, 0, sizeof(*info));
+  memset(&x, 0, sizeof(x));
+  if (!data || len < 12u || !(j = calloc(1, sizeof(*j)))) return false;
+  j->arena.limit = X_ARENA;
+  info->fileFormatType = IM_FILEFORMATTYPE_J2K;
+  if (be32(data) == 12u && be32(data + 4) == 0x6A502020u) {
+    cs = NULL;
+    if (!read_boxes(j, &x, data, len, &cs, &cs_len, 0u) || !cs) goto done;
+    info->fileFormatType = IM_FILEFORMATTYPE_JP2;
+  }
+  if (cs_len < 4u || be16(cs) != 0xFF4Fu) goto done;
+  /* the main header: SIZ, COD */
+  while (pos + 4u <= cs_len) {
+    uint32_t m = be16(cs + pos), l = be16(cs + pos + 2u);
+
+    if (m == 0xFF90u || l < 2u || pos + 2u + l > cs_len) break;
+    if (m == 0xFF51u) {
+      if (!read_siz(j, cs + pos + 4u, l - 2u)) goto done;
+      siz = true;
+    } else if (m == 0xFF52u && l >= 12u) {
+      info->levels = cs[pos + 9u] + 1u; /* Scod, progression, layers (2), MCT, then the decompositions */
+    }
+    pos += 2u + l;
+  }
+  if (!siz) goto done;
+  info->coding     = IM_CODING_JPEG2000;
+  info->width      = j->x1 - j->x0;
+  info->height     = j->y1 - j->y0;
+  info->components = j->ncomp;
+  for (c = 0; c < j->ncomp; c++) {
+    if (j->prec[c] > info->bitsPerComponent) info->bitsPerComponent = j->prec[c];
+  }
+  /* an opacity channel, as compose finds it */
+  {
+    uint32_t nch = x.nmap && x.pal ? x.nmap : j->ncomp, k;
+    uint32_t ncol = x.enumcs == 17u ? 1u : x.enumcs == 12u ? 4u
+                  : x.enumcs == 16u || x.enumcs == 18u || x.enumcs == 14u || x.enumcs == 24u ? 3u
+                  : x.icc == 0x47524159u ? 1u : x.icc == 0x434D594Bu ? 4u : x.icc == 0x52474220u ? 3u
+                  : nch <= 2u ? 1u : nch == 3u ? 3u : 4u;
+
+    if (ncol > nch) ncol = nch >= 3u ? 3u : 1u;
+    if (x.ndef) {
+      for (k = 0; k < x.ndef; k++) info->opacity = info->opacity || (x.def[k].cn < nch && (x.def[k].typ == 1u || x.def[k].typ == 2u));
+    } else {
+      info->opacity = nch > ncol;
+    }
+  }
+  ok = true;
+
+done:
+  arena_free_all(&j->arena);
+  free(j);
+  return ok;
+}
+
 static jxopts_t
 opts_of(const im_open_config_t *c) {
   jxopts_t o;
@@ -2856,6 +2922,7 @@ jp2_dec_mem(ImImage               ** __restrict dest,
   return *dest ? IM_OK : IM_EBADF;
 }
 
+#if !IM_CODECS_ONLY
 IM_HIDE
 ImResult
 jp2_dec(ImImage         ** __restrict dest,
@@ -2897,3 +2964,4 @@ jp2_dec(ImImage         ** __restrict dest,
 
   return IM_OK;
 }
+#endif /* !IM_CODECS_ONLY */

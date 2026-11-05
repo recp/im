@@ -256,39 +256,6 @@ static void __attribute__((constructor)) verify_hashes(void) {
 }
 #endif
 
-/* the options as a decoder reads them */
-static im_open_config_t
-open_config(im_option_base_t *options[], ImOpenIntent openIntent) {
-  im_open_config_t  conf;
-  im_option_base_t *opt;
-
-  memset(&conf, 0, sizeof(conf));
-  conf.openIntent    = openIntent;
-  conf.byteOrder     = IM_BYTEORDER_ANY;
-  conf.supportsPal   = true;
-  conf.options       = options;
-  conf.jpegTransform = -1;
-
-  if (options) {
-    for (int i = 0; options[i]; i++) {
-      opt = options[i];
-      switch (opt->type) {
-        case IM_OPTION_ROW_PAD_LAST:         conf.rowPadding     = ((im_option_rowpadding_t*)opt)->pad;  break;
-        case IM_OPTION_BYTE_ORDER:           conf.byteOrder      = ((im_option_byteorder_t*)opt)->order; break;
-        case IM_OPTION_SUPPORTS_PALETTE:     conf.supportsPal    = ((im_option_bool_t*)opt)->on;         break;
-        case IM_OPTION_BGR_TO_RGB:           conf.bgr2rgb        = ((im_option_bool_t*)opt)->on;         break;
-        case IM_OPTION_THREADS:              conf.threads        = (uint32_t)((im_option_int_t*)opt)->value; break;
-        case IM_OPTION_JPEG_COLOR_TRANSFORM: conf.jpegTransform  = ((im_option_int_t*)opt)->value;       break;
-        case IM_OPTION_CMYK_AS_STORED:       conf.cmykAsStored   = ((im_option_bool_t*)opt)->on;         break;
-        case IM_OPTION_RGB_PADDED:           conf.rgbPadded      = ((im_option_bool_t*)opt)->on;         break;
-        case IM_OPTION_PALETTE_INDEXES:      conf.paletteIndexes = ((im_option_bool_t*)opt)->on;         break;
-        default: break;
-      }
-    }
-  }
-  return conf;
-}
-
 IM_EXPORT
 ImResult
 im_load(ImImage         ** __restrict dest,
@@ -304,7 +271,7 @@ im_load(ImImage         ** __restrict dest,
 
   /* TODO: currently file_type from file ext.  */
   filetype = IM_FILE_TYPE_AUTO;
-  conf     = open_config(options, openIntent);
+  conf     = im_config(options, openIntent);
 
   if (!filetype && (ext=strrchr(url,'.')) && (fn=extmap[hash_ext(ext+1)]))
     return fn(dest, url, &conf);
@@ -318,73 +285,3 @@ im_load(ImImage         ** __restrict dest,
 #endif
 }
 
-IM_EXPORT
-ImResult
-im_load_mem(ImImage         ** __restrict dest,
-            const void       * __restrict data,
-            size_t                        len,
-            im_option_base_t *            options[],
-            ImOpenIntent                  openIntent) {
-  static const uint8_t jp2sig[12] = { 0, 0, 0, 12, 'j', 'P', ' ', ' ', 13, 10, 0x87, 10 };
-  const uint8_t       *p = data;
-  im_open_config_t     conf;
-
-  if (!dest) return IM_EBADF;
-  *dest = NULL;
-  if (!p || len < 4u) return IM_EBADF;
-  conf = open_config(options, openIntent);
-
-  /* by its first bytes */
-#if IM_WITH_JPG
-  if (p[0] == 0xFFu && p[1] == 0xD8u) return jpg_dec_mem(dest, p, len, &conf);
-#endif
-#if IM_WITH_JP2
-  if ((len >= 12u && !memcmp(p, jp2sig, 12u)) || (p[0] == 0xFFu && p[1] == 0x4Fu && p[2] == 0xFFu && p[3] == 0x51u)) {
-    return jp2_dec_mem(dest, p, len, &conf);
-  }
-#endif
-  (void)jp2sig;
-  (void)conf;
-  return IM_EBADF;
-}
-
-IM_EXPORT
-ImResult
-im_free(ImImage * __restrict im) {
-  if (!im) return IM_OK;
-
-  if (im->file.mmap) {
-    im_unmap(im->file.raw, im->file.size);
-  } else if (im->file.mustfree) {
-    free(im->file.raw);
-  }
-
-  if (im->data.data) {
-    free(im->data.data);
-  }
-
-  if (im->background)
-    free(im->background);
-
-  if (im->chrm)
-    free(im->chrm);
-
-  if (im->iccProfile)
-    free(im->iccProfile);
-
-  if (im->physicalDim)
-    free(im->physicalDim);
-
-  if (im->timeStamp)
-    free(im->timeStamp);
-
-  if (im->transparency) {
-    if (im->transparency->value.pal.alpha)
-      free(im->transparency->value.pal.alpha);
-    free(im->transparency);
-  }
-
-  free(im);
-
-  return IM_OK;
-}

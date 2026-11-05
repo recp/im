@@ -25,6 +25,11 @@ jpg_dec(ImImage         ** __restrict dest,
         const char       * __restrict path,
         im_open_config_t * __restrict open_config);
 
+/* the headers' word on `data` (im_info_mem); false: not a JPEG frame */
+IM_HIDE
+bool
+jpg_info(const uint8_t *data, size_t len, ImInfo *info);
+
 /* `data`, `len` bytes, decoded: what the file would give */
 IM_HIDE
 ImResult

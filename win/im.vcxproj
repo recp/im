@@ -191,6 +191,7 @@
     <ClInclude Include="..\src\sampler.h" />
     <ClInclude Include="..\src\str.h" />
     <ClInclude Include="..\src\thread\common.h" />
+    <ClInclude Include="..\src\thread\none.h" />
     <ClInclude Include="..\src\thread\thread.h" />
     <ClInclude Include="..\src\thread\pool.h" />
     <ClInclude Include="..\src\win\thread.h" />
@@ -199,6 +200,7 @@
     <ClCompile Include="..\src\color.c" />
     <ClCompile Include="..\src\file.c" />
     <ClCompile Include="..\src\im.c" />
+    <ClCompile Include="..\src\load.c" />
     <ClCompile Include="..\src\io\bmp\bmp.c" />
     <ClCompile Include="..\src\io\bmp\dib.c" />
     <ClCompile Include="..\src\io\jp2\jp2.c" />

@@ -16,12 +16,20 @@ set(IM_BUILD)
 option(IM_SHARED "Shared build" ON)
 option(IM_STATIC "Static build" OFF)
 option(IM_USE_TEST "Enable Tests" OFF)
+# the codecs alone, from memory (im_load_mem, im_info_mem, im_free): JPEG,
+# JPEG 2000 and their pool; no file layer, no other format, no submodule,
+# no framework. IM_NO_THREADS: no thread layer either (the pool inline;
+# WASI without -pthread is so on its own)
+option(IM_CODECS_ONLY "JPEG and JPEG 2000 from memory alone" OFF)
+option(IM_NO_THREADS "No threads (decoders run on the caller's)" OFF)
 
 # The formats built in: all, or some of these (png alone needs the defl
 # and huff submodules)
 set(IM_ALL_FORMATS png bmp ppm qoi tga jpg jp2 jxl heic)
 set(IM_FORMATS "all" CACHE STRING "Formats built in: all, or a list of ${IM_ALL_FORMATS}")
-if(IM_FORMATS STREQUAL "all")
+if(IM_CODECS_ONLY)
+  set(IM_ON jpg jp2)
+elseif(IM_FORMATS STREQUAL "all")
   set(IM_ON ${IM_ALL_FORMATS})
 else()
   set(IM_ON ${IM_FORMATS})
@@ -111,7 +119,27 @@ if("png" IN_LIST IM_ON)
     add_subdirectory(deps/huff)
   endif()
 endif()
-add_subdirectory(src)
+if(IM_CODECS_ONLY)
+  # README's codec list
+  target_sources(${PROJECT_NAME} PRIVATE
+    src/load.c
+    src/io/jpg/jpg.c src/io/jpg/arith.c src/io/jpg/huff.c src/io/jpg/idct.c src/io/jpg/sample.c
+    src/io/jp2/jp2.c
+    src/thread/pool.c)
+  if(NOT IM_NO_THREADS)
+    if(WIN32)
+      target_sources(${PROJECT_NAME} PRIVATE src/win/thread.c)
+    else()
+      target_sources(${PROJECT_NAME} PRIVATE src/posix/thread.c)
+    endif()
+  endif()
+  target_compile_definitions(${PROJECT_NAME} PRIVATE IM_CODECS_ONLY=1)
+else()
+  add_subdirectory(src)
+endif()
+if(IM_NO_THREADS)
+  target_compile_definitions(${PROJECT_NAME} PRIVATE IM_NO_THREADS=1)
+endif()
 
 # the formats picked: src/formats.h's IM_WITH_<FORMAT> (all where none is)
 if(NOT IM_FORMATS STREQUAL "all" OR NOT APPLE)
@@ -148,14 +176,14 @@ if("png" IN_LIST IM_ON)
   )
 endif()
 
-if(APPLE)
+if(APPLE AND NOT IM_CODECS_ONLY)
     target_link_libraries(${PROJECT_NAME}
         PRIVATE "-framework Foundation"
         PRIVATE "-framework CoreImage"
         PRIVATE "-framework CoreGraphics"
         PRIVATE "-framework ImageIO"
     )
-elseif(UNIX)
+elseif(UNIX AND NOT APPLE)
     target_link_libraries(${PROJECT_NAME} PRIVATE m)
 endif()
 

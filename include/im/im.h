@@ -256,6 +256,33 @@ im_load(ImImage         ** __restrict dest,
         im_option_base_t *            options[],
         ImOpenIntent                  openIntent);
 
+/* how an image's coded (im_info_mem) */
+typedef enum ImCoding {
+  IM_CODING_UNKNOWN = 0,
+  IM_CODING_BASELINE,     /* JPEG: SOF0 */
+  IM_CODING_EXTENDED,     /* SOF1, SOF9 */
+  IM_CODING_PROGRESSIVE,  /* SOF2, SOF10 */
+  IM_CODING_LOSSLESS,     /* SOF3, SOF11 */
+  IM_CODING_HIERARCHICAL, /* SOF5–7, SOF13–15 (not decoded yet) */
+  IM_CODING_JPEG2000
+} ImCoding;
+
+/* what an image's headers say, nothing decoded */
+typedef struct ImInfo {
+  ImFileFormatType fileFormatType;   /* JPEG, JP2 or J2K */
+  ImCoding         coding;
+  uint32_t         width, height;    /* a JPEG's height from its DNL where the frame has none */
+  uint32_t         components;       /* in the file (JPEG 2000: the codestream's) */
+  uint32_t         bitsPerComponent; /* the deepest component's */
+  uint32_t         levels;           /* JPEG 2000: resolution levels, the main header's decompositions + 1 */
+  bool             arithmetic;       /* JPEG: arithmetic coded */
+  bool             opacity;          /* JPEG 2000: a channel of opacity (cdef, or more than the colours) */
+} ImInfo;
+
+IM_EXPORT
+ImResult
+im_info_mem(ImInfo * __restrict info, const void * __restrict data, size_t len);
+
 /* an image in memory: JPEG, JPEG 2000 (a JP2 file or a codestream).
    `data` is read, not kept: the image owns nothing of it. IM_EBADF where
    it isn't one of those or doesn't decode */
