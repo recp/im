@@ -16,12 +16,11 @@
 
 /*
  * JPEG 2000 (io/jp2) on data/jp2's fixtures (make.sh made them): each one's
- * pixels hashed as the PDF engine's test_jpx hashes its decode, which is
- * PDFium's (OpenJPEG's) to the byte, with im's own layouts (CMYK, gray and
- * opacity, deeper samples in 16 bits, a premultiplied opacity kept); 16-bit
- * samples as ffmpeg decodes them; ImageIO's file, large enough for the
- * threads, and its ICC profile; every fifth cut of two files decoding as
- * far as it goes, or not at all.
+ * pixels hashed in 8 bits as OpenJPEG gives them (to the byte), with im's
+ * own layouts (CMYK, gray and opacity, deeper samples in 16 bits, a
+ * premultiplied opacity kept); 16-bit samples as ffmpeg decodes them;
+ * ImageIO's file, large enough for the threads, and its ICC profile; every
+ * fifth cut of two files decoding as far as it goes, or not at all.
  */
 
 #include "../include/common.h"
@@ -65,13 +64,12 @@ fixture(const char *name, ImByteOrder order) {
   return load(path, order);
 }
 
-/* the PDF engine's test_jpx hash of `im`: its colours (an 0xFF after an
-   RGB pixel's three, the engine's RGBX), 16-bit samples taken back to their
-   `depth` and brought to 8 as the engine does (their top 8 bits and the
-   next one); its opacity apart. False: a 16-bit sample isn't one of the
-   depth's spread over 0–65535 */
+/* an 8-bit hash of `im`: its colours (an 0xFF after an RGB pixel's three,
+   RGBX), 16-bit samples taken back to their `depth` and brought to 8 as
+   OpenJPEG does (their top 8 bits and the next one); its opacity apart.
+   False: a 16-bit sample isn't one of the depth's spread over 0–65535 */
 static bool
-pdf_hash(const ImImage *im, uint32_t depth, uint32_t *colour, uint32_t *alpha) {
+hash8(const ImImage *im, uint32_t depth, uint32_t *colour, uint32_t *alpha) {
   uint32_t ncol, comps, max, i, u;
   size_t   n;
   bool     wide;
@@ -142,7 +140,7 @@ TEST_IMPL(jp2_fixtures) {
     { "parts.j2k",       IM_FORMAT_RGB,        8,  8,  J2K, RGB,  NONE,   0x868E41C2u, 0 },
     /* gray-layers.jp2's packets under a POC */
     { "poc.j2k",         IM_FORMAT_GRAY,       8,  8,  J2K, GRAY, NONE,   0x937121C4u, 0 },
-    /* four components bare: CMYK (its opacity, as the engine has it, none) */
+    /* four components bare: CMYK (no opacity) */
     { "cmyk.j2k",        IM_FORMAT_CMYK,       8,  8,  J2K, CMYK, NONE,   0x6047FBEDu, 0 },
     /* gray and opacity, 9/7 */
     { "gray-alpha.jp2",  IM_FORMAT_GRAY_ALPHA, 8,  8,  JP2, GRAY, LAST,   0x8BC82C1Eu, 0x4BCBF784u },
@@ -176,7 +174,7 @@ TEST_IMPL(jp2_fixtures) {
     ASSERT(im->alphaInfo == (ImAlphaInfo)cases[i].alpha_info);
     ASSERT(!im->iccProfile && !im->pal);
 
-    ASSERT(pdf_hash(im, cases[i].depth, &hash, &alpha));
+    ASSERT(hash8(im, cases[i].depth, &hash, &alpha));
     if (hash != cases[i].hash || (cases[i].alpha && alpha != cases[i].alpha)) {
       fprintf(stderr, "  %s: 0x%08X 0x%08X\n", cases[i].name, hash, alpha);
     }
@@ -231,8 +229,8 @@ TEST_IMPL(jp2_16bit) {
   TEST_SUCCESS
 }
 
-/* ImageIO's file: 307,200 pixels decode on the threads to the PDF engine's
-   pixels; its sRGB profile comes with them */
+/* ImageIO's file: 307,200 pixels decode on the threads to the same pixels;
+   its sRGB profile comes with them */
 TEST_IMPL(jp2_threads) {
   ImImage       *im;
   const uint8_t *icc;
@@ -244,7 +242,7 @@ TEST_IMPL(jp2_threads) {
   ASSERT(im->format == IM_FORMAT_RGB && im->bitsPerComponent == 8u);
   ASSERT(im->fileFormatType == IM_FILEFORMATTYPE_JP2);
 
-  ASSERT(pdf_hash(im, 8u, &hash, &alpha));
+  ASSERT(hash8(im, 8u, &hash, &alpha));
   if (hash != 0xF1F2CB8Du) fprintf(stderr, "  imageio.jp2: 0x%08X\n", hash);
   ASSERT(hash == 0xF1F2CB8Du);
 

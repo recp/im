@@ -16,8 +16,9 @@ TODO
 - [ ] Streaming Decode + Progresive Support 
 - [ ] GPU support
 - [x] Cocoa and Win32 helpers
-- [x] From memory (`im_load_mem`: JPEG, JPEG 2000), with what a PDF asks: threads, a JPEG's colour
-      transform (DCTDecode's /ColorTransform), CMYK as stored, RGB padded to RGB0, a palette's indexes
+- [x] From memory (`im_load_mem`, `im_info_mem`: JPEG, JPEG 2000), with options: threads, a JPEG's colour
+      transform said by its container, CMYK as stored, RGB padded to RGB0, a palette's indexes, 8 bits
+      by OpenJPEG's rounding, the opacity apart (or not decoded)
 - [x] Formats picked at build time: `-DIM_FORMATS="jpg;jp2"` (default `all`); only png needs the
       defl and huff submodules
 - [x] WebAssembly (WASI): wasi-sdk's toolchain file, `-DIM_STATIC=ON` (`-msimd128` for SIMD128);

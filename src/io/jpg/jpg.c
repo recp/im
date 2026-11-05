@@ -798,7 +798,7 @@ guess_space(const jpg_t *j) {
   }
 }
 
-/* the colours: as guessed, or the caller's word (a PDF's /ColorTransform)
+/* the colours: as guessed, or the caller's word (a container's flag)
    on whether three or four components are transformed */
 static jspace_t
 space_of(const jpg_t *j) {
@@ -860,7 +860,7 @@ decode_stream(jpg_t *j, ImImage *im, ImByteOrder order, uint8_t **padp) {
     }
     len -= 2u;
     /* cut inside a segment after a scan: the end there, as if EOI came (as
-       PDFium shows it; where libjpeg reads such a segment's fake bytes
+       a viewer that stops at the error shows it; where libjpeg reads such a segment's fake bytes
        without failing, nothing after it decodes either) */
     if (tail && m != 0xDAu && j->nscans) break;
 

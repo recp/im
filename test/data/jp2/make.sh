@@ -1,15 +1,14 @@
 #!/bin/sh
 # Makes the JPEG 2000 fixtures (ffmpeg 9's encoder made the committed ones)
 # from one synthetic 37 × 23 picture: gradients, a ring, stripes. Each is
-# PDFium's (OpenJPEG's) pixels to the byte as the decoder reads it (the
-# PDF engine's, whose test data these are, and jp2.c's).
+# OpenJPEG's pixels to the byte as jp2.c reads it.
 # Not made here: ppt.j2k, ppm.j2k and parts.j2k are ict-tiles.j2k with its
 # packet headers moved into each tile-part's PPT, into the main header's
 # PPM, and with each tile in two tile-parts (the first ones before any
 # second), and poc.j2k is gray-layers.jp2's packets reordered under a POC
 # (RLCP for two resolutions and two layers, then LRCP), written after COD.
-# A scratch transcoder did that from the engine's packet boundaries; each
-# decodes, in PDFium too, to its source's pixels.
+# A scratch transcoder did that from the packets' boundaries; each
+# decodes, in OpenJPEG too, to its source's pixels.
 set -eu
 cd "$(dirname "$0")"
 python3 - <<'PY'
