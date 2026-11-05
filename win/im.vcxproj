@@ -166,6 +166,10 @@
     <ClInclude Include="..\src\io\bmp\dib.h" />
     <ClInclude Include="..\src\io\common.h" />
     <ClInclude Include="..\src\io\jp2\jp2.h" />
+    <ClInclude Include="..\src\io\jpg\jpg.h" />
+    <ClInclude Include="..\src\io\jpg\jpgint.h" />
+    <ClInclude Include="..\src\io\jpg\idct_neon.h" />
+    <ClInclude Include="..\src\io\jpg\sample_neon.h" />
     <ClInclude Include="..\src\io\png\png.h" />
     <ClInclude Include="..\src\io\ppm\common.h" />
     <ClInclude Include="..\src\io\ppm\pam.h" />
@@ -182,6 +186,7 @@
     <ClInclude Include="..\src\str.h" />
     <ClInclude Include="..\src\thread\common.h" />
     <ClInclude Include="..\src\thread\thread.h" />
+    <ClInclude Include="..\src\thread\pool.h" />
     <ClInclude Include="..\src\win\thread.h" />
   </ItemGroup>
   <ItemGroup>
@@ -191,6 +196,11 @@
     <ClCompile Include="..\src\io\bmp\bmp.c" />
     <ClCompile Include="..\src\io\bmp\dib.c" />
     <ClCompile Include="..\src\io\jp2\jp2.c" />
+    <ClCompile Include="..\src\io\jpg\arith.c" />
+    <ClCompile Include="..\src\io\jpg\huff.c" />
+    <ClCompile Include="..\src\io\jpg\idct.c" />
+    <ClCompile Include="..\src\io\jpg\jpg.c" />
+    <ClCompile Include="..\src\io\jpg\sample.c" />
     <ClCompile Include="..\src\io\png\png.c" />
     <ClCompile Include="..\src\io\ppm\pam.c" />
     <ClCompile Include="..\src\io\ppm\pbm.c" />
@@ -203,6 +213,7 @@
     <ClCompile Include="..\src\mm\mmap.c" />
     <ClCompile Include="..\src\pp\pp.c" />
     <ClCompile Include="..\src\win\dllmain.c" />
+    <ClCompile Include="..\src\thread\pool.c" />
     <ClCompile Include="..\src\win\thread.c" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

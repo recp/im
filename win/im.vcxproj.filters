@@ -161,6 +161,18 @@
     <ClInclude Include="..\src\mm\mmap.h">
       <Filter>src\mm</Filter>
     </ClInclude>
+    <ClInclude Include="..\src\io\jpg\jpg.h">
+      <Filter>src\io\jpg</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\io\jpg\jpgint.h">
+      <Filter>src\io\jpg</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\io\jpg\idct_neon.h">
+      <Filter>src\io\jpg</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\io\jpg\sample_neon.h">
+      <Filter>src\io\jpg</Filter>
+    </ClInclude>
     <ClInclude Include="..\src\io\jp2\jp2.h">
       <Filter>src\io\jp2</Filter>
     </ClInclude>
@@ -219,6 +231,21 @@
     </ClCompile>
     <ClCompile Include="..\src\mm\mmap.c">
       <Filter>src\mm</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\io\jpg\arith.c">
+      <Filter>src\io\jpg</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\io\jpg\huff.c">
+      <Filter>src\io\jpg</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\io\jpg\idct.c">
+      <Filter>src\io\jpg</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\io\jpg\jpg.c">
+      <Filter>src\io\jpg</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\io\jpg\sample.c">
+      <Filter>src\io\jpg</Filter>
     </ClCompile>
     <ClCompile Include="..\src\io\jp2\jp2.c">
       <Filter>src\io\jp2</Filter>
