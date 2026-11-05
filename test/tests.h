@@ -39,6 +39,7 @@ TEST_DECLARE(jpg_fixtures)
 TEST_DECLARE(jpg_16bit)
 TEST_DECLARE(jpg_icc)
 TEST_DECLARE(jpg_truncated)
+TEST_DECLARE(jpg_cut_segment)
 #endif
 
 #if IM_WITH_JPG && IM_WITH_JP2
@@ -65,6 +66,7 @@ TEST_LIST {
   TEST_ENTRY(jpg_16bit)
   TEST_ENTRY(jpg_icc)
   TEST_ENTRY(jpg_truncated)
+  TEST_ENTRY(jpg_cut_segment)
 #endif
 
 #if IM_WITH_JPG && IM_WITH_JP2

@@ -275,3 +275,47 @@ TEST_IMPL(jpg_truncated) {
 
   TEST_SUCCESS
 }
+
+/* cut inside a segment after a scan (here a DHT between progressive
+   scans): the scans so far, as if EOI came where the segment begins */
+TEST_IMPL(jpg_cut_segment) {
+  uint8_t *d;
+  size_t   n, at = 2u, scans = 0u, dht = 0u;
+
+  ASSERT((d = read_all("prog.jpg", &n)));
+  /* the first DHT after a scan */
+  while (at + 4u <= n && !dht) {
+    uint32_t m = d[at + 1u], len = (uint32_t)d[at + 2u] << 8 | d[at + 3u];
+
+    if (m == 0xC4u && scans) {
+      dht = at;
+      break;
+    }
+    at += 2u + len;
+    if (m == 0xDAu) {
+      /* past the scan's data: the next marker but RSTn and stuffing */
+      while (at + 1u < n && !(d[at] == 0xFFu && d[at + 1u] && d[at + 1u] != 0xFFu && (d[at + 1u] < 0xD0u || d[at + 1u] > 0xD7u))) at++;
+      scans++;
+    }
+  }
+  ASSERT(dht && dht + 12u < n);
+  {
+    ImImage *a = NULL, *b = NULL;
+    uint8_t *e = malloc(dht + 2u);
+
+    /* the cut one, and the same with an EOI where the DHT began */
+    ASSERT(e);
+    memcpy(e, d, dht);
+    e[dht]      = 0xFFu;
+    e[dht + 1u] = 0xD9u;
+    ASSERT(im_load_mem(&a, d, dht + 12u, NULL, IM_OPEN_INTENT_READONLY) == IM_OK && a);
+    ASSERT(im_load_mem(&b, e, dht + 2u, NULL, IM_OPEN_INTENT_READONLY) == IM_OK && b);
+    ASSERT(a->len == b->len && !memcmp(a->data.data, b->data.data, a->len));
+    im_free(a);
+    im_free(b);
+    free(e);
+  }
+  free(d);
+
+  TEST_SUCCESS
+}
