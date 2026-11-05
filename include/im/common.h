@@ -47,6 +47,9 @@ extern "C" {
 
 #if defined(_MSC_VER) || defined(__MINGW32__) || defined(__MINGW64__)
 #  define IM_WINAPI
+#endif
+
+#if defined(_MSC_VER)
 #  pragma warning (disable : 4068) /* disable unknown pragma warnings */
 #endif
 
