@@ -28,8 +28,13 @@ TODO
   - [x] custom unzip/deflate - in progress -
   - [ ] Deflate & IDAT optimization - in progress -
   - [ ] convert to user selected format
-- [ ] JPEG 2000
-  - [x] Apple platform
+- [x] JPEG 2000 (JP2, J2K)
+  - [x] Part 1: tiles, precincts, layers, the five progressions, POC, PPM/PPT, SOP/EPH, ROI
+  - [x] every code-block style, 5/3 and 9/7, RCT and ICT, subsampling
+  - [x] gray, RGB, RGBA, CMYK; 8 and 16 bits; palette, sYCC, ICC profile
+  - [x] threads
+  - [ ] HT (Part 15), Part 2 (Apple's decoder reads them on Apple platforms)
+  - [ ] SIMD
 - [ ] JXL
   - [x] Apple platform
 - [ ] TIFF

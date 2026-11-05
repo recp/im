@@ -121,6 +121,8 @@ if(APPLE)
         PRIVATE "-framework CoreGraphics"
         PRIVATE "-framework ImageIO"
     )
+elseif(UNIX)
+    target_link_libraries(${PROJECT_NAME} PRIVATE m)
 endif()
 
 install(TARGETS ${PROJECT_NAME}
