@@ -30,7 +30,8 @@ TODO
       `src/thread/pool.c`, and `src/posix/thread.c` or `src/win/thread.c` (none without threads), with
       `IM_CODECS_ONLY=1`, `IM_STATIC`, `include/` and `src/` on the include path
 - [x] `-DIM_PREFIX=app_`: a codec-only build's every symbol under that prefix (callers' names unchanged,
-      `im.h` renames them too), so it links beside another copy of im
+      `im.h` renames them too; the same define for im's sources and the caller's), so it links beside
+      another copy of im; `test/check-prefix.sh` checks none is left bare
 - [x] The caller's threads (`im_option_runner`): a decode's parallel work on them, none of im's started
 - [x] Into the caller's memory (`im_option_dest`): rows at its stride, no allocation for the pixels
 - [x] JPEG (libjpeg-turbo's pixels, to the byte)

@@ -29,6 +29,7 @@
 #  define im_pool_new           IM_PFX(im_pool_new)
 #  define im_pool_run           IM_PFX(im_pool_run)
 #  define im_pool_size          IM_PFX(im_pool_size)
+#  define im_pool_wrap          IM_PFX(im_pool_wrap)
 #  define jp2_dec_mem           IM_PFX(jp2_dec_mem)
 #  define jp2_info              IM_PFX(jp2_info)
 #  define jpg_dc8               IM_PFX(jpg_dc8)
