@@ -179,7 +179,16 @@
     <ClInclude Include="..\src\io\jpg\idct_x86.h">
       <Filter>src\io\jpg</Filter>
     </ClInclude>
+    <ClInclude Include="..\src\io\jpg\idct_pass.h">
+      <Filter>src\io\jpg</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\io\jpg\idct_wasm.h">
+      <Filter>src\io\jpg</Filter>
+    </ClInclude>
     <ClInclude Include="..\src\io\jpg\sample_x86.h">
+      <Filter>src\io\jpg</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\io\jpg\sample_wasm.h">
       <Filter>src\io\jpg</Filter>
     </ClInclude>
     <ClInclude Include="..\src\io\jp2\jp2.h">
