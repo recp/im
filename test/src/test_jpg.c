@@ -319,3 +319,59 @@ TEST_IMPL(jpg_cut_segment) {
 
   TEST_SUCCESS
 }
+
+/* the first `m` segment's place (its FF) before the first scan, or 0 */
+static size_t
+segment_at(const uint8_t *d, size_t n, uint32_t m) {
+  size_t at = 2u;
+
+  while (at + 4u <= n && d[at] == 0xFFu) {
+    if (d[at + 1u] == m) return at;
+    if (d[at + 1u] == 0xDAu) break;
+    at += 2u + ((size_t)d[at + 2u] << 8 | d[at + 3u]);
+  }
+  return 0u;
+}
+
+/* refused before anything is decoded where it will be anyway: a scan whose
+   component's quantization table no DQT gave (as libjpeg); and a big frame
+   from little data whose stream goes wrong after its scan (its structure
+   read first), while the same frame whole decodes (the rest gray) */
+TEST_IMPL(jpg_refused_early) {
+  static const uint8_t stray[] = { 0xFFu, 0xDAu, 0x00u, 0x08u, 0x01u, 0x09u, 0x00u, 0x00u, 0x3Fu, 0x00u, 0xFFu, 0xD9u };
+  static const char   *names[] = { "420.jpg", "prog.jpg" };
+  size_t               k;
+
+  for (k = 0; k < sizeof(names) / sizeof(names[0]); k++) {
+    ImImage *im = NULL;
+    uint8_t *d, *e;
+    size_t   n, q, sof, len;
+
+    ASSERT((d = read_all(names[k], &n)) && (e = malloc(n + sizeof(stray))));
+    ASSERT((q = segment_at(d, n, 0xDBu)) && (sof = segment_at(d, n, k ? 0xC2u : 0xC0u)));
+
+    /* its first DQT left out */
+    len = 2u + ((size_t)d[q + 2u] << 8 | d[q + 3u]);
+    memcpy(e, d, q);
+    memcpy(e + q, d + q + len, n - q - len);
+    ASSERT(im_load_mem(&im, e, n - len, NULL, IM_OPEN_INTENT_READONLY) != IM_OK && !im);
+
+    /* 2048×2048 from the same data */
+    memcpy(e, d, n);
+    e[sof + 5u] = e[sof + 7u] = 0x08u;
+    e[sof + 6u] = e[sof + 8u] = 0x00u;
+    ASSERT(im_load_mem(&im, e, n, NULL, IM_OPEN_INTENT_READONLY) == IM_OK && im);
+    ASSERT(im->width == 2048u && im->height == 2048u);
+    im_free(im);
+    im = NULL;
+
+    /* and a scan after its end naming no component it has */
+    ASSERT(e[n - 2u] == 0xFFu && e[n - 1u] == 0xD9u);
+    memcpy(e + n - 2u, stray, sizeof(stray));
+    ASSERT(im_load_mem(&im, e, n - 2u + sizeof(stray), NULL, IM_OPEN_INTENT_READONLY) != IM_OK && !im);
+    free(e);
+    free(d);
+  }
+
+  TEST_SUCCESS
+}
