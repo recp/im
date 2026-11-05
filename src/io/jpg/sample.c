@@ -55,12 +55,19 @@ up_method(const jpg_t *j, const jcomp_t *c) {
     u.how = UP_FULL;
   } else if (hi * 2u == ho && vi == vo) {
     if (fancy && c->cw > 2u) u.how = UP_H2V1_FANCY;
-    else u.how = UP_INT, u.hx = 2u;
+    else {
+      u.how = UP_INT;
+      u.hx  = 2u;
+    }
   } else if (hi == ho && vi * 2u == vo && fancy) {
     u.how = UP_H1V2_FANCY;
   } else if (hi * 2u == ho && vi * 2u == vo) {
     if (fancy && c->cw > 2u) u.how = UP_H2V2_FANCY;
-    else u.how = UP_INT, u.hx = 2u, u.vx = 2u;
+    else {
+      u.how = UP_INT;
+      u.hx  = 2u;
+      u.vx  = 2u;
+    }
   } else if (ho % hi == 0u && vo % vi == 0u) {
     u.how = UP_INT;
     u.hx  = ho / hi;

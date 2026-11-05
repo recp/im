@@ -181,11 +181,26 @@ smooth_comp(jpg_t *j, uint32_t ci, const int8_t *latch, const int8_t *prev, uint
                              - 8 * DC23 - 6 * DC24 - 2 * DC25), Q00, 0);
       }
       jpg_put(j, c, ws, bx, by);
-      DC01 = DC02, DC02 = DC03, DC03 = DC04, DC04 = DC05;
-      DC06 = DC07, DC07 = DC08, DC08 = DC09, DC09 = DC10;
-      DC11 = DC12, DC12 = DC13, DC13 = DC14, DC14 = DC15;
-      DC16 = DC17, DC17 = DC18, DC18 = DC19, DC19 = DC20;
-      DC21 = DC22, DC22 = DC23, DC23 = DC24, DC24 = DC25;
+      DC01 = DC02;
+      DC02 = DC03;
+      DC03 = DC04;
+      DC04 = DC05;
+      DC06 = DC07;
+      DC07 = DC08;
+      DC08 = DC09;
+      DC09 = DC10;
+      DC11 = DC12;
+      DC12 = DC13;
+      DC13 = DC14;
+      DC14 = DC15;
+      DC16 = DC17;
+      DC17 = DC18;
+      DC18 = DC19;
+      DC19 = DC20;
+      DC21 = DC22;
+      DC22 = DC23;
+      DC23 = DC24;
+      DC24 = DC25;
     }
   }
 }
@@ -433,7 +448,10 @@ read_sos(jpg_t *j, const uint8_t *s, uint32_t len) {
         for (k = j->ss; k <= j->se; k++) c->bits[k] = (int8_t)j->al;
       }
     } else {
-      j->ss = 0u, j->se = 63u, j->ah = 0u, j->al = 0u;
+      j->ss = 0u;
+    j->se = 63u;
+    j->ah = 0u;
+    j->al = 0u;
     }
     for (i = 0; i < n; i++) {
       const jcomp_t *c = &j->comp[j->scomp[i]];
@@ -460,7 +478,10 @@ read_sos(jpg_t *j, const uint8_t *s, uint32_t len) {
       for (k = j->ss; k <= j->se; k++) c->bits[k] = (int8_t)j->al;
     }
   } else {
-    j->ss = 0u, j->se = 63u, j->ah = 0u, j->al = 0u;
+    j->ss = 0u;
+    j->se = 63u;
+    j->ah = 0u;
+    j->al = 0u;
     for (i = 0; i < n; i++) {
       const jcomp_t *c = &j->comp[j->scomp[i]];
 

@@ -313,7 +313,14 @@ block_seq(jbits_t *b, const jhuff_t *dct, const jhuff_t *act, int32_t *dc, int16
     DROP(b, e & 31u);
     diff = (int32_t)e >> 16;
   } else {
-    uint32_t s = e ? (DROP(b, e & 31u), (e >> 8) & 15u) : huff_long(b, dct) & 15u;
+    uint32_t s;
+
+    if (e) {
+      DROP(b, e & 31u);
+      s = (e >> 8) & 15u;
+    } else {
+      s = huff_long(b, dct) & 15u;
+    }
 
     diff = extend(get_bits(b, s), s);
   }
@@ -334,7 +341,12 @@ block_seq(jbits_t *b, const jhuff_t *dct, const jhuff_t *act, int32_t *dc, int16
         continue;
       }
     } else {
-      rs = e ? (DROP(b, e & 31u), (e >> 8) & 0xFFu) : huff_long(b, act);
+      if (e) {
+        DROP(b, e & 31u);
+        rs = (e >> 8) & 0xFFu;
+      } else {
+        rs = huff_long(b, act);
+      }
       if ((s = rs & 15u)) {
         k += rs >> 4;
         blk[jpg_natural[k]] = (int16_t)extend(get_bits(b, s), s);
@@ -887,7 +899,14 @@ block_drop(jbits_t *b, const jhuff_t *dct, const jhuff_t *act) {
     DROP(b, e & 31u);
     diff = (int32_t)e >> 16;
   } else {
-    uint32_t s = e ? (DROP(b, e & 31u), (e >> 8) & 15u) : huff_long(b, dct) & 15u;
+    uint32_t s;
+
+    if (e) {
+      DROP(b, e & 31u);
+      s = (e >> 8) & 15u;
+    } else {
+      s = huff_long(b, dct) & 15u;
+    }
 
     diff = extend(get_bits(b, s), s);
   }
@@ -900,7 +919,12 @@ block_drop(jbits_t *b, const jhuff_t *dct, const jhuff_t *act) {
       DROP(b, e & 31u);
       rs = (e >> 8) & 0xFFu;
     } else {
-      rs = e ? (DROP(b, e & 31u), (e >> 8) & 0xFFu) : huff_long(b, act);
+      if (e) {
+        DROP(b, e & 31u);
+        rs = (e >> 8) & 0xFFu;
+      } else {
+        rs = huff_long(b, act);
+      }
       if (rs & 15u) {
         if (b->n < 16) refill(b);
         DROP(b, rs & 15u);
