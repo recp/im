@@ -17,6 +17,9 @@
 #ifndef thread_common_h
 #define thread_common_h
 
+#include "../../include/im/prefix.h"
+#include "../prefix.h"
+
 #if defined(_MSC_VER)
 #  ifdef TH_STATIC
 #    define TH_EXPORT

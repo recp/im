@@ -22,6 +22,9 @@ option(IM_USE_TEST "Enable Tests" OFF)
 # WASI without -pthread is so on its own)
 option(IM_CODECS_ONLY "JPEG and JPEG 2000 from memory alone" OFF)
 option(IM_NO_THREADS "No threads (decoders run on the caller's)" OFF)
+# every symbol under a prefix (an identifier's start, e.g. app_): for a
+# codec-only build linked beside another copy of im
+set(IM_PREFIX "" CACHE STRING "A prefix for im's symbols (codec-only builds)")
 
 # The formats built in: all, or some of these (png alone needs the defl
 # and huff submodules)
@@ -139,6 +142,9 @@ else()
 endif()
 if(IM_NO_THREADS)
   target_compile_definitions(${PROJECT_NAME} PRIVATE IM_NO_THREADS=1)
+endif()
+if(IM_PREFIX)
+  target_compile_definitions(${PROJECT_NAME} PUBLIC IM_PREFIX=${IM_PREFIX})
 endif()
 
 # the formats picked: src/formats.h's IM_WITH_<FORMAT> (all where none is)

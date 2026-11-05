@@ -16,6 +16,8 @@
 
 #ifndef im_common_h
 #define im_common_h
+
+#include "prefix.h"
 #ifdef __cplusplus
 extern "C" {
 #endif

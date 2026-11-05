@@ -18,6 +18,7 @@
 #define src_common_h
 
 #include "../include/im/common.h"
+#include "prefix.h"
 #include "../include/im/im.h"
 
 #include "endian.h"
