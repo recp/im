@@ -22,6 +22,12 @@ TODO
       defl and huff submodules
 - [x] WebAssembly (WASI): wasi-sdk's toolchain file, `-DIM_STATIC=ON` (`-msimd128` for SIMD128);
       one thread, files read (no mmap)
+- [x] The codecs alone (`-DIM_CODECS_ONLY=ON`): JPEG and JPEG 2000 from memory (`im_load_mem`,
+      `im_info_mem`, `im_free`), no file layer, other formats, submodules or frameworks; `-DIM_NO_THREADS=ON`
+      (WASI without `-pthread` on its own) leaves the thread layer out, decoders on the caller's thread.
+      Built by hand: `src/load.c`, `src/io/jpg/{jpg,arith,huff,idct,sample}.c`, `src/io/jp2/jp2.c`,
+      `src/thread/pool.c`, and `src/posix/thread.c` or `src/win/thread.c` (none without threads), with
+      `IM_CODECS_ONLY=1`, `IM_STATIC`, `include/` and `src/` on the include path
 - [x] JPEG (libjpeg-turbo's pixels, to the byte)
   - [x] baseline, extended (8 and 12 bits), progressive; Huffman and arithmetic coding
   - [x] lossless, 2 to 16 bits
