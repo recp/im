@@ -1,2 +1,7 @@
 
 https://github.com/kaksmet/jpeg-decoder/
+
+JPEG: the decoder (src/io/jpg) gives libjpeg-turbo's pixels, so its inverse DCT, upsampling,
+colour conversion, block smoothing and handling of damaged data follow libjpeg-turbo's
+arithmetic. This software is based in part on the work of the Independent JPEG Group.
+https://libjpeg-turbo.org/

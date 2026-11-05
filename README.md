@@ -16,7 +16,14 @@ TODO
 - [ ] Streaming Decode + Progresive Support 
 - [ ] GPU support
 - [x] Cocoa and Win32 helpers
-- [ ] JPEG (In Progress)
+- [x] JPEG (libjpeg-turbo's pixels, to the byte)
+  - [x] baseline, extended (8 and 12 bits), progressive; Huffman and arithmetic coding
+  - [x] lossless, 2 to 16 bits
+  - [x] every sampling, restarts, Adobe/JFIF, CMYK and YCCK, ICC profile
+  - [x] cut streams and damage as libjpeg reads them, block smoothing
+  - [x] NEON IDCT, upsampling, colour; restart intervals and speculative Huffman on threads
+  - [ ] hierarchical, lossless arithmetic, DNL
+  - [ ] SSE/AVX2
 - [x] PNG (In Progress)
   - [x] palette
   - [x] color types
