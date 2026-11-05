@@ -858,6 +858,10 @@ decode_stream(jpg_t *j, ImImage *im, ImByteOrder order, uint8_t **padp) {
       }
     }
     len -= 2u;
+    /* cut inside a segment after a scan: the end there, as if EOI came (as
+       PDFium shows it; where libjpeg reads such a segment's fake bytes
+       without failing, nothing after it decodes either) */
+    if (tail && m != 0xDAu && j->nscans) break;
 
     switch (m) {
     case 0xC0: case 0xC1: case 0xC2: case 0xC3:
