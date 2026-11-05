@@ -563,14 +563,15 @@ scan_mcu(jctx_t *x, uint32_t n, uint32_t w) {
   }
 }
 
-/* a restart (libjpeg's process_restart, read_restart_marker and its
-   resync): the expected RSTn taken; a marker before it skipped, its
-   segment with it; one of the next two RSTs (or any other marker) left
-   unread, the interval reading zeros; any other RST taken for it */
-static void
-restart(jctx_t *x, uint32_t *next_rst, uint32_t *cur, bool *at_marker) {
-  const jdata_t *d = &x->j->sd;
-  uint32_t       want = *next_rst, m, i;
+/* libjpeg's read_restart_marker and its resync, on the segments: the
+   expected RSTn taken; a marker before it skipped, its segment with it;
+   one of the next two RSTs (or any other marker) left unread (true), the
+   interval reading zeros; any other RST taken for it. `cur` the segment
+   the next interval reads */
+IM_HIDE bool
+jpg_resync(const jdata_t *d, uint32_t *next_rst, uint32_t *cur) {
+  uint32_t want = *next_rst, m;
+  bool     at_marker = false;
 
   for (;;) {
     int action;
@@ -590,14 +591,23 @@ restart(jctx_t *x, uint32_t *next_rst, uint32_t *cur, bool *at_marker) {
       action = 1;
     }
     if (action == 3) {
-      *at_marker = true;
+      at_marker = true;
       break;
     }
     (*cur)++;
-    *at_marker = false;
     if (action == 1 || *cur >= d->nseg) break;
   }
   *next_rst = (*next_rst + 1u) & 7u;
+  return at_marker;
+}
+
+/* a restart (libjpeg's process_restart): predictions and runs reset, data
+   on from the segment the resync finds */
+static void
+restart(jctx_t *x, uint32_t *next_rst, uint32_t *cur, bool *at_marker) {
+  uint32_t i;
+
+  *at_marker = jpg_resync(&x->j->sd, next_rst, cur);
   for (i = 0; i < J_COMPS; i++) x->dc[i] = 0;
   x->eobrun = 0u;
   if (!*at_marker) x->lacking = false;

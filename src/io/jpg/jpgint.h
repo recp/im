@@ -125,6 +125,7 @@ typedef struct jpg {
   uint16_t  quant[4][64];     /* natural order */
   jhuff_t  *dc[4], *ac[4];    /* NULL: not defined */
   uint32_t  restart;          /* DRI's interval in MCUs; 0 none */
+  uint8_t   dc_l[16], dc_u[16], ac_k[16]; /* DAC's conditioning */
 
   /* markers that say what the samples are */
   bool      jfif, adobe;
@@ -157,6 +158,10 @@ IM_HIDE bool jpg_huff_build(jhuff_t *h, const uint8_t counts[16], const uint8_t 
 IM_HIDE void jpg_huff_std(jpg_t *j);
 IM_HIDE bool jpg_unstuff(jdata_t *d, const uint8_t *p, const uint8_t *end);
 IM_HIDE bool jpg_scan_huff(jpg_t *j, im_pool_t *pool);
+IM_HIDE bool jpg_resync(const jdata_t *d, uint32_t *next_rst, uint32_t *cur);
+
+/* arith.c */
+IM_HIDE bool jpg_scan_arith(jpg_t *j);
 
 /* idct.c */
 IM_HIDE void jpg_idct8(const int16_t *in, const uint16_t *q, void *out, size_t stride);

@@ -253,7 +253,7 @@ read_sof(jpg_t *j, uint32_t m, const uint8_t *s, uint32_t len) {
   case 3:  j->process = J_LOSSLESS;    break;
   default: j->process = J_SEQUENTIAL;  break;
   }
-  if (j->process == J_LOSSLESS || j->arith) return false; /* not yet */
+  if (j->process == J_LOSSLESS) return false; /* not yet */
   if (!j->width || !j->height || !j->ncomp || j->ncomp > J_COMPS || len != 6u + j->ncomp * 3u) return false;
   if (j->prec != 8u && j->prec != 12u) return false;
   j->idct = j->prec == 8u ? jpg_idct8 : jpg_idct12;
@@ -380,6 +380,32 @@ read_sos(jpg_t *j, const uint8_t *s, uint32_t len) {
   j->ah     = s[3u + n * 2u] >> 4;
   j->al     = s[3u + n * 2u] & 15u;
 
+  if (j->arith) {
+    bool dc = j->ss == 0u;
+
+    if (j->process == J_PROGRESSIVE) {
+      if ((dc && j->se != 0u) || (!dc && (j->ss > j->se || j->se > 63u || n != 1u)) || (j->ah && j->al != j->ah - 1u)
+          || j->al > 13u) {
+        return false;
+      }
+      for (i = 0; i < n; i++) {
+        jcomp_t *c = &j->comp[j->scomp[i]];
+
+        for (k = j->ss < 1u ? j->ss : 1u; k <= (j->se > 9u ? j->se : 9u) && k < 10u; k++) {
+          if (k) c->prev[k] = j->nscans + 1u > 1u ? c->bits[k] : 0;
+        }
+        for (k = j->ss; k <= j->se; k++) c->bits[k] = (int8_t)j->al;
+      }
+    } else {
+      j->ss = 0u, j->se = 63u, j->ah = 0u, j->al = 0u;
+    }
+    for (i = 0; i < n; i++) {
+      const jcomp_t *c = &j->comp[j->scomp[i]];
+
+      if (c->td > 15u || c->ta > 15u) return false;
+    }
+    return true;
+  }
   if (j->process == J_PROGRESSIVE) {
     bool dc = j->ss == 0u;
 
@@ -493,6 +519,9 @@ decode_stream(jpg_t *j, ImImage *im, ImByteOrder order, uint8_t **padp) {
 
   if (end - p < 4 || p[0] != 0xFFu || p[1] != 0xD8u) return false;
   p += 2;
+  memset(j->dc_l, 0, sizeof(j->dc_l));
+  memset(j->dc_u, 1, sizeof(j->dc_u));
+  memset(j->ac_k, 5, sizeof(j->ac_k));
   while (!done) {
     uint32_t       m = marker_at(&p, end), len;
     const uint8_t *s;
@@ -538,6 +567,24 @@ decode_stream(jpg_t *j, ImImage *im, ImByteOrder order, uint8_t **padp) {
     case 0xDB:
       if (!read_dqt(j, s, len)) return false;
       break;
+    case 0xCC: { /* DAC */
+      uint32_t k;
+
+      if (len & 1u) return false;
+      for (k = 0; k < len; k += 2u) {
+        uint32_t index = s[k], val = s[k + 1u];
+
+        if (index >= 32u) return false;
+        if (index >= 16u) {
+          j->ac_k[index - 16u] = (uint8_t)val;
+        } else {
+          j->dc_l[index] = (uint8_t)(val & 15u);
+          j->dc_u[index] = (uint8_t)(val >> 4);
+          if (j->dc_l[index] > j->dc_u[index]) return false;
+        }
+      }
+      break;
+    }
     case 0xDD:
       if (len != 2u) return false;
       j->restart = be16(s);
@@ -569,11 +616,11 @@ decode_stream(jpg_t *j, ImImage *im, ImByteOrder order, uint8_t **padp) {
       if (tail) {
         static const uint8_t fake[3] = { 0xD9u, 0xFFu, 0xD9u };
 
-        if (!jpg_unstuff(&j->sd, odd ? fake : fake + 1, fake + 3) || !jpg_scan_huff(j, j->pool)) return false;
+        if (!jpg_unstuff(&j->sd, odd ? fake : fake + 1, fake + 3) || !(j->arith ? jpg_scan_arith(j) : jpg_scan_huff(j, j->pool))) return false;
         j->nscans++;
         break;
       }
-      if (!jpg_unstuff(&j->sd, p, end) || !jpg_scan_huff(j, j->pool)) return false;
+      if (!jpg_unstuff(&j->sd, p, end) || !(j->arith ? jpg_scan_arith(j) : jpg_scan_huff(j, j->pool))) return false;
       j->nscans++;
       p = j->sd.next;
       break;
