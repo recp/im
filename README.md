@@ -20,6 +20,8 @@ TODO
       transform (DCTDecode's /ColorTransform), CMYK as stored, RGB padded to RGB0, a palette's indexes
 - [x] Formats picked at build time: `-DIM_FORMATS="jpg;jp2"` (default `all`); only png needs the
       defl and huff submodules
+- [x] WebAssembly (WASI): wasi-sdk's toolchain file, `-DIM_STATIC=ON`; one thread, files read
+      (no mmap)
 - [x] JPEG (libjpeg-turbo's pixels, to the byte)
   - [x] baseline, extended (8 and 12 bits), progressive; Huffman and arithmetic coding
   - [x] lossless, 2 to 16 bits
