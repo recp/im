@@ -173,6 +173,12 @@
     <ClInclude Include="..\src\io\jpg\sample_neon.h">
       <Filter>src\io\jpg</Filter>
     </ClInclude>
+    <ClInclude Include="..\src\io\jpg\idct_x86.h">
+      <Filter>src\io\jpg</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\io\jpg\sample_x86.h">
+      <Filter>src\io\jpg</Filter>
+    </ClInclude>
     <ClInclude Include="..\src\io\jp2\jp2.h">
       <Filter>src\io\jp2</Filter>
     </ClInclude>

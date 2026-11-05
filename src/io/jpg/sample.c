@@ -28,6 +28,9 @@
 #if (defined(__ARM_NEON) || defined(_M_ARM64)) && defined(__aarch64__) && !defined(IM_NO_SIMD)
 #  define J_NEON 1
 #  include "sample_neon.h"
+#elif (defined(__x86_64__) || defined(__i386__)) && (defined(__GNUC__) || defined(__clang__)) && !defined(IM_NO_SIMD)
+#  define J_X86 1
+#  include "sample_x86.h"
 #endif
 
 /* how a component comes to the image's size */
@@ -153,6 +156,7 @@ UPSAMPLE_FN(up_row16, uint16_t, int64_t)
 typedef struct jrow {
   uint8_t  *pad;
   uint16_t *sums;
+  bool      x86;  /* the CPU has SSSE3 and SSE4.1 */
 } jrow_t;
 
 static const uint8_t*
@@ -184,6 +188,36 @@ up_row8(const jpg_t *j, const jcomp_t *c, const jupc_t *u, uint32_t y, uint8_t *
     return out;
   default:
     break;
+  }
+#elif J_X86
+  const uint8_t *plane = c->plane, *near, *far;
+  size_t         st = c->stride;
+  uint32_t       n = c->cw, cy;
+
+  if (r->x86) {
+    switch (u->how) {
+    case UP_H2V1_FANCY: {
+      const uint8_t *in = plane + (size_t)y * st;
+
+      memcpy(r->pad + 1, in, n);
+      r->pad[0]      = in[0];
+      r->pad[n + 1u] = in[n - 1u];
+      jx_h2v1(r->pad + 1, n, out);
+      return out;
+    }
+    case UP_H1V2_FANCY:
+    case UP_H2V2_FANCY:
+      cy   = y >> 1;
+      near = plane + (size_t)cy * st;
+      if (!(y & 1u)) far = cy ? near - st : near;
+      else far = cy + 1u < c->ch ? near + st : near;
+      jx_colsum(near, far, n, r->sums + 1);
+      if (u->how == UP_H2V2_FANCY) jx_h2v2(r->sums + 1, n, out);
+      else jx_h1v2(r->sums + 1, n, (y & 1u) ? 2u : 1u, out);
+      return out;
+    default:
+      break;
+    }
   }
 #else
   (void)r;
@@ -287,14 +321,22 @@ PIXELS_FN(pixels16, uint16_t)
 
 static void
 pixels8(const uint8_t *const *row, uint32_t ncomp, jspace_t space, const jycc_t *t, int32_t max, bool invert,
-        uint32_t w, uint8_t *o) {
-#if J_NEON
+        uint32_t w, uint8_t *o, bool x86) {
+#if J_NEON || J_X86
   uint32_t done = 0, i;
 
-  /* YCbCr's NEON is 8-bit samples' (lossless shallower ones: the plain loop) */
+  /* YCbCr's SIMD is 8-bit samples' (lossless shallower ones: the plain loop) */
+#  if J_NEON
+  (void)x86;
   if (ncomp == 3u && space == J_YCC && max == 255) done = jn_ycc(row[0], row[1], row[2], NULL, o, w);
   else if (ncomp == 4u && space == J_YCCK && max == 255) done = jn_ycc(row[0], row[1], row[2], row[3], o, w);
   else if (ncomp > 1u) done = jn_interleave(row, ncomp, o, w);
+#  else
+  if (!x86) done = 0;
+  else if (ncomp == 3u && space == J_YCC && max == 255) done = jx_ycc(row[0], row[1], row[2], NULL, o, w);
+  else if (ncomp == 4u && space == J_YCCK && max == 255) done = jx_ycc(row[0], row[1], row[2], row[3], o, w);
+  else if (ncomp > 1u) done = jx_interleave(row, ncomp, o, w);
+#  endif
   if (done) {
     const uint8_t *rest[J_COMPS];
 
@@ -305,6 +347,8 @@ pixels8(const uint8_t *const *row, uint32_t ncomp, jspace_t space, const jycc_t 
     }
     return;
   }
+#else
+  (void)x86;
 #endif
   pixels8_plain(row, ncomp, space, t, max, invert, w, o);
 }
@@ -342,7 +386,7 @@ out_band(void *arg, uint32_t worker, uint32_t item) {
       const uint8_t *row[J_COMPS];
 
       for (i = 0; i < n; i++) row[i] = up_row8(j, &j->comp[i], &o->up[i], y, rows + o->rowlen * i, &o->scratch[worker]);
-      pixels8(row, n, o->space, &o->t, (int32_t)o->max, o->invert, w, o->px + (size_t)y * w * n);
+      pixels8(row, n, o->space, &o->t, (int32_t)o->max, o->invert, w, o->px + (size_t)y * w * n, o->scratch[worker].x86);
       if (j->prec < 8u) {
         /* shallower samples spread over 0–255 */
         uint8_t *p = o->px + (size_t)y * w * n;
@@ -402,6 +446,9 @@ jpg_out(jpg_t *j, jspace_t space, ImImage *im, ImByteOrder order) {
   if ((space == J_YCC || space == J_YCCK) && !ycc_tables(&o->t, o->max, o->wide ? 65536u : 256u)) goto done;
   if (!(o->px = malloc(len))) goto done;
   for (i = 0; i < nw; i++) {
+#if J_X86
+    o->scratch[i].x86 = __builtin_cpu_supports("ssse3") && __builtin_cpu_supports("sse4.1");
+#endif
     if (!(o->rows[i] = malloc(o->rowlen * n * (o->wide ? 2u : 1u))) || !(o->scratch[i].pad = malloc(o->rowlen + 2u))
         || !(o->scratch[i].sums = malloc((o->rowlen + 2u) * sizeof(uint16_t)))) {
       goto done;

@@ -169,7 +169,10 @@ IM_HIDE bool jpg_scan_lossless(jpg_t *j);
 IM_HIDE bool jpg_scan_arith(jpg_t *j);
 
 /* idct.c */
+typedef void (*jpg_idct_fn)(const int16_t *in, const uint16_t *q, void *out, size_t stride);
+
 IM_HIDE void jpg_idct8(const int16_t *in, const uint16_t *q, void *out, size_t stride);
+IM_HIDE jpg_idct_fn jpg_idct8_best(void);
 IM_HIDE void jpg_idct12(const int16_t *in, const uint16_t *q, void *out, size_t stride);
 
 /* sample.c */

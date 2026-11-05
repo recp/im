@@ -271,7 +271,7 @@ read_sof(jpg_t *j, uint32_t m, const uint8_t *s, uint32_t len) {
   if (j->process == J_LOSSLESS && j->arith) return false; /* libjpeg has none: not yet */
   if (!j->width || !j->height || !j->ncomp || j->ncomp > J_COMPS || len != 6u + j->ncomp * 3u) return false;
   if (j->process == J_LOSSLESS ? j->prec < 2u || j->prec > 16u : j->prec != 8u && j->prec != 12u) return false;
-  j->idct = j->prec == 8u ? jpg_idct8 : jpg_idct12;
+  j->idct = j->prec == 8u ? jpg_idct8_best() : jpg_idct12;
 
   j->hmax = j->vmax = 1u;
   for (i = 0; i < j->ncomp; i++) {

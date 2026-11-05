@@ -170,6 +170,8 @@
     <ClInclude Include="..\src\io\jpg\jpgint.h" />
     <ClInclude Include="..\src\io\jpg\idct_neon.h" />
     <ClInclude Include="..\src\io\jpg\sample_neon.h" />
+    <ClInclude Include="..\src\io\jpg\idct_x86.h" />
+    <ClInclude Include="..\src\io\jpg\sample_x86.h" />
     <ClInclude Include="..\src\io\png\png.h" />
     <ClInclude Include="..\src\io\ppm\common.h" />
     <ClInclude Include="..\src\io\ppm\pam.h" />

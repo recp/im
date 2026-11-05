@@ -28,6 +28,9 @@
 #if (defined(__ARM_NEON) || defined(_M_ARM64)) && defined(__aarch64__) && !defined(IM_NO_SIMD)
 #  define J_NEON 1
 #  include "idct_neon.h"
+#elif (defined(__x86_64__) || defined(__i386__)) && (defined(__GNUC__) || defined(__clang__)) && !defined(IM_NO_SIMD)
+#  define J_X86 1
+#  include "idct_x86.h"
 #endif
 
 #define FIX_0_298631336 ((int64_t)2446)
@@ -173,6 +176,28 @@ jpg_idct8(const int16_t *in, const uint16_t *q, void *out, size_t stride) {
   if (jpg_idct8_neon(in, q, out, stride)) return;
 #endif
   idct8_plain(in, q, out, stride);
+}
+
+#if J_X86
+static void
+idct8_sse41(const int16_t *in, const uint16_t *q, void *out, size_t stride) {
+  if (!jpg_idct8_sse41(in, q, out, stride)) idct8_plain(in, q, out, stride);
+}
+
+static void
+idct8_avx2(const int16_t *in, const uint16_t *q, void *out, size_t stride) {
+  if (!jpg_idct8_avx2(in, q, out, stride)) idct8_plain(in, q, out, stride);
+}
+#endif
+
+/* the 8-bit IDCT this CPU runs fastest */
+IM_HIDE jpg_idct_fn
+jpg_idct8_best(void) {
+#if J_X86
+  if (__builtin_cpu_supports("avx2")) return idct8_avx2;
+  if (__builtin_cpu_supports("sse4.1")) return idct8_sse41;
+#endif
+  return jpg_idct8;
 }
 
 IM_HIDE void
