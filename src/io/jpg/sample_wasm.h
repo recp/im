@@ -81,18 +81,18 @@ jw_h2v1(const uint8_t *in, uint32_t n, uint8_t *out) {
 
 /* the column sums 3·near + far of h2v2 and h1v2: s[-1], s[n] the edges' */
 IM_INLINE void
-jw_colsum(const uint8_t *near, const uint8_t *far, uint32_t n, uint16_t *s) {
+jw_colsum(const uint8_t *rnear, const uint8_t *rfar, uint32_t n, uint16_t *s) {
   const v128_t three = wasm_i16x8_splat(3);
   uint32_t     i = 0;
 
   for (; i + 16u <= n; i += 16u) {
-    v128_t a = wasm_v128_load(near + i), b = wasm_v128_load(far + i);
+    v128_t a = wasm_v128_load(rnear + i), b = wasm_v128_load(rfar + i);
 
     wasm_v128_store(s + i, wasm_i16x8_add(wasm_i16x8_mul(wasm_u16x8_extend_low_u8x16(a), three), wasm_u16x8_extend_low_u8x16(b)));
     wasm_v128_store(s + i + 8u,
                     wasm_i16x8_add(wasm_i16x8_mul(wasm_u16x8_extend_high_u8x16(a), three), wasm_u16x8_extend_high_u8x16(b)));
   }
-  for (; i < n; i++) s[i] = (uint16_t)(near[i] * 3u + far[i]);
+  for (; i < n; i++) s[i] = (uint16_t)(rnear[i] * 3u + rfar[i]);
   s[-1] = s[0];
   s[n]  = s[n - 1u];
 }

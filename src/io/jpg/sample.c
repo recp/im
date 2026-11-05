@@ -86,7 +86,7 @@ up_method(const jpg_t *j, const jcomp_t *c) {
 #define UPSAMPLE_FN(NAME, T, W)                                                \
 static const T*                                                                \
 NAME(const jpg_t *j, const jcomp_t *c, const jupc_t *u, uint32_t y, T *out) {  \
-  const T *plane = c->plane, *near, *far;                                      \
+  const T *plane = c->plane, *rnear, *rfar;                                      \
   size_t   st    = c->stride;                                                  \
   uint32_t n     = c->cw, x, cy;                                               \
                                                                                \
@@ -113,21 +113,21 @@ NAME(const jpg_t *j, const jcomp_t *c, const jupc_t *u, uint32_t y, T *out) {  \
     W bias = (y & 1u) ? 2 : 1;                                                 \
                                                                                \
     cy   = y >> 1;                                                             \
-    near = plane + (size_t)cy * st;                                            \
-    if (!(y & 1u)) far = cy ? near - st : near;                                \
-    else far = cy + 1u < c->ch ? near + st : near;                             \
+    rnear = plane + (size_t)cy * st;                                            \
+    if (!(y & 1u)) rfar = cy ? rnear - st : rnear;                                \
+    else rfar = cy + 1u < c->ch ? rnear + st : rnear;                             \
     if (u->how == UP_H1V2_FANCY) {                                             \
-      for (x = 0; x < n; x++) out[x] = (T)(((W)near[x] * 3 + far[x] + bias) >> 2); \
+      for (x = 0; x < n; x++) out[x] = (T)(((W)rnear[x] * 3 + rfar[x] + bias) >> 2); \
       return out;                                                              \
     } else {                                                                   \
-      W this = (W)near[0] * 3 + far[0], next = (W)near[1] * 3 + far[1], last;  \
+      W this = (W)rnear[0] * 3 + rfar[0], next = (W)rnear[1] * 3 + rfar[1], last;  \
                                                                                \
       out[0] = (T)((this * 4 + 8) >> 4);                                       \
       out[1] = (T)((this * 3 + next + 7) >> 4);                                \
       for (x = 1; x + 1u < n; x++) {                                           \
         last = this;                                                           \
         this = next;                                                           \
-        next = (W)near[x + 1u] * 3 + far[x + 1u];                              \
+        next = (W)rnear[x + 1u] * 3 + rfar[x + 1u];                              \
         out[2u * x]      = (T)((this * 3 + last + 8) >> 4);                    \
         out[2u * x + 1u] = (T)((this * 3 + next + 7) >> 4);                    \
       }                                                                        \
@@ -165,7 +165,7 @@ typedef struct jrow {
 static const uint8_t*
 up_row8(const jpg_t *j, const jcomp_t *c, const jupc_t *u, uint32_t y, uint8_t *out, const jrow_t *r) {
 #if J_NEON
-  const uint8_t *plane = c->plane, *near, *far;
+  const uint8_t *plane = c->plane, *rnear, *rfar;
   size_t         st = c->stride;
   uint32_t       n = c->cw, cy;
 
@@ -182,10 +182,10 @@ up_row8(const jpg_t *j, const jcomp_t *c, const jupc_t *u, uint32_t y, uint8_t *
   case UP_H1V2_FANCY:
   case UP_H2V2_FANCY:
     cy   = y >> 1;
-    near = plane + (size_t)cy * st;
-    if (!(y & 1u)) far = cy ? near - st : near;
-    else far = cy + 1u < c->ch ? near + st : near;
-    jn_colsum(near, far, n, r->sums + 1);
+    rnear = plane + (size_t)cy * st;
+    if (!(y & 1u)) rfar = cy ? rnear - st : rnear;
+    else rfar = cy + 1u < c->ch ? rnear + st : rnear;
+    jn_colsum(rnear, rfar, n, r->sums + 1);
     if (u->how == UP_H2V2_FANCY) jn_h2v2(r->sums + 1, n, out);
     else jn_h1v2(r->sums + 1, n, (y & 1u) ? 2u : 1u, out);
     return out;
@@ -193,7 +193,7 @@ up_row8(const jpg_t *j, const jcomp_t *c, const jupc_t *u, uint32_t y, uint8_t *
     break;
   }
 #elif J_WASM
-  const uint8_t *plane = c->plane, *near, *far;
+  const uint8_t *plane = c->plane, *rnear, *rfar;
   size_t         st = c->stride;
   uint32_t       n = c->cw, cy;
 
@@ -210,10 +210,10 @@ up_row8(const jpg_t *j, const jcomp_t *c, const jupc_t *u, uint32_t y, uint8_t *
   case UP_H1V2_FANCY:
   case UP_H2V2_FANCY:
     cy   = y >> 1;
-    near = plane + (size_t)cy * st;
-    if (!(y & 1u)) far = cy ? near - st : near;
-    else far = cy + 1u < c->ch ? near + st : near;
-    jw_colsum(near, far, n, r->sums + 1);
+    rnear = plane + (size_t)cy * st;
+    if (!(y & 1u)) rfar = cy ? rnear - st : rnear;
+    else rfar = cy + 1u < c->ch ? rnear + st : rnear;
+    jw_colsum(rnear, rfar, n, r->sums + 1);
     if (u->how == UP_H2V2_FANCY) jw_h2v2(r->sums + 1, n, out);
     else jw_h1v2(r->sums + 1, n, (y & 1u) ? 2u : 1u, out);
     return out;
@@ -221,7 +221,7 @@ up_row8(const jpg_t *j, const jcomp_t *c, const jupc_t *u, uint32_t y, uint8_t *
     break;
   }
 #elif J_X86
-  const uint8_t *plane = c->plane, *near, *far;
+  const uint8_t *plane = c->plane, *rnear, *rfar;
   size_t         st = c->stride;
   uint32_t       n = c->cw, cy;
 
@@ -239,10 +239,10 @@ up_row8(const jpg_t *j, const jcomp_t *c, const jupc_t *u, uint32_t y, uint8_t *
     case UP_H1V2_FANCY:
     case UP_H2V2_FANCY:
       cy   = y >> 1;
-      near = plane + (size_t)cy * st;
-      if (!(y & 1u)) far = cy ? near - st : near;
-      else far = cy + 1u < c->ch ? near + st : near;
-      jx_colsum(near, far, n, r->sums + 1);
+      rnear = plane + (size_t)cy * st;
+      if (!(y & 1u)) rfar = cy ? rnear - st : rnear;
+      else rfar = cy + 1u < c->ch ? rnear + st : rnear;
+      jx_colsum(rnear, rfar, n, r->sums + 1);
       if (u->how == UP_H2V2_FANCY) jx_h2v2(r->sums + 1, n, out);
       else jx_h1v2(r->sums + 1, n, (y & 1u) ? 2u : 1u, out);
       return out;

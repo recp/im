@@ -485,20 +485,22 @@ popcount64(uint64_t v) {
 
 /* the block's nonzero coefficients, bit k for zigzag position k */
 #if J_NZ_NEON
+/* 16 coefficients' "nonzero" bytes (0xFF) */
+IM_INLINE uint8x16_t
+jn_nz16(const int16_t *p) {
+  int16x8_t a = vld1q_s16(p), b = vld1q_s16(p + 8);
+
+  return vcombine_u8(vmovn_u16(vtstq_s16(a, a)), vmovn_u16(vtstq_s16(b, b)));
+}
+
 IM_INLINE uint64_t
 nonzero_zz(const jctx_t *x, const int16_t *blk) {
   static const uint8_t wb[16] = { 1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128 };
   const uint8x16_t     w      = vld1q_u8(wb);
-  uint8x16x4_t         t;
+  uint8x16x4_t         t      = { { jn_nz16(blk), jn_nz16(blk + 16), jn_nz16(blk + 32), jn_nz16(blk + 48) } };
   uint8x16_t           z0, z1, z2, z3, sum;
-  uint32_t             k;
 
   (void)x;
-  for (k = 0; k < 4u; k++) {
-    int16x8_t a = vld1q_s16(blk + 16u * k), b = vld1q_s16(blk + 16u * k + 8u);
-
-    t.val[k] = vcombine_u8(vmovn_u16(vtstq_s16(a, a)), vmovn_u16(vtstq_s16(b, b)));
-  }
   z0  = vandq_u8(vqtbl4q_u8(t, vld1q_u8(jpg_natural)), w);
   z1  = vandq_u8(vqtbl4q_u8(t, vld1q_u8(jpg_natural + 16)), w);
   z2  = vandq_u8(vqtbl4q_u8(t, vld1q_u8(jpg_natural + 32)), w);

@@ -60,17 +60,17 @@ jx_h2v1(const uint8_t *in, uint32_t n, uint8_t *out) {
 }
 
 JX_SSSE3 static inline void
-jx_colsum(const uint8_t *near, const uint8_t *far, uint32_t n, uint16_t *s) {
+jx_colsum(const uint8_t *rnear, const uint8_t *rfar, uint32_t n, uint16_t *s) {
   const __m128i z = _mm_setzero_si128(), three = _mm_set1_epi16(3);
   uint32_t      i = 0;
 
   for (; i + 16u <= n; i += 16u) {
-    __m128i a = _mm_loadu_si128((const __m128i *)(near + i)), b = _mm_loadu_si128((const __m128i *)(far + i));
+    __m128i a = _mm_loadu_si128((const __m128i *)(rnear + i)), b = _mm_loadu_si128((const __m128i *)(rfar + i));
 
     _mm_storeu_si128((__m128i *)(s + i), _mm_add_epi16(_mm_mullo_epi16(_mm_unpacklo_epi8(a, z), three), _mm_unpacklo_epi8(b, z)));
     _mm_storeu_si128((__m128i *)(s + i + 8u), _mm_add_epi16(_mm_mullo_epi16(_mm_unpackhi_epi8(a, z), three), _mm_unpackhi_epi8(b, z)));
   }
-  for (; i < n; i++) s[i] = (uint16_t)(near[i] * 3u + far[i]);
+  for (; i < n; i++) s[i] = (uint16_t)(rnear[i] * 3u + rfar[i]);
   s[-1] = s[0];
   s[n]  = s[n - 1u];
 }

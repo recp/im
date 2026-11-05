@@ -56,16 +56,16 @@ jn_h2v1(const uint8_t *in, uint32_t n, uint8_t *out) {
 
 /* the column sums 3·near + far of h2v2 and h1v2: s[-1], s[n] the edges' */
 IM_INLINE void
-jn_colsum(const uint8_t *near, const uint8_t *far, uint32_t n, uint16_t *s) {
+jn_colsum(const uint8_t *rnear, const uint8_t *rfar, uint32_t n, uint16_t *s) {
   uint32_t i = 0;
 
   for (; i + 16u <= n; i += 16u) {
-    uint8x16_t a = vld1q_u8(near + i), b = vld1q_u8(far + i);
+    uint8x16_t a = vld1q_u8(rnear + i), b = vld1q_u8(rfar + i);
 
     vst1q_u16(s + i, vmlal_u8(vmovl_u8(vget_low_u8(b)), vget_low_u8(a), vdup_n_u8(3)));
     vst1q_u16(s + i + 8u, vmlal_high_u8(vmovl_high_u8(b), a, vdupq_n_u8(3)));
   }
-  for (; i < n; i++) s[i] = (uint16_t)(near[i] * 3u + far[i]);
+  for (; i < n; i++) s[i] = (uint16_t)(rnear[i] * 3u + rfar[i]);
   s[-1] = s[0];
   s[n]  = s[n - 1u];
 }
