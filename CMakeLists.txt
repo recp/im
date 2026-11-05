@@ -15,6 +15,7 @@ endif()
 set(IM_BUILD)
 option(IM_SHARED "Shared build" ON)
 option(IM_STATIC "Static build" OFF)
+option(IM_USE_TEST "Enable Tests" OFF)
 
 if(NOT IM_STATIC AND IM_SHARED)
   set(IM_BUILD SHARED)
@@ -123,6 +124,11 @@ if(APPLE)
     )
 elseif(UNIX)
     target_link_libraries(${PROJECT_NAME} PRIVATE m)
+endif()
+
+if(IM_USE_TEST)
+  enable_testing()
+  add_subdirectory(test)
 endif()
 
 install(TARGETS ${PROJECT_NAME}
