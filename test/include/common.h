@@ -28,6 +28,34 @@
 
 #include <im/im.h>
 
+/* a file loaded: by its path, or (a codec-only build, which has no
+   im_load) read here and given to im_load_mem */
+static inline ImResult
+test_load(ImImage **dest, const char *path, im_option_base_t *options[]) {
+#if IM_CODECS_ONLY
+  FILE    *f = fopen(path, "rb");
+  long     n;
+  void    *d;
+  ImResult r;
+
+  *dest = NULL;
+  if (!f) return IM_EBADF;
+  fseek(f, 0, SEEK_END);
+  n = ftell(f);
+  fseek(f, 0, SEEK_SET);
+  if (n <= 0 || !(d = malloc((size_t)n)) || fread(d, 1, (size_t)n, f) != (size_t)n) {
+    fclose(f);
+    return IM_EBADF;
+  }
+  fclose(f);
+  r = im_load_mem(dest, d, (size_t)n, options, IM_OPEN_INTENT_READONLY);
+  free(d);
+  return r;
+#else
+  return im_load(dest, path, options, IM_OPEN_INTENT_READONLY);
+#endif
+}
+
 typedef struct test_status_t {
   const char *msg;
   int         status;

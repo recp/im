@@ -19,6 +19,11 @@ target_compile_definitions(${TEST_MAIN} PRIVATE
 
 target_link_libraries(${TEST_MAIN} PRIVATE ${PROJECT_NAME})
 
+# a codec-only build has no im_load: the tests read files themselves
+if(IM_CODECS_ONLY)
+  target_compile_definitions(${TEST_MAIN} PRIVATE IM_CODECS_ONLY=1)
+endif()
+
 # a format's tests where it's built in
 foreach(f ${IM_ON})
   string(TOUPPER ${f} F)

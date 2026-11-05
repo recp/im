@@ -50,7 +50,7 @@ load(const char *path, ImByteOrder order) {
   ImImage               *im = NULL;
   im_option_byteorder_t  bo = im_option_row_byteorder(order);
 
-  if (im_load(&im, path, IM_OPTIONS { &bo.base, NULL }, IM_OPEN_INTENT_READONLY) != IM_OK) {
+  if (test_load(&im, path, IM_OPTIONS { &bo.base, NULL }) != IM_OK) {
     if (im) im_free(im);
     return NULL;
   }

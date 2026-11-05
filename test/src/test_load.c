@@ -73,7 +73,7 @@ file(const char *dir, const char *name) {
   ImImage *im = NULL;
 
   snprintf(path, sizeof(path), "%s/%s/%s", IM_TEST_DATA, dir, name);
-  if (im_load(&im, path, NULL, IM_OPEN_INTENT_READONLY) != IM_OK) return NULL;
+  if (test_load(&im, path, NULL) != IM_OK) return NULL;
   return im;
 }
 
