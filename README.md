@@ -14,7 +14,9 @@ Companion Libaries:
 TODO
 -----
 - [ ] Streaming Decode + Progresive Support 
-- [ ] GPU support
+- [ ] GPU support: what follows the entropy decoding, the same work for every block or sample (JPEG's IDCT,
+      upsampling and colour; JPEG 2000's wavelet and colour), on the GPU for big images; the Huffman and MQ
+      decoding stays on the CPU's threads
 - [x] Cocoa and Win32 helpers
 - [x] From memory (`im_load_mem`, `im_info_mem`: JPEG, JPEG 2000), with options: threads, a JPEG's colour
       transform said by its container, CMYK as stored, RGB padded to RGB0, a palette's indexes, 8 bits
@@ -43,6 +45,7 @@ TODO
   - [x] on threads: restart intervals, speculative Huffman, progressive scans row by row
   - [x] DNL (the height after the first scan; libjpeg refuses it)
   - [ ] hierarchical, lossless arithmetic
+  - [ ] scaled decode: ½, ¼, ⅛ by a smaller IDCT (djpeg's `-scale`)
 - [x] PNG (In Progress)
   - [x] palette
   - [x] color types
@@ -60,6 +63,7 @@ TODO
   - [x] gray, RGB, RGBA, CMYK; 8 and 16 bits; palette, sYCC, ICC profile
   - [x] threads
   - [ ] HT (Part 15), Part 2 (Apple's decoder reads them on Apple platforms)
+  - [ ] reduced resolution: the finest levels left out (OpenJPEG's `reduce`)
   - [ ] SIMD
 - [ ] JXL
   - [x] Apple platform
