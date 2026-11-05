@@ -161,6 +161,9 @@
     <ClInclude Include="..\src\mm\mmap.h">
       <Filter>src\mm</Filter>
     </ClInclude>
+    <ClInclude Include="..\src\io\jp2\jp2.h">
+      <Filter>src\io\jp2</Filter>
+    </ClInclude>
     <ClInclude Include="..\src\io\png\png.h">
       <Filter>src\io\png</Filter>
     </ClInclude>
@@ -216,6 +219,9 @@
     </ClCompile>
     <ClCompile Include="..\src\mm\mmap.c">
       <Filter>src\mm</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\io\jp2\jp2.c">
+      <Filter>src\io\jp2</Filter>
     </ClCompile>
     <ClCompile Include="..\src\io\png\png.c">
       <Filter>src\io\png</Filter>
