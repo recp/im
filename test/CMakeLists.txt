@@ -31,6 +31,14 @@ target_include_directories(${TEST_MAIN} PRIVATE
 
 set_target_properties(${TEST_MAIN} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR})
 
+if(CMAKE_SYSTEM_NAME STREQUAL "WASI")
+  # the runner's clock(), WASI's emulated one; a decoder's stack past
+  # wasm-ld's 64 KB
+  target_compile_definitions(${TEST_MAIN} PRIVATE _WASI_EMULATED_PROCESS_CLOCKS)
+  target_link_libraries(${TEST_MAIN} PRIVATE wasi-emulated-process-clocks)
+  target_link_options(${TEST_MAIN} PRIVATE -Wl,-z,stack-size=1048576)
+endif()
+
 add_test(
     NAME im.${TEST_MAIN}
     COMMAND ${TEST_MAIN} ${TEST_RUNNER_PARAMS})
