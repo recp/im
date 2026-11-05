@@ -30,21 +30,40 @@
 #include "color.h"
 #include "sampler.h"
 
-#include "io/jpg/jpg.h"
+#include "formats.h"
 #include "io/apple/coreimg.h"
-#include "io/ppm/ppm.h"
-#include "io/ppm/pgm.h"
-#include "io/ppm/pbm.h"
-#include "io/ppm/pfm.h"
-#include "io/ppm/pam.h"
-#include "io/bmp/bmp.h"
-#include "io/bmp/dib.h"
-#include "io/png/png.h"
-#include "io/tga/tga.h"
-#include "io/qoi/qoi.h"
-#include "io/heic/heic.h"
-#include "io/jxl/jxl.h"
-#include "io/jp2/jp2.h"
+#if IM_WITH_JPG
+#  include "io/jpg/jpg.h"
+#endif
+#if IM_WITH_PPM
+#  include "io/ppm/ppm.h"
+#  include "io/ppm/pgm.h"
+#  include "io/ppm/pbm.h"
+#  include "io/ppm/pfm.h"
+#  include "io/ppm/pam.h"
+#endif
+#if IM_WITH_BMP
+#  include "io/bmp/bmp.h"
+#  include "io/bmp/dib.h"
+#endif
+#if IM_WITH_PNG
+#  include "io/png/png.h"
+#endif
+#if IM_WITH_TGA
+#  include "io/tga/tga.h"
+#endif
+#if IM_WITH_QOI
+#  include "io/qoi/qoi.h"
+#endif
+#if IM_WITH_HEIC
+#  include "io/heic/heic.h"
+#endif
+#if IM_WITH_JXL
+#  include "io/jxl/jxl.h"
+#endif
+#if IM_WITH_JP2
+#  include "io/jp2/jp2.h"
+#endif
 
 #include "file.h"
 
@@ -125,29 +144,75 @@ typedef ImResult (*imloader)(ImImage**, const char*, im_open_config_t*);
 
 /* static const struct { imloader fn; } extmap[256] = { */
 static const imloader extmap[256] = {
+#if IM_WITH_JP2
   [0x04] = jp2_dec,         /* jpf  */
+#endif
+#if IM_WITH_BMP
   [0x06] = dib_dec,         /* dib  */
+#endif
+#if IM_WITH_PPM
   [0x1F] = ppm_dec,         /* ppm  */
+#endif
+#if IM_WITH_TGA
   [0x30] = tga_dec,         /* vda  */
+#endif
+#if IM_WITH_PPM
   [0x3C] = pbm_dec,         /* pbm  */
+#endif
+#if IM_WITH_HEIC
   [0x54] = heic_dec,        /* heic */
+#endif
+#if IM_WITH_JP2
   [0x58] = jp2_dec,         /* jp2  */
+#endif
+#if IM_WITH_JP2
   [0x5A] = jp2_dec,         /* jpx  */
+#endif
+#if IM_WITH_TGA
   [0x64] = tga_dec,         /* icb  */
+#endif
+#if IM_WITH_PPM
   [0x68] = pgm_dec,         /* pgm  */
+#endif
+#if IM_WITH_JP2
   [0x69] = jp2_dec,         /* j2k  */
+#endif
+#if IM_WITH_BMP
   [0x79] = bmp_dec,         /* bmp  */
+#endif
+#if IM_WITH_JXL
   [0x7A] = jxl_dec,         /* jxl  */
+#endif
+#if IM_WITH_QOI
   [0x99] = qoi_dec,         /* qoi  */
+#endif
+#if IM_WITH_TGA
   [0x9D] = tga_dec,         /* vst  */
+#endif
+#if IM_WITH_PNG
   [0xA9] = png_dec,         /* png  */
+#endif
+#if IM_WITH_JP2
   [0xBB] = jp2_dec,         /* jpc  */
+#endif
+#if IM_WITH_TGA
   [0xEA] = tga_dec,         /* tga  */
+#endif
+#if IM_WITH_PPM
   [0xF0] = pam_dec,         /* pam  */
+#endif
+#if IM_WITH_JP2
   [0xF1] = jp2_dec,         /* j2c  */
+#endif
+#if IM_WITH_JPG
   [0xF7] = jpg_dec,         /* jpg  */
+#endif
+#if IM_WITH_PPM
   [0xFB] = pfm_dec,         /* pfm  */
+#endif
+#if IM_WITH_JPG
   [0xFC] = jpg_dec,         /* jpeg */
+#endif
 };
 
 #if 0
@@ -270,10 +335,16 @@ im_load_mem(ImImage         ** __restrict dest,
   conf = open_config(options, openIntent);
 
   /* by its first bytes */
+#if IM_WITH_JPG
   if (p[0] == 0xFFu && p[1] == 0xD8u) return jpg_dec_mem(dest, p, len, &conf);
+#endif
+#if IM_WITH_JP2
   if ((len >= 12u && !memcmp(p, jp2sig, 12u)) || (p[0] == 0xFFu && p[1] == 0x4Fu && p[2] == 0xFFu && p[3] == 0x51u)) {
     return jp2_dec_mem(dest, p, len, &conf);
   }
+#endif
+  (void)jp2sig;
+  (void)conf;
   return IM_EBADF;
 }
 

@@ -134,6 +134,9 @@
     <ClInclude Include="..\src\common.h">
       <Filter>src</Filter>
     </ClInclude>
+    <ClInclude Include="..\src\formats.h">
+      <Filter>src</Filter>
+    </ClInclude>
     <ClInclude Include="..\src\endian.h">
       <Filter>src</Filter>
     </ClInclude>

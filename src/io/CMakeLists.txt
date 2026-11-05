@@ -4,16 +4,12 @@ target_sources(${PROJECT_NAME}
   ${CSources}
 )
 
-add_subdirectory(png)
-add_subdirectory(bmp)
-add_subdirectory(ppm)
-add_subdirectory(qoi)
-add_subdirectory(tga)
-
-add_subdirectory(jpg)
-add_subdirectory(jp2)
-add_subdirectory(jxl)
-add_subdirectory(heic)
+# the formats asked for (IM_FORMATS); Apple's fallback always
+foreach(f png bmp ppm qoi tga jpg jp2 jxl heic)
+  if(f IN_LIST IM_ON)
+    add_subdirectory(${f})
+  endif()
+endforeach()
 add_subdirectory(apple)
 
 if(MSVC OR MSYS OR MINGW)

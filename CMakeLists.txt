@@ -17,6 +17,25 @@ option(IM_SHARED "Shared build" ON)
 option(IM_STATIC "Static build" OFF)
 option(IM_USE_TEST "Enable Tests" OFF)
 
+# The formats built in: all, or some of these (png alone needs the defl
+# and huff submodules)
+set(IM_ALL_FORMATS png bmp ppm qoi tga jpg jp2 jxl heic)
+set(IM_FORMATS "all" CACHE STRING "Formats built in: all, or a list of ${IM_ALL_FORMATS}")
+if(IM_FORMATS STREQUAL "all")
+  set(IM_ON ${IM_ALL_FORMATS})
+else()
+  set(IM_ON ${IM_FORMATS})
+  foreach(f ${IM_ON})
+    if(NOT f IN_LIST IM_ALL_FORMATS)
+      message(FATAL_ERROR "IM_FORMATS: no format '${f}' (${IM_ALL_FORMATS})")
+    endif()
+  endforeach()
+endif()
+if(NOT APPLE)
+  # Apple's decoders, Apple's platforms alone
+  list(REMOVE_ITEM IM_ON jxl heic)
+endif()
+
 if(NOT IM_STATIC AND IM_SHARED)
   set(IM_BUILD SHARED)
 else(IM_STATIC)
@@ -28,7 +47,7 @@ find_package(Git QUIET)
 if(GIT_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git")
 # Update submodules as needed
     option(GIT_SUBMODULE "Check submodules during build" ON)
-    if(GIT_SUBMODULE)
+    if(GIT_SUBMODULE AND "png" IN_LIST IM_ON)
         message(STATUS "Submodule update")
         execute_process(COMMAND ${GIT_EXECUTABLE} submodule update --init --recursive
                         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
@@ -86,11 +105,23 @@ else()
   target_compile_definitions(${PROJECT_NAME} PUBLIC -DIM_STATIC)
 endif()
 
-add_subdirectory(deps/defl)
-if(NOT TARGET huff)
-  add_subdirectory(deps/huff)
+if("png" IN_LIST IM_ON)
+  add_subdirectory(deps/defl)
+  if(NOT TARGET huff)
+    add_subdirectory(deps/huff)
+  endif()
 endif()
 add_subdirectory(src)
+
+# the formats picked: src/formats.h's IM_WITH_<FORMAT> (all where none is)
+if(NOT IM_FORMATS STREQUAL "all" OR NOT APPLE)
+  set(IM_FORMAT_DEFS IM_SELECTED_FORMATS=1)
+  foreach(f ${IM_ON})
+    string(TOUPPER ${f} F)
+    list(APPEND IM_FORMAT_DEFS IM_WITH_${F}=1)
+  endforeach()
+  target_compile_definitions(${PROJECT_NAME} PRIVATE ${IM_FORMAT_DEFS})
+endif()
 
 set_target_properties(${PROJECT_NAME} PROPERTIES
                               VERSION ${PROJECT_VERSION} 
@@ -110,10 +141,12 @@ target_include_directories(${PROJECT_NAME}
         ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
-target_link_libraries(${PROJECT_NAME}
-    PRIVATE defl
-    PRIVATE huff
-)
+if("png" IN_LIST IM_ON)
+  target_link_libraries(${PROJECT_NAME}
+      PRIVATE defl
+      PRIVATE huff
+  )
+endif()
 
 if(APPLE)
     target_link_libraries(${PROJECT_NAME}

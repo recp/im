@@ -160,6 +160,7 @@
     <ClInclude Include="..\src\arch\intrin.h" />
     <ClInclude Include="..\src\color.h" />
     <ClInclude Include="..\src\common.h" />
+    <ClInclude Include="..\src\formats.h" />
     <ClInclude Include="..\src\endian.h" />
     <ClInclude Include="..\src\file.h" />
     <ClInclude Include="..\src\io\bmp\bmp.h" />
