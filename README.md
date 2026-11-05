@@ -31,6 +31,7 @@ TODO
       `IM_CODECS_ONLY=1`, `IM_STATIC`, `include/` and `src/` on the include path
 - [x] `-DIM_PREFIX=app_`: a codec-only build's every symbol under that prefix (callers' names unchanged,
       `im.h` renames them too), so it links beside another copy of im
+- [x] The caller's threads (`im_option_runner`): a decode's parallel work on them, none of im's started
 - [x] JPEG (libjpeg-turbo's pixels, to the byte)
   - [x] baseline, extended (8 and 12 bits), progressive; Huffman and arithmetic coding
   - [x] lossless, 2 to 16 bits
