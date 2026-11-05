@@ -641,6 +641,317 @@ par_item(void *arg, uint32_t worker, uint32_t item) {
   return true;
 }
 
+/* -- one segment on threads: speculative, self-synchronising ------------------- */
+
+/* A sequential scan without restarts is one segment; its bits can still be
+   split. A Huffman decoder started at any byte soon falls into step with
+   one started at the beginning (Klein and Wiseman): once both are at a
+   block boundary at the same bit and the same block of the MCU they decode
+   alike. So (1) each thread decodes its chunk from its first byte, keeping
+   the boundaries it passes early on and the first past its end; (2) in
+   order, from the true start, each chunk's first true boundary is walked
+   on, block by block, until it's one the chunk's decoder passed: its
+   start, known; (3) each thread decodes its part for real. A chunk that
+   never falls into step is walked through in (2): the pixels are the same
+   either way, only the time differs. (parajpeg does this too.) */
+
+typedef struct jsync {
+  uint64_t bit;            /* where in the segment */
+  uint32_t blk;            /* blocks since the path's start */
+  uint32_t slot;           /* the block's place in its MCU */
+  int32_t  dc[J_COMPS];    /* DC differences summed since the start */
+} jsync_t;
+
+typedef struct jchunk {
+  size_t   start, end;     /* bytes */
+  uint64_t window;         /* boundaries kept below this bit */
+  jsync_t *rec;
+  uint32_t nrec, cap;
+  jsync_t  cross;          /* the first boundary at or past `end` */
+  bool     crossed;
+  jsync_t  s;              /* (2): its true start, absolute */
+} jchunk_t;
+
+typedef struct jspec {
+  jpg_t    *j;
+  jctx_t   *ctx;
+  jchunk_t *ch;
+  uint32_t  n, w, total;   /* chunks, MCUs across, blocks */
+  uint32_t  nblk;          /* blocks an MCU */
+  uint8_t   slot_ci[64], slot_h[64], slot_v[64];
+} jspec_t;
+
+/* a sequential block decoded and dropped: its DC difference */
+IM_INLINE int32_t
+block_drop(jbits_t *b, const jhuff_t *dct, const jhuff_t *act) {
+  uint32_t e, k;
+  int32_t  diff;
+
+  if (b->n < 32) refill(b);
+  e = dct->fast[PEEK(b, J_HBITS)];
+  if (likely(e & J_FUSED)) {
+    DROP(b, e & 31u);
+    diff = (int32_t)e >> 16;
+  } else {
+    uint32_t s = e ? (DROP(b, e & 31u), (e >> 8) & 15u) : huff_long(b, dct) & 15u;
+
+    diff = extend(get_bits(b, s), s);
+  }
+  for (k = 1; k < 64u; k++) {
+    uint32_t rs;
+
+    if (b->n < 32) refill(b);
+    e = act->fast[PEEK(b, J_HBITS)];
+    if (likely(e & J_FUSED)) {
+      DROP(b, e & 31u);
+      rs = (e >> 8) & 0xFFu;
+    } else {
+      rs = e ? (DROP(b, e & 31u), (e >> 8) & 0xFFu) : huff_long(b, act);
+      if (rs & 15u) {
+        if (b->n < 16) refill(b);
+        DROP(b, rs & 15u);
+      }
+    }
+    if (rs & 15u) {
+      k += rs >> 4;
+      continue;
+    }
+    if (rs != 0xF0u) break;
+    k += 15u;
+  }
+  return diff;
+}
+
+IM_INLINE uint64_t
+rd_bit(const jrd_t *r) {
+  return ((uint64_t)(r->b.p - r->org) + r->pre) * 8u - r->b.n;
+}
+
+/* the reader at bit `bit` of segment 0 */
+static void
+rd_seek(jctx_t *x, uint64_t bit) {
+  jrd_t *r = &x->r;
+
+  rd_start(x, 0u);
+  r->b.p = r->org + bit / 8u;
+  if (r->b.p >= r->lim) rd_tail(x);
+  refill(&r->b);
+  DROP(&r->b, (uint32_t)(bit & 7u));
+}
+
+/* block `blk` of the scan, to its plane, decoded with `dc` */
+static void
+spec_block(jspec_t *sp, jctx_t *x, uint32_t blk, bool skip) {
+  IM_ALIGN(16) int16_t scratch[64];
+  jpg_t   *j = sp->j;
+  uint32_t m = blk / sp->nblk, slot = blk % sp->nblk, ci = sp->slot_ci[slot];
+  jcomp_t *c = &j->comp[ci];
+  uint32_t mx = m % sp->w, my = m / sp->w, bx, by;
+
+  if (j->nscomp == 1u) {
+    bx = mx;
+    by = my;
+  } else {
+    bx = mx * c->h + sp->slot_h[slot];
+    by = my * c->v + sp->slot_v[slot];
+  }
+  memset(scratch, 0, sizeof(scratch));
+  if (!skip) block_seq(&x->r.b, j->dc[c->td], j->ac[c->ta], &x->dc[ci], scratch);
+  jpg_put(j, c, scratch, bx, by);
+}
+
+/* (1): chunk `item` from its first byte (the first chunk's from the true
+   start): boundaries in its window kept, the first past its end */
+static bool
+spec_pass1(void *arg, uint32_t worker, uint32_t item) {
+  jspec_t  *sp = arg;
+  jpg_t    *j  = sp->j;
+  jctx_t   *x  = &sp->ctx[worker];
+  jchunk_t *ch = &sp->ch[item];
+  jsync_t   st;
+  uint64_t  end = (uint64_t)ch->end * 8u;
+  bool      last = item + 1u == sp->n;
+
+  memset(&st, 0, sizeof(st));
+  rd_seek(x, (uint64_t)ch->start * 8u);
+  for (;;) {
+    uint32_t ci = sp->slot_ci[st.slot];
+
+    st.bit = rd_bit(&x->r);
+    if (item && st.bit < ch->window) {
+      if (ch->nrec == ch->cap) {
+        uint32_t cap  = ch->cap ? ch->cap * 2u : 1024u;
+        jsync_t *next = realloc(ch->rec, cap * sizeof(*next));
+
+        if (!next) return false;
+        ch->rec = next;
+        ch->cap = cap;
+      }
+      ch->rec[ch->nrec++] = st;
+    }
+    if (last ? st.bit >= ch->window : st.bit >= end) {
+      ch->cross   = st;
+      ch->crossed = !last;
+      return true;
+    }
+    if (st.blk >= sp->total) return true; /* ran off the end */
+    st.dc[ci] = (int32_t)((uint32_t)st.dc[ci]
+                          + (uint32_t)block_drop(&x->r.b, j->dc[j->comp[ci].td], j->ac[j->comp[ci].ta]));
+    st.blk++;
+    st.slot = st.slot + 1u == sp->nblk ? 0u : st.slot + 1u;
+  }
+}
+
+/* (3): chunk `item` for real, from its true start to the next chunk's */
+static bool
+spec_pass3(void *arg, uint32_t worker, uint32_t item) {
+  jspec_t  *sp = arg;
+  jctx_t   *x  = &sp->ctx[worker];
+  jchunk_t *ch = &sp->ch[item];
+  uint32_t  blk, end = item + 1u < sp->n ? sp->ch[item + 1u].s.blk : sp->total, i;
+
+  for (i = 0; i < J_COMPS; i++) x->dc[i] = ch->s.dc[i];
+  x->lacking = false;
+  rd_seek(x, ch->s.bit);
+  for (blk = ch->s.blk; blk < end; blk++) {
+    if (x->lacking) {
+      spec_block(sp, x, blk, true);
+      continue;
+    }
+    if (!x->r.tail && x->r.b.p >= x->r.lim) rd_tail(x);
+    spec_block(sp, x, blk, false);
+    /* where data runs out: as one pass, the MCUs after are skipped */
+    if ((blk + 1u) % sp->nblk == 0u && rd_past(&x->r)) x->lacking = true;
+  }
+  return true;
+}
+
+/* (2): each chunk's true start, in order; false: fall back to one thread */
+static bool
+spec_pass2(jspec_t *sp, jctx_t *x) {
+  jpg_t   *j = sp->j;
+  jsync_t  t = sp->ch[0].cross;
+  uint32_t i;
+
+  memset(&sp->ch[0].s, 0, sizeof(sp->ch[0].s));
+  if (!sp->ch[0].crossed) return false;
+  for (i = 1; i < sp->n; i++) {
+    jchunk_t *ch = &sp->ch[i];
+    uint32_t  r  = 0, k;
+
+    /* walk t on until the chunk's decoder passed it */
+    for (;;) {
+      while (r < ch->nrec && ch->rec[r].bit < t.bit) r++;
+      if (r < ch->nrec && ch->rec[r].bit == t.bit && ch->rec[r].slot == t.slot) break;
+      if (r >= ch->nrec || t.blk >= sp->total) {
+        r = UINT32_MAX; /* never in step */
+        break;
+      }
+      rd_seek(x, t.bit);
+      {
+        uint32_t ci = sp->slot_ci[t.slot];
+
+        t.dc[ci] = (int32_t)((uint32_t)t.dc[ci] + (uint32_t)block_drop(&x->r.b, j->dc[j->comp[ci].td], j->ac[j->comp[ci].ta]));
+      }
+      t.bit = rd_bit(&x->r);
+      t.blk++;
+      t.slot = t.slot + 1u == sp->nblk ? 0u : t.slot + 1u;
+    }
+    if (r == UINT32_MAX) {
+      /* through the chunk in order, to the next one's start */
+      ch->s = t;
+      if (i + 1u < sp->n) {
+        uint64_t end = (uint64_t)ch->end * 8u;
+
+        rd_seek(x, t.bit);
+        while (t.bit < end && t.blk < sp->total) {
+          uint32_t ci = sp->slot_ci[t.slot];
+
+          t.dc[ci] = (int32_t)((uint32_t)t.dc[ci] + (uint32_t)block_drop(&x->r.b, j->dc[j->comp[ci].td], j->ac[j->comp[ci].ta]));
+          t.bit    = rd_bit(&x->r);
+          t.blk++;
+          t.slot = t.slot + 1u == sp->nblk ? 0u : t.slot + 1u;
+        }
+      }
+      continue;
+    }
+    ch->s = t;
+    if (i + 1u < sp->n) {
+      const jsync_t *a = &ch->rec[r], *e = &ch->cross;
+
+      if (!ch->crossed) return false;
+      t.blk += e->blk - a->blk;
+      for (k = 0; k < J_COMPS; k++) t.dc[k] = (int32_t)((uint32_t)t.dc[k] + (uint32_t)e->dc[k] - (uint32_t)a->dc[k]);
+      t.bit  = e->bit;
+      t.slot = e->slot;
+    }
+  }
+  /* starts in order, none past the end */
+  for (i = 1; i < sp->n; i++) {
+    if (sp->ch[i].s.blk < sp->ch[i - 1u].s.blk || sp->ch[i].s.blk > sp->total) return false;
+  }
+  return true;
+}
+
+/* the one-pass sequential scan's single segment on `pool`; false with
+   nothing written: decode it in order */
+static bool
+scan_spec(jpg_t *j, im_pool_t *pool, uint32_t w, uint32_t h, size_t margin, bool *done) {
+  jspec_t  sp;
+  jctx_t   ctx[IM_POOL_MAX];
+  jchunk_t ch[IM_POOL_MAX];
+  size_t   len = j->sd.seg[0].end - j->sd.seg[0].start, part;
+  uint32_t nw = im_pool_size(pool), i, s = 0;
+  bool     ok = false;
+
+  *done = false;
+  memset(&sp, 0, sizeof(sp));
+  memset(ch, 0, sizeof(ch));
+  sp.j = j;
+  sp.w = w;
+  /* the MCU's blocks, in order */
+  for (i = 0; i < j->nscomp; i++) {
+    const jcomp_t *c  = &j->comp[j->scomp[i]];
+    uint32_t       nh = j->nscomp == 1u ? 1u : c->h, nv = j->nscomp == 1u ? 1u : c->v, a, b;
+
+    for (b = 0; b < nv; b++) {
+      for (a = 0; a < nh; a++) {
+        if (s >= 64u) return false;
+        sp.slot_ci[s] = (uint8_t)j->scomp[i];
+        sp.slot_h[s]  = (uint8_t)a;
+        sp.slot_v[s]  = (uint8_t)b;
+        s++;
+      }
+    }
+  }
+  sp.nblk  = s;
+  sp.total = w * h * s;
+  sp.n     = nw;
+  if (len / sp.n < (64u << 10)) sp.n = (uint32_t)(len / (64u << 10));
+  if (sp.n < 3u) return false;
+  part = len / sp.n;
+  for (i = 0; i < sp.n; i++) {
+    ch[i].start  = part * i;
+    ch[i].end    = i + 1u < sp.n ? part * (i + 1u) : len;
+    ch[i].window = ((uint64_t)ch[i].start + (part / 2u < (16u << 10) ? part / 2u : (16u << 10))) * 8u;
+  }
+  for (i = 0; i < nw; i++) {
+    if (!ctx_init(&ctx[i], j, margin)) {
+      while (i--) free(ctx[i].tail);
+      return false;
+    }
+  }
+  sp.ctx = ctx;
+  sp.ch  = ch;
+  if (im_pool_run(pool, spec_pass1, &sp, sp.n) && spec_pass2(&sp, &ctx[0])) {
+    ok    = im_pool_run(pool, spec_pass3, &sp, sp.n);
+    *done = true;
+  }
+  for (i = 0; i < nw; i++) free(ctx[i].tail);
+  for (i = 0; i < sp.n; i++) free(ch[i].rec);
+  return ok;
+}
+
 /* the scan whose data `j->sd` holds; `pool` its threads, if any */
 IM_HIDE bool
 jpg_scan_huff(jpg_t *j, im_pool_t *pool) {
@@ -703,6 +1014,15 @@ jpg_scan_huff(jpg_t *j, im_pool_t *pool) {
       j->last_good = pa.last_good;
       return ok;
     }
+  }
+
+  /* one segment, one pass, sequential: on threads, speculatively */
+  if (pool && !j->restart && !j->multiscan && j->process == J_SEQUENTIAL && j->sd.nseg >= 1u
+      && j->sd.seg[0].end - j->sd.seg[0].start >= (256u << 10)) {
+    bool done;
+
+    if (scan_spec(j, pool, w, h, margin, &done)) return true;
+    if (done) return false;
   }
 
   /* in order */
