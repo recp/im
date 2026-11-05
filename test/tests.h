@@ -31,6 +31,12 @@ TEST_DECLARE(jp2_16bit)
 TEST_DECLARE(jp2_threads)
 TEST_DECLARE(jp2_truncated)
 
+/* jpg */
+TEST_DECLARE(jpg_fixtures)
+TEST_DECLARE(jpg_16bit)
+TEST_DECLARE(jpg_icc)
+TEST_DECLARE(jpg_truncated)
+
 /*****************************************************************************/
 
 TEST_LIST {
@@ -39,6 +45,12 @@ TEST_LIST {
   TEST_ENTRY(jp2_16bit)
   TEST_ENTRY(jp2_threads)
   TEST_ENTRY(jp2_truncated)
+
+  /* jpg */
+  TEST_ENTRY(jpg_fixtures)
+  TEST_ENTRY(jpg_16bit)
+  TEST_ENTRY(jpg_icc)
+  TEST_ENTRY(jpg_truncated)
 };
 
 #endif /* tests_h */

@@ -4,6 +4,7 @@ cmake_minimum_required(VERSION 3.13)
 set(TESTFILES
   runner.c
   src/test_jp2.c
+  src/test_jpg.c
   )
 
 set(TEST_MAIN tests)
