@@ -16,6 +16,8 @@ TODO
 - [ ] Streaming Decode + Progresive Support 
 - [ ] GPU support
 - [x] Cocoa and Win32 helpers
+- [x] From memory (`im_load_mem`: JPEG, JPEG 2000), with what a PDF asks: threads, a JPEG's colour
+      transform (DCTDecode's /ColorTransform), CMYK as stored, RGB padded to RGB0, a palette's indexes
 - [x] JPEG (libjpeg-turbo's pixels, to the byte)
   - [x] baseline, extended (8 and 12 bits), progressive; Huffman and arithmetic coding
   - [x] lossless, 2 to 16 bits
