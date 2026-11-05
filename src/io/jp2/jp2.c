@@ -254,7 +254,7 @@ typedef struct xscratch {
   size_t    lift_len;
 } xscratch_t;
 
-enum { X_THREADS = 8 }; /* a decode's, the caller's among them */
+enum { X_THREADS = 16 }; /* a decode's, the caller's among them */
 
 struct jpx;
 typedef bool (*xjob_fn)(struct jpx *j, xscratch_t *s, void *ctx, uint32_t item);
@@ -1896,6 +1896,17 @@ idwt_cols(jpx_t *j, xscratch_t *s, void *ctx, uint32_t item) {
 
 /* -- the pool ---------------------------------------------------------------------- */
 
+/* the next item, without the lock: a round's start and end are under it,
+   its items taken by one atomic add each */
+#if defined(_MSC_VER) && !defined(__clang__)
+#  include <intrin.h>
+#  define X_TAKE(p)     ((uint32_t)_InterlockedExchangeAdd((volatile long *)(p), 1))
+#  define X_RESET(p)    ((void)_InterlockedExchange((volatile long *)(p), 0))
+#else
+#  define X_TAKE(p)     __atomic_fetch_add((p), 1u, __ATOMIC_RELAXED)
+#  define X_RESET(p)    __atomic_store_n((p), 0u, __ATOMIC_RELAXED)
+#endif
+
 static void
 pool_main(void *arg) {
   xworker_t *w = arg;
@@ -1905,19 +1916,22 @@ pool_main(void *arg) {
 
   thread_lock(&p->m);
   for (;;) {
+    xjob_fn  fn;
+    void    *ctx;
+    uint32_t items, i;
+    bool     ok = true;
+
     while (!p->quit && p->round == seen) thread_cond_wait(&p->go, &p->m);
     if (p->quit) break;
-    seen = p->round;
+    seen  = p->round;
+    fn    = p->fn;
+    ctx   = p->ctx;
+    items = p->items;
     p->busy++;
-    while (p->next < p->items) {
-      uint32_t i = p->next++;
-      bool     ok;
-
-      thread_unlock(&p->m);
-      ok = p->fn(j, &j->scratch[w->id], p->ctx, i);
-      thread_lock(&p->m);
-      if (!ok) p->failed = true;
-    }
+    thread_unlock(&p->m);
+    while ((i = X_TAKE(&p->next)) < items) ok = fn(j, &j->scratch[w->id], ctx, i) && ok;
+    thread_lock(&p->m);
+    if (!ok) p->failed = true;
     if (!--p->busy) thread_cond_broadcast(&p->idle);
   }
   thread_unlock(&p->m);
@@ -1980,19 +1994,19 @@ pool_run(jpx_t *j, xjob_fn fn, void *ctx, uint32_t n) {
     return ok;
   }
   thread_lock(&p->m);
+  /* a worker late for the last round may still hold its job: done with it
+     first, so the counter it reads is that round's */
+  while (p->busy) thread_cond_wait(&p->idle, &p->m);
   p->fn     = fn;
   p->ctx    = ctx;
   p->items  = n;
-  p->next   = 0;
   p->failed = false;
+  X_RESET(&p->next);
   p->round++;
   thread_cond_broadcast(&p->go);
-  while (p->next < p->items) {
-    i = p->next++;
-    thread_unlock(&p->m);
-    ok = fn(j, &j->scratch[0], ctx, i) && ok;
-    thread_lock(&p->m);
-  }
+  thread_unlock(&p->m);
+  while ((i = X_TAKE(&p->next)) < n) ok = fn(j, &j->scratch[0], ctx, i) && ok;
+  thread_lock(&p->m);
   while (p->busy) thread_cond_wait(&p->idle, &p->m);
   ok = ok && !p->failed;
   thread_unlock(&p->m);
