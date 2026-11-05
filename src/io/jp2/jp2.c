@@ -1759,6 +1759,26 @@ run97(float *x, const float *a, const float *b, size_t n, float c) {
   for (k = 0; k < n; k++) x[k] = x[k] + (a[k] + b[k]) * c;
 }
 
+/* the first two with OpenJPEG's scaling of lows (KL) and highs (KH) done
+   as they're read: the products a scaling pass would have stored, the
+   same roundings, two passes over memory fewer */
+#define KL 1.230174105f
+#define KH 1.625732422f
+
+static void
+run97_first(float *x, const float *a, const float *b, size_t n, float c) {
+  size_t k;
+
+  for (k = 0; k < n; k++) x[k] = x[k] * KL + (a[k] * KH + b[k] * KH) * c;
+}
+
+static void
+run97_second(float *x, const float *a, const float *b, size_t n, float c) {
+  size_t k;
+
+  for (k = 0; k < n; k++) x[k] = x[k] * KH + (a[k] + b[k]) * c;
+}
+
 static void
 run53_low(int32_t *x, const int32_t *a, const int32_t *b, size_t n) {
   size_t k;
@@ -1797,6 +1817,10 @@ step_apart(void *x, const void *y, uint32_t n, uint32_t m, int32_t off, size_t s
     }
     if (kind == 0) {
       run97((float *)x + (size_t)i * step, (const float *)y + (size_t)a * step, (const float *)y + (size_t)b * step, cnt, c);
+    } else if (kind == 3) {
+      run97_first((float *)x + (size_t)i * step, (const float *)y + (size_t)a * step, (const float *)y + (size_t)b * step, cnt, c);
+    } else if (kind == 4) {
+      run97_second((float *)x + (size_t)i * step, (const float *)y + (size_t)a * step, (const float *)y + (size_t)b * step, cnt, c);
     } else if (kind == 1) {
       run53_low((int32_t *)x + (size_t)i * step, (const int32_t *)y + (size_t)a * step, (const int32_t *)y + (size_t)b * step, cnt);
     } else {
@@ -1824,23 +1848,31 @@ lift_apart(void *low, void *high, uint32_t sn, uint32_t dn, uint32_t cas, size_t
     return;
   }
   if (sn + dn <= 1u) return;
+  /* both bands there: the scalings in the first two steps */
+  if (sn && dn) {
+    step_apart(low, high, sn, dn, (int32_t)cas - 1, step, v, 3, -0.443506852f);
+    step_apart(high, low, dn, sn, -(int32_t)cas, step, v, 4, -0.882911075f);
+    step_apart(low, high, sn, dn, (int32_t)cas - 1, step, v, 0, 0.052980118f);
+    step_apart(high, low, dn, sn, -(int32_t)cas, step, v, 0, 1.586134342f);
+    return;
+  }
   /* OpenJPEG's: the high band scaled by its historic 2/K (its steps for 9/7
      carry no gain, which this makes up) */
   if (step == 1u && v == 1u) {
     float *x = low, *y = high;
 
-    for (i = 0; i < sn; i++) x[i] *= 1.230174105f;
-    for (i = 0; i < dn; i++) y[i] *= 1.625732422f;
+    for (i = 0; i < sn; i++) x[i] *= KL;
+    for (i = 0; i < dn; i++) y[i] *= KH;
   } else {
     for (i = 0; i < sn; i++) {
       float *x = (float *)low + (size_t)i * step;
 
-      for (k = 0; k < v; k++) x[k] *= 1.230174105f;
+      for (k = 0; k < v; k++) x[k] *= KL;
     }
     for (i = 0; i < dn; i++) {
       float *x = (float *)high + (size_t)i * step;
 
-      for (k = 0; k < v; k++) x[k] *= 1.625732422f;
+      for (k = 0; k < v; k++) x[k] *= KH;
     }
   }
   step_apart(low, high, sn, dn, (int32_t)cas - 1, step, v, 0, -0.443506852f);
