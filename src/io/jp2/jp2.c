@@ -2648,15 +2648,199 @@ pick(const jpx_t *j, const jp2_t *x, bool raw, xpick_t *pk) {
   return true;
 }
 
+/* a sample of channel `c` as compose makes it 8 bits: through the
+   palette, then the depth to 8 (OpenJPEG's way where asked), or an index */
+static uint8_t
+sample8(const jpx_t *j, const jp2_t *x, const xchan_t *c, const jxopts_t *o, int32_t s) {
+  if (c->col >= 0) {
+    if (j->sgnd[c->comp]) s -= 1 << (j->prec[c->comp] - 1u);
+    s = s < 0 ? 0 : s >= (int32_t)x->pal_n ? (int32_t)x->pal_n - 1 : s;
+    s = x->pal[(uint32_t)s * x->pal_cols + (uint32_t)c->col];
+  }
+  if (o->raw) {
+    int32_t t = s < 0 ? 0 : s;
+
+    return o->eight ? eight_shift(s, c->bits, true) : (uint8_t)(t > 255 ? 255 : t);
+  }
+  return o->eight ? eight_shift(s, c->bits, false) : eight(s, c->bits);
+}
+
+enum { X_PIECE = 1u << 15 }; /* pixels of a row a pool item lays */
+
+/* 8-bit pixels laid where they end: the samples of `nuse` channels, each
+   through its table (sample8's for each value its plane holds) */
+typedef struct xlay {
+  uint32_t        nuse, ncol, w, step, pieces;
+  uint32_t        comp[5];
+  const uint32_t *cols[5]; /* the plane's column for each X; NULL: X */
+  const uint8_t  *lut[5];
+  const uint8_t  *whole;   /* one component for all, full size: a pixel's
+                              bytes by its sample (four a value) */
+  uint8_t        *px, *alpha;
+  size_t          pitch;
+  bool            apart, pad;
+} xlay_t;
+
+static bool
+lay_piece(jpx_t *j, xscratch_t *s, void *ctx, uint32_t item) {
+  const xlay_t *l = ctx;
+  uint32_t      Y = item / l->pieces, X0 = (item % l->pieces) * X_PIECE, X1, X, u;
+  uint8_t      *o = l->px + (size_t)Y * l->pitch + (size_t)X0 * l->step, *q;
+
+  (void)s;
+  X1 = l->w - X0 > X_PIECE ? X0 + X_PIECE : l->w;
+  if (l->whole) {
+    uint32_t        cp = l->comp[0];
+    int64_t         sy = (int64_t)(j->y0 + Y) - (int64_t)j->py0[cp];
+    const uint16_t *src;
+
+    sy  = sy < 0 ? 0 : sy >= j->ph[cp] ? (int64_t)j->ph[cp] - 1 : sy;
+    src = j->plane[cp] + (size_t)sy * j->pw[cp];
+    if (l->step == 4u) {
+      for (X = X0; X < X1; X++, o += 4) memcpy(o, l->whole + (size_t)src[X] * 4u, 4);
+    } else {
+      for (X = X0; X < X1; X++, o += l->step) memcpy(o, l->whole + (size_t)src[X] * 4u, l->step);
+    }
+    return true;
+  }
+  for (u = 0; u < l->nuse; u++) {
+    uint32_t        cp = l->comp[u];
+    int64_t         sy = (int64_t)(j->y0 + Y) / j->dy[cp] - (int64_t)j->py0[cp];
+    const uint16_t *src;
+    const uint8_t  *lut = l->lut[u];
+    const uint32_t *cl  = l->cols[u];
+    size_t          st  = l->step;
+
+    sy  = sy < 0 ? 0 : sy >= j->ph[cp] ? (int64_t)j->ph[cp] - 1 : sy;
+    src = j->plane[cp] + (size_t)sy * j->pw[cp];
+    q   = o + u;
+    if (l->apart && u == l->ncol) {
+      q  = l->alpha + (size_t)Y * l->w + X0;
+      st = 1u;
+    }
+    if (cl) {
+      for (X = X0; X < X1; X++, q += st) *q = lut[src[cl[X]]];
+    } else if (st == 1u) {
+      for (X = X0; X < X1; X++) q[X - X0] = lut[src[X]];
+    } else {
+      for (X = X0; X < X1; X++, q += st) *q = lut[src[X]];
+    }
+  }
+  if (l->pad) {
+    for (X = X0, q = o + 3; X < X1; X++, q += 4) *q = 0xFFu;
+  }
+  return true;
+}
+
+/* compose's 8-bit pixels (no sYCC, no premultiplied opacity apart) the
+   quick way: the tables, then the pieces of rows on the pool, straight into
+   RGB0, the opacity's own plane, the caller's memory. False with `*px`
+   NULL: no memory; `*px` NULL and true: laid in the caller's */
+static bool
+compose8(jpx_t *j, const jp2_t *x, const jxopts_t *o, const xchan_t *ch, const uint32_t *use, uint32_t nuse,
+         uint32_t ncol, bool apart, uint8_t **pxp, void **alphap, uint32_t *stepp, size_t *lenp, uint32_t *padp) {
+  xlay_t    l;
+  uint32_t  w = j->x1 - j->x0, h = j->y1 - j->y0, u, X, total = 0;
+  uint32_t *cols = NULL;
+  uint8_t  *luts, *px;
+  size_t    n = (size_t)w * h, row;
+  bool      ok;
+
+  memset(&l, 0, sizeof(l));
+  l.nuse  = nuse;
+  l.ncol  = ncol;
+  l.w     = w;
+  l.apart = apart;
+  l.step  = apart ? ncol : nuse;
+  l.pad   = o->pad && l.step == 3u;
+  l.step  = l.pad ? 4u : l.step;
+  row     = (size_t)w * l.step;
+  for (u = 0; u < nuse; u++) total += 1u << j->prec[ch[use[u]].comp];
+  if (!(luts = malloc(total + ((size_t)4u << j->prec[ch[use[0]].comp])))) return false;
+  total = 0;
+  for (u = 0; u < nuse; u++) {
+    const xchan_t *c = &ch[use[u]];
+    uint32_t       cp = c->comp, v;
+    uint8_t       *lut = luts + total;
+
+    for (v = 0; v < 1u << j->prec[cp]; v++) lut[v] = sample8(j, x, c, o, (int32_t)v);
+    total     += 1u << j->prec[cp];
+    l.lut[u]  = lut;
+    l.comp[u] = cp;
+    /* the plane's columns: X itself where the component is full size */
+    if (j->dx[cp] != 1u || j->px0[cp] != j->x0 || j->pw[cp] < w) {
+      if (!cols && !(cols = malloc((size_t)w * sizeof(*cols) * 5u))) {
+        free(luts);
+        return false;
+      }
+      for (X = 0; X < w; X++) {
+        int64_t sx = (int64_t)(j->x0 + X) / j->dx[cp] - (int64_t)j->px0[cp];
+
+        cols[u * w + X] = (uint32_t)(sx < 0 ? 0 : sx >= j->pw[cp] ? (int64_t)j->pw[cp] - 1 : sx);
+      }
+      l.cols[u] = cols + (size_t)u * w;
+    }
+  }
+  /* every channel one full-size component's (a palette's colours, gray):
+     each value's pixel whole, four bytes a value */
+  if (!apart && l.step > 1u && !cols && j->dy[l.comp[0]] == 1u) {
+    uint32_t v, nv = 1u << j->prec[l.comp[0]];
+    uint8_t *whole = luts + total;
+
+    for (u = 1; u < nuse && l.comp[u] == l.comp[0]; u++) {
+    }
+    if (u == nuse) {
+      for (v = 0; v < nv; v++) {
+        for (u = 0; u < 4u; u++) whole[v * 4u + u] = u < nuse ? l.lut[u][v] : 0xFFu;
+      }
+      l.whole = whole;
+    }
+  }
+  if (o->dest) {
+    if (o->dest_stride < row || o->dest_size < o->dest_stride * (h - 1u) + row) {
+      free(luts);
+      free(cols);
+      return false;
+    }
+    px      = o->dest;
+    l.pitch = o->dest_stride;
+  } else {
+    px      = malloc(n * l.step);
+    l.pitch = row;
+  }
+  if (!px || (apart && !(l.alpha = malloc(n)))) {
+    if (px != o->dest) free(px);
+    free(luts);
+    free(cols);
+    return false;
+  }
+  l.px     = px;
+  l.pieces = (w + X_PIECE - 1u) / X_PIECE;
+  ok       = pool_run(j, lay_piece, &l, l.pieces * h);
+  free(luts);
+  free(cols);
+  if (!ok) {
+    if (px != o->dest) free(px);
+    free(l.alpha);
+    return false;
+  }
+  *pxp    = px == o->dest ? NULL : px;
+  *alphap = l.alpha;
+  *stepp  = l.step;
+  *lenp   = o->dest ? o->dest_stride * (h - 1u) + row : n * l.step;
+  *padp   = o->dest ? (uint32_t)(o->dest_stride - row) : 0u;
+  return true;
+}
+
 /* the planes as `im`'s pixels: the colours then the opacity, a sample 8
    bits or (any channel deeper) 16 in `order` */
 static bool
 compose(jpx_t *j, const jp2_t *x, ImImage *im, const jxopts_t *o) {
   ImByteOrder order = o->order;
   xchan_t   ch[X_COMPS];
-  uint32_t  ncol, space, colour[4], use[5], nuse, k, u, w = j->x1 - j->x0, h = j->y1 - j->y0, X, Y, step;
+  uint32_t  ncol, space, colour[4], use[5], nuse, k, u, w = j->x1 - j->x0, h = j->y1 - j->y0, X, Y, step, rowpad = 0;
   int32_t   opacity = -1;
-  bool      ycc = false, premult = false, wide = false, direct;
+  bool      ycc = false, premult = false, wide = false, direct, laid = false;
   uint32_t *cols;
   uint8_t  *px, *icc = NULL;
   void     *alpha = NULL;
@@ -2682,6 +2866,24 @@ compose(jpx_t *j, const jp2_t *x, ImImage *im, const jxopts_t *o) {
   for (u = 0; u < ncol; u++) use[u] = colour[u];
   if (opacity >= 0) use[nuse++] = (uint32_t)opacity;
   for (u = 0; u < nuse; u++) wide = wide || (ch[use[u]].bits > 8u && !o->eight);
+
+  /* 8 bits, no sYCC, no premultiplied opacity apart: the quick way, laid
+     where it ends (small deep images, whose tables are more than their
+     samples, compose's own) */
+  if (!ycc && !wide && !(premult && opacity >= 0 && o->opacity == IM_OPACITY_APART)) {
+    size_t lut = 0;
+
+    for (u = 0; u < nuse; u++) lut += (size_t)1 << j->prec[ch[use[u]].comp];
+    if (lut <= 1024u || n >= lut * 4u) {
+      bool apart = opacity >= 0 && o->opacity == IM_OPACITY_APART;
+
+      px = NULL;
+      if (!compose8(j, x, o, ch, use, nuse, ncol, apart, &px, &alpha, &step, &len, &rowpad)) return false;
+      if (apart) opacity = -1;
+      laid = true;
+      goto made;
+    }
+  }
 
   step = nuse;
   len  = n * step * (wide ? 2u : 1u);
@@ -2787,7 +2989,7 @@ made:
   /* the opacity apart: the colours drawn together (un-premultiplied where
      the JP2 says premultiplied, to the nearest), the last sample of
      each pixel to its own plane */
-  if (o->opacity == IM_OPACITY_APART && opacity >= 0) {
+  if (!laid && o->opacity == IM_OPACITY_APART && opacity >= 0) {
     uint32_t top = wide ? 65535u : 255u;
 
     if (!(alpha = malloc(n * (wide ? 2u : 1u)))) {
@@ -2832,7 +3034,7 @@ made:
   }
 
   /* RGB as RGB0: each pixel spread to four, from the last (in place) */
-  if (o->pad && step == 3u) {
+  if (!laid && o->pad && step == 3u) {
     uint8_t *q = realloc(px, n * 4u * (wide ? 2u : 1u));
 
     if (!q) {
@@ -2873,8 +3075,11 @@ made:
     memcpy(icc, x->icc_data, x->icc_len);
   }
 
-  /* the caller's memory: the rows there, at its stride */
-  if (o->dest) {
+  /* the caller's memory: the rows there, at its stride (laid there already
+     the quick way) */
+  if (laid) {
+    im->row_pad_last = rowpad;
+  } else if (o->dest) {
     size_t row = (size_t)w * step * (wide ? 2u : 1u), y;
 
     if (o->dest_stride < row || o->dest_size < o->dest_stride * (h - 1u) + row
