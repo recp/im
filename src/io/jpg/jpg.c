@@ -253,9 +253,11 @@ idct_all(jpg_t *j) {
 
 /* -- markers ----------------------------------------------------------------------- */
 
+static bool frame_size(jpg_t *j);
+
 static bool
 read_sof(jpg_t *j, uint32_t m, const uint8_t *s, uint32_t len) {
-  uint32_t i, unit;
+  uint32_t i;
 
   if (j->frame || len < 6u) return false;
   j->prec   = s[0];
@@ -269,7 +271,7 @@ read_sof(jpg_t *j, uint32_t m, const uint8_t *s, uint32_t len) {
   default: j->process = J_SEQUENTIAL;  break;
   }
   if (j->process == J_LOSSLESS && j->arith) return false; /* libjpeg has none: not yet */
-  if (!j->width || !j->height || !j->ncomp || j->ncomp > J_COMPS || len != 6u + j->ncomp * 3u) return false;
+  if (!j->width || !j->ncomp || j->ncomp > J_COMPS || len != 6u + j->ncomp * 3u) return false;
   if (j->process == J_LOSSLESS ? j->prec < 2u || j->prec > 16u : j->prec != 8u && j->prec != 12u) return false;
   j->idct = j->prec == 8u ? jpg_idct8_best() : jpg_idct12;
 
@@ -285,6 +287,16 @@ read_sof(jpg_t *j, uint32_t m, const uint8_t *s, uint32_t len) {
     if (c->h > j->hmax) j->hmax = c->h;
     if (c->v > j->vmax) j->vmax = c->v;
   }
+  j->frame = true;
+  /* no height: a DNL after the first scan gives it (frame_size then) */
+  return j->height ? frame_size(j) : true;
+}
+
+/* the frame's MCUs and planes, its size known */
+static bool
+frame_size(jpg_t *j) {
+  uint32_t i, unit;
+
   /* a data unit: a block, or (lossless) a sample */
   unit    = j->process == J_LOSSLESS ? 1u : 8u;
   j->mcux = (j->width + unit * j->hmax - 1u) / (unit * j->hmax);
@@ -304,8 +316,22 @@ read_sof(jpg_t *j, uint32_t m, const uint8_t *s, uint32_t len) {
     if (samples > J_SAMPLES || !(c->plane = malloc((size_t)samples * (j->prec > 8u ? 2u : 1u)))) return false;
     memset(c->bits, -1, sizeof(c->bits));
   }
-  j->frame = true;
   return true;
+}
+
+static uint32_t marker_at(const uint8_t **pp, const uint8_t *end);
+
+/* the height a DNL gives (B.2.5): the first marker past the first scan's
+   data from `p` but its restarts; 0 none */
+static uint32_t
+dnl_height(const uint8_t *p, const uint8_t *end) {
+  for (;;) {
+    uint32_t m = marker_at(&p, end);
+
+    if (m >= 0xD0u && m <= 0xD7u) continue;
+    if (m != 0xDCu || end - p < 4 || be16(p) != 4u) return 0u;
+    return be16(p + 2);
+  }
 }
 
 /* DQT: 16-bit entries for any precision nibble but 0, as libjpeg */
@@ -872,6 +898,8 @@ decode_stream(jpg_t *j, ImImage *im, ImByteOrder order, uint8_t **padp) {
       if (first) {
         jpg_huff_std(j);
         if (!j->frame) return false;
+        /* the height a DNL gives, where the frame gave none */
+        if (!j->height && (tail || !(j->height = dnl_height(p, end)) || !frame_size(j))) return false;
       }
       if (!read_sos(j, s, len)) return false;
       if (first) {
