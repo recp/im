@@ -579,6 +579,14 @@ scan(jpg_t *j) {
    running. In order as far as anything shows: each scan its own state,
    the last one's last good row the image's. At most J_BATCH at a time
    (their dependencies a mask), more after those are done. */
+/* the row-by-row waits need locks: without a thread layer (a caller's
+   runner then) the scans go in order, each on the threads its own way */
+#if IM_NO_THREADS
+#  define J_FLOW 0
+#else
+#  define J_FLOW 1
+#endif
+
 enum { J_BATCH = 64 };
 
 typedef struct jdeferred {
@@ -910,7 +918,10 @@ decode_stream(jpg_t *j, ImImage *im, ImByteOrder order, uint8_t **padp) {
       if (first) {
         uint32_t i;
 
-        if (j->threads > 1u && (uint64_t)j->width * j->height >= J_POOL_MIN) j->pool = im_pool_new(j->threads);
+        if ((uint64_t)j->width * j->height >= J_POOL_MIN) {
+          if (j->runner.run) j->pool = im_pool_wrap(&j->runner);
+          else if (j->threads > 1u) j->pool = im_pool_new(j->threads);
+        }
         j->multiscan = j->process != J_LOSSLESS && (j->process == J_PROGRESSIVE || j->nscomp < j->ncomp);
         for (i = 0; i < j->ncomp && j->multiscan; i++) {
           jcomp_t *c = &j->comp[i];
@@ -928,7 +939,7 @@ decode_stream(jpg_t *j, ImImage *im, ImByteOrder order, uint8_t **padp) {
       if (tail) {
         static const uint8_t fake[3] = { 0xD9u, 0xFFu, 0xD9u };
 
-        if (j->pool && j->multiscan) {
+        if (j->pool && j->multiscan && J_FLOW) {
           if (!defer_scan(j, odd ? fake : fake + 1, fake + 3, NULL)) return false;
         } else if (!jpg_unstuff(&j->sd, odd ? fake : fake + 1, fake + 3) || !scan(j)) {
           return false;
@@ -936,7 +947,7 @@ decode_stream(jpg_t *j, ImImage *im, ImByteOrder order, uint8_t **padp) {
         j->nscans++;
         break;
       }
-      if (j->pool && j->multiscan) {
+      if (j->pool && j->multiscan && J_FLOW) {
         /* kept for the waves; where the next marker is */
         if (!defer_scan(j, p, end, &p)) return false;
         j->nscans++;
@@ -1029,6 +1040,7 @@ jpg_decode_mem(const uint8_t *data, size_t len, ImImage *im, const jopts_t *o) {
   j->want_transform = o->transform;
   j->cmyk_stored    = o->cmyk_stored;
   j->rgb_pad        = o->rgb_pad;
+  j->runner         = o->runner;
   ok                = decode(j, im, o->order);
   im_pool_free(j->pool);
   jpg_free(j);
@@ -1045,6 +1057,7 @@ opts_of(const im_open_config_t *c) {
   o.transform   = c->jpegTransform < 0 ? -1 : c->jpegTransform != 0;
   o.cmyk_stored = c->cmykAsStored;
   o.rgb_pad     = c->rgbPadded;
+  o.runner      = c->runner;
   return o;
 }
 

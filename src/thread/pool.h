@@ -28,15 +28,18 @@
 
 enum { IM_POOL_MAX = 16 }; /* threads a pool, the caller's among them */
 
-/* `worker` 0 (the caller) to im_pool_size() - 1: its own scratch */
-typedef bool (*im_job_fn)(void *ctx, uint32_t worker, uint32_t item);
-
+/* a job (im_job_fn, options.h): `worker` 0 (the caller) to
+   im_pool_size() - 1, its own scratch */
 typedef struct im_pool im_pool_t;
 
 /* up to `threads` (the caller's counted, at most the CPUs); NULL where
    there'd be none besides the caller's */
 IM_HIDE im_pool_t *im_pool_new(uint32_t threads);
 IM_HIDE uint32_t   im_pool_size(const im_pool_t *p);
+
+/* the caller's runner as a pool (no thread of im's); NULL where it isn't
+   one (workers 2 to IM_POOL_MAX) */
+IM_HIDE im_pool_t *im_pool_wrap(const im_runner_t *r);
 
 /* `fn` for items [0, n); false if any item's was. With no pool, on the
    caller alone */

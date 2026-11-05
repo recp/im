@@ -30,6 +30,7 @@ struct im_pool {
   uint32_t        items, next, busy, round, nworkers;
   bool            quit, failed;
   im_worker_t     worker[IM_POOL_MAX - 1];
+  im_runner_t     ext;      /* the caller's (ext.run): no thread here */
 };
 
 static void
@@ -83,9 +84,18 @@ im_pool_new(uint32_t threads) {
   return p;
 }
 
+IM_HIDE im_pool_t*
+im_pool_wrap(const im_runner_t *r) {
+  im_pool_t *p;
+
+  if (!r || !r->run || r->workers < 2u || r->workers > IM_POOL_MAX || !(p = calloc(1, sizeof(*p)))) return NULL;
+  p->ext = *r;
+  return p;
+}
+
 IM_HIDE uint32_t
 im_pool_size(const im_pool_t *p) {
-  return p ? p->nworkers + 1u : 1u;
+  return !p ? 1u : p->ext.run ? p->ext.workers : p->nworkers + 1u;
 }
 
 IM_HIDE bool
@@ -97,6 +107,7 @@ im_pool_run(im_pool_t *p, im_job_fn fn, void *ctx, uint32_t n) {
     for (i = 0; i < n; i++) ok = fn(ctx, 0u, i) && ok;
     return ok;
   }
+  if (p->ext.run) return p->ext.run(p->ext.ctx, fn, ctx, n);
   thread_lock(&p->m);
   p->fn     = fn;
   p->ctx    = ctx;
@@ -122,6 +133,10 @@ im_pool_free(im_pool_t *p) {
   uint32_t i;
 
   if (!p) return;
+  if (p->ext.run) {
+    free(p);
+    return;
+  }
   if (p->nworkers) {
     thread_lock(&p->m);
     p->quit = true;

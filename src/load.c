@@ -57,6 +57,7 @@ im_config(im_option_base_t *options[], ImOpenIntent openIntent) {
         case IM_OPTION_PALETTE_INDEXES:      conf.paletteIndexes = ((im_option_bool_t*)opt)->on;         break;
         case IM_OPTION_EIGHT_BITS:           conf.eightBits      = ((im_option_bool_t*)opt)->on;         break;
         case IM_OPTION_OPACITY:              conf.opacity        = ((im_option_int_t*)opt)->value;       break;
+        case IM_OPTION_RUNNER:               conf.runner         = ((im_option_runner_t*)opt)->runner;   break;
         default: break;
       }
     }

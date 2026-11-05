@@ -78,6 +78,7 @@ typedef struct im_open_config_t {
   bool              paletteIndexes;
   bool              eightBits;
   int32_t           opacity;        /* ImOpacity */
+  im_runner_t       runner;         /* run NULL: none */
 } im_open_config_t;
 
 /* the options as a decoder reads them (load.c) */

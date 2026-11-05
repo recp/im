@@ -155,8 +155,10 @@ typedef struct jpg {
      Adobe CMYK left inverted, RGB as RGB0 */
   int32_t    want_transform;
   bool       cmyk_stored, rgb_pad;
-  /* threads: at most `threads`, the pool's (NULL: the caller's alone) */
+  /* threads: at most `threads`, the pool's (NULL: the caller's alone), or
+     the caller's runner */
   uint32_t   threads;
+  im_runner_t runner;
   im_pool_t *pool;
   /* a multi-scan image's scans on threads: those kept; a kept one's
      place among them, the earlier ones it waits for (a mask) */
@@ -178,6 +180,7 @@ typedef struct jopts {
   int32_t     transform;   /* -1: as the file says; 0 none; 1 YCbCr/YCCK to RGB/CMYK */
   bool        cmyk_stored; /* an Adobe CMYK left inverted */
   bool        rgb_pad;     /* RGB as RGB0 */
+  im_runner_t runner;      /* the caller's threads (run NULL: none) */
 } jopts_t;
 
 IM_HIDE bool jpg_decode_mem(const uint8_t *data, size_t len, ImImage *im, const jopts_t *o);

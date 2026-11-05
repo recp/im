@@ -77,7 +77,12 @@ typedef enum im_option_type_t {
      dropped), apart in ImImage's `alpha` (the colours un-premultiplied;
      CMYK's kept), or not decoded at all */
   IM_OPTION_OPACITY,
+
+  /* the caller's threads for a decode's parallel work (im_option_runner);
+     im starts none of its own then */
+  IM_OPTION_RUNNER,
 } im_option_type_t;
+
 
 typedef enum ImOpacity {
   IM_OPACITY_INTERLEAVED = 0,
@@ -88,6 +93,27 @@ typedef enum ImOpacity {
 typedef struct im_option_base_t {
   im_option_type_t type;
 } im_option_base_t;
+
+/* one item of a decode's parallel work: `worker` below the runner's
+   `workers`; false: the decode fails */
+typedef bool (*im_job_fn)(void *arg, uint32_t worker, uint32_t item);
+
+/* The caller's threads. run() calls job(arg, w, i) once for each i < n and
+   returns when all are done (false if any job returned false): w below
+   `workers` (2 to 16) and none shared by two jobs running at once; items
+   started in index order, a started one run to its end (a job may wait for
+   an earlier one: JPEG's progressive scans do, row by row). An image
+   smaller than 256K pixels doesn't call it. */
+typedef struct im_runner {
+  void     *ctx;
+  uint32_t  workers;
+  bool    (*run)(void *ctx, im_job_fn job, void *arg, uint32_t n);
+} im_runner_t;
+
+typedef struct im_option_runner_t {
+  im_option_base_t base;
+  im_runner_t      runner;
+} im_option_runner_t;
 
 #define IM_OPTIONS (im_option_base_t *[])
 
@@ -141,6 +167,17 @@ im_option_int(im_option_type_t optype, int32_t value) {
 
   opt.base.type = optype;
   opt.value     = value;
+
+  return opt;
+}
+
+IM_INLINE
+im_option_runner_t
+im_option_runner(im_runner_t runner) {
+  im_option_runner_t opt;
+
+  opt.base.type = IM_OPTION_RUNNER;
+  opt.runner    = runner;
 
   return opt;
 }

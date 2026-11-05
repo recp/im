@@ -299,6 +299,7 @@ typedef struct jpx {
   xworker_t  worker[X_THREADS - 1];
   uint32_t   workers; /* threads besides the caller's */
   uint32_t   threads; /* at most, the caller's among them; 0 as many as help */
+  im_runner_t runner;  /* the caller's threads (run NULL: none) */
   uint8_t    zc[4][512], sc[256];
 } jpx_t;
 
@@ -2004,6 +2005,13 @@ pool_start(jpx_t *j) {
   uint32_t n    = cpus > X_THREADS ? X_THREADS - 1u : cpus > 1u ? cpus - 1u : 0u, i;
 
   if (j->threads && n > j->threads - 1u) n = j->threads - 1u;
+  /* the caller's runner: its workers, no thread of ours */
+  if (j->runner.run) {
+    if (j->runner.workers >= 2u && j->runner.workers <= X_THREADS && (uint64_t)(j->x1 - j->x0) * (j->y1 - j->y0) >= (1u << 18)) {
+      j->workers = j->runner.workers - 1u;
+    }
+    return;
+  }
 
   if (!n || (uint64_t)(j->x1 - j->x0) * (j->y1 - j->y0) < (1u << 18)) return;
   thread_mutex_init(&j->pool.m);
@@ -2026,7 +2034,10 @@ static void
 pool_stop(jpx_t *j) {
   uint32_t i;
 
-  if (!j->workers) return;
+  if (!j->workers || j->runner.run) {
+    j->workers = 0;
+    return;
+  }
   thread_lock(&j->pool.m);
   j->pool.quit = true;
   thread_cond_broadcast(&j->pool.go);
@@ -2041,6 +2052,20 @@ pool_stop(jpx_t *j) {
   j->workers = 0;
 }
 
+/* a job on the caller's runner: its worker's scratch */
+typedef struct xrun {
+  jpx_t  *j;
+  xjob_fn fn;
+  void   *ctx;
+} xrun_t;
+
+static bool
+run_item(void *arg, uint32_t worker, uint32_t item) {
+  xrun_t *r = arg;
+
+  return r->fn(r->j, &r->j->scratch[worker], r->ctx, item);
+}
+
 /* `fn` for items [0, n): on the workers too where there are */
 static bool
 pool_run(jpx_t *j, xjob_fn fn, void *ctx, uint32_t n) {
@@ -2051,6 +2076,14 @@ pool_run(jpx_t *j, xjob_fn fn, void *ctx, uint32_t n) {
   if (!j->workers || n < 2u) {
     for (i = 0; i < n; i++) ok = fn(j, &j->scratch[0], ctx, i) && ok;
     return ok;
+  }
+  if (j->runner.run) {
+    xrun_t r;
+
+    r.j   = j;
+    r.fn  = fn;
+    r.ctx = ctx;
+    return j->runner.run(j->runner.ctx, run_item, &r, n);
   }
   thread_lock(&p->m);
   /* a worker late for the last round may still hold its job: done with it
@@ -2522,6 +2555,7 @@ typedef struct jxopts {
   bool        raw, pad;
   bool        eight;   /* deeper samples in 8 bits, OpenJPEG's way */
   int32_t     opacity; /* ImOpacity */
+  im_runner_t runner;  /* the caller's threads */
 } jxopts_t;
 
 /* the planes as `im`'s pixels: the colours then the opacity, a sample 8
@@ -2843,6 +2877,7 @@ jpx_decode(const uint8_t *data, size_t len, ImImage *im, const jxopts_t *o) {
   if (!(j = calloc(1, sizeof(*j)))) return false;
   j->arena.limit = X_ARENA;
   j->threads     = o->threads;
+  j->runner      = o->runner;
 
   if (be32(data) == 12u && be32(data + 4) == 0x6A502020u) {
     if (!read_boxes(j, &x, data, len, &cs, &cs_len, 0u) || !cs) goto done;
@@ -2957,6 +2992,7 @@ opts_of(const im_open_config_t *c) {
   o.pad     = c->rgbPadded;
   o.eight   = c->eightBits;
   o.opacity = c->opacity;
+  o.runner  = c->runner;
   return o;
 }
 
