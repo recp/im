@@ -29,6 +29,8 @@ TODO
       Built by hand: `src/load.c`, `src/io/jpg/{jpg,arith,huff,idct,sample}.c`, `src/io/jp2/jp2.c`,
       `src/thread/pool.c`, and `src/posix/thread.c` or `src/win/thread.c` (none without threads), with
       `IM_CODECS_ONLY=1`, `IM_STATIC`, `include/` and `src/` on the include path
+- [x] `-DIM_PREFIX=app_`: a codec-only build's every symbol under that prefix (callers' names unchanged,
+      `im.h` renames them too), so it links beside another copy of im
 - [x] JPEG (libjpeg-turbo's pixels, to the byte)
   - [x] baseline, extended (8 and 12 bits), progressive; Huffman and arithmetic coding
   - [x] lossless, 2 to 16 bits
