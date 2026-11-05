@@ -21,8 +21,10 @@
  * the usual RGB, and turned on an RGB file's samples taken as YCbCr; an
  * Adobe CMYK left inverted is 255 minus the usual; RGB padded is the RGB
  * with 255 (65535) after each pixel; a JPEG 2000 palette's indexes, one
- * gray channel each pixel mapping to one colour of the usual decode; one
- * thread what many give.
+ * gray channel each pixel mapping to one colour of the usual decode; 8
+ * bits OpenJPEG's rounding of the 16 (taken back to their depth); the
+ * opacity apart (the colours un-premultiplied) or not decoded; one thread
+ * what many give; im_info_mem the headers' word.
  */
 
 #include "../include/common.h"
@@ -296,11 +298,134 @@ TEST_IMPL(jp2_options) {
     im_free(b);
   }
 
+  /* 8 bits: OpenJPEG's (v >> d) + ((v >> (d - 1)) & 1), v the 16 taken
+     back to the depth */
+  {
+    static const struct { const char *name; uint32_t depth; } deep[] = { { "rgb10.jp2", 10u }, { "gray16.jp2", 16u } };
+    im_option_bool_t eight = im_option_bool(IM_OPTION_EIGHT_BITS, true);
+    im_option_int_t  little = im_option_int(IM_OPTION_BYTE_ORDER, IM_BYTEORDER_LITTLE);
+
+    for (i = 0; i < 2u; i++) {
+      size_t   k;
+      uint32_t max = (1u << deep[i].depth) - 1u, d = deep[i].depth - 8u;
+
+      little.base.type = IM_OPTION_BYTE_ORDER;
+      a = mem("jp2", deep[i].name, &little.base, NULL);
+      b = mem("jp2", deep[i].name, &eight.base, NULL);
+      ASSERT(a && b && a->bitsPerComponent == 16u && b->bitsPerComponent == 8u);
+      ASSERT(b->len * 2u == a->len && b->componentsPerPixel == a->componentsPerPixel);
+      for (k = 0; k < b->len; k++) {
+        const uint8_t *q = (const uint8_t *)a->data.data + 2u * k;
+        uint32_t       v16 = (uint32_t)q[0] | (uint32_t)q[1] << 8, v = (uint32_t)(((uint64_t)v16 * max + 32767u) / 65535u);
+        uint32_t       e = (v >> d) + ((v >> (d - 1u)) & 1u);
+
+        ASSERT(((const uint8_t *)b->data.data)[k] == (e > 255u ? 255u : e));
+      }
+      im_free(a);
+      im_free(b);
+    }
+  }
+
+  /* the opacity apart: the colours (un-premultiplied where the JP2 says
+     premultiplied), the last sample to `alpha`; or not decoded at all */
+  {
+    static const char *const names[] = { "alpha.jp2", "premult.jp2", "gray-alpha.jp2" };
+    im_option_int_t apart = im_option_int(IM_OPTION_OPACITY, IM_OPACITY_APART);
+    im_option_int_t none = im_option_int(IM_OPTION_OPACITY, IM_OPACITY_NONE);
+
+    for (i = 0; i < 3u; i++) {
+      ImImage *c;
+      uint32_t ncol, u;
+      size_t   k;
+
+      a = mem("jp2", names[i], NULL, NULL);
+      b = mem("jp2", names[i], &apart.base, NULL);
+      c = mem("jp2", names[i], &none.base, NULL);
+      ASSERT(a && b && c && a->bitsPerComponent == 8u);
+      ncol = a->componentsPerPixel - 1u;
+      ASSERT(a->alphaInfo == (i == 1u ? IM_ALPHA_PREMUL_LAST : IM_ALPHA_LAST) && !a->alpha);
+      ASSERT(b->componentsPerPixel == ncol && b->alphaInfo == IM_ALPHA_NONE && b->alpha);
+      ASSERT(c->componentsPerPixel == ncol && c->alphaInfo == IM_ALPHA_NONE && !c->alpha);
+      ASSERT(b->format == (ncol == 1u ? IM_FORMAT_GRAY : IM_FORMAT_RGB) && c->format == b->format);
+      for (k = 0, n = (size_t)a->width * a->height; k < n; k++) {
+        const uint8_t *p = (const uint8_t *)a->data.data + (ncol + 1u) * k;
+        uint32_t       al = p[ncol];
+
+        ASSERT(((const uint8_t *)b->alpha)[k] == al);
+        for (u = 0; u < ncol; u++) {
+          uint32_t o = p[u], want = i == 1u ? (al ? (o > al ? 255u : (o * 255u + al / 2u) / al) : 0u) : o;
+
+          ASSERT(((const uint8_t *)b->data.data)[ncol * k + u] == want);
+          ASSERT(((const uint8_t *)c->data.data)[ncol * k + u] == o);
+        }
+      }
+      im_free(a);
+      im_free(b);
+      im_free(c);
+    }
+  }
+
   /* one thread: what many give */
   a = mem("jp2", "imageio.jp2", NULL, NULL);
   ASSERT(same(a, b = mem("jp2", "imageio.jp2", &one.base, NULL)));
   im_free(a);
   im_free(b);
+
+  TEST_SUCCESS
+}
+
+/* the headers' word, nothing decoded */
+TEST_IMPL(info_mem) {
+  static const struct {
+    const char *dir, *name;
+    uint32_t    w, h, comps, bits, coding, levels;
+    bool        arith, opacity;
+  } cases[] = {
+    { "jpg", "420.jpg",        37, 23, 3, 8,  IM_CODING_BASELINE,    0, false, false },
+    { "jpg", "prog.jpg",       37, 23, 3, 8,  IM_CODING_PROGRESSIVE, 0, false, false },
+    { "jpg", "p12.jpg",        37, 23, 3, 12, IM_CODING_EXTENDED,    0, false, false },
+    { "jpg", "arith.jpg",      37, 23, 3, 8,  IM_CODING_EXTENDED,    0, true,  false },
+    { "jpg", "arith-prog.jpg", 37, 23, 3, 8,  IM_CODING_PROGRESSIVE, 0, true,  false },
+    { "jpg", "ll-p16.jpg",     37, 23, 3, 16, IM_CODING_LOSSLESS,    0, false, false },
+    { "jpg", "gray.jpg",       37, 23, 1, 8,  IM_CODING_BASELINE,    0, false, false },
+    { "jpg", "cmyk.jpg",       37, 23, 4, 8,  IM_CODING_BASELINE,    0, false, false },
+    { "jpg", "dnl.jpg",        37, 23, 3, 8,  IM_CODING_BASELINE,    0, false, false }, /* the height a DNL's */
+    { "jp2", "rct.jp2",        37, 23, 3, 8,  IM_CODING_JPEG2000,    7, false, false },
+    { "jp2", "alpha.jp2",      37, 23, 4, 8,  IM_CODING_JPEG2000,    7, false, true  },
+    { "jp2", "gray-alpha.jp2", 37, 23, 2, 8,  IM_CODING_JPEG2000,    7, false, true  },
+    { "jp2", "gray16.jp2",     37, 23, 1, 16, IM_CODING_JPEG2000,    7, false, false },
+    { "jp2", "imageio.jp2",    640, 480, 3, 8, IM_CODING_JPEG2000,   6, false, false },
+    { "jp2", "cmyk.j2k",       37, 23, 4, 8,  IM_CODING_JPEG2000,    7, false, false },
+  };
+  static const uint8_t junk[8] = { 0x89, 'P', 'N', 'G', 13, 10, 26, 10 };
+  ImInfo info;
+  size_t i;
+
+  for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+    size_t   len = 0;
+    uint8_t *d = read_all(cases[i].dir, cases[i].name, &len);
+
+    ASSERT(d && im_info_mem(&info, d, len) == IM_OK);
+    if (info.width != cases[i].w || info.height != cases[i].h || info.components != cases[i].comps
+        || info.bitsPerComponent != cases[i].bits || info.coding != (ImCoding)cases[i].coding
+        || info.levels != cases[i].levels || info.arithmetic != cases[i].arith || info.opacity != cases[i].opacity) {
+      fprintf(stderr, "  %s: %ux%u %u comps %u bits coding %d levels %u arith %d opacity %d\n", cases[i].name, info.width,
+              info.height, info.components, info.bitsPerComponent, (int)info.coding, info.levels, info.arithmetic, info.opacity);
+    }
+    ASSERT(info.width == cases[i].w && info.height == cases[i].h && info.components == cases[i].comps);
+    ASSERT(info.bitsPerComponent == cases[i].bits && info.coding == (ImCoding)cases[i].coding);
+    ASSERT(info.levels == cases[i].levels && info.arithmetic == cases[i].arith && info.opacity == cases[i].opacity);
+    ASSERT(info.fileFormatType == (!strcmp(cases[i].dir, "jpg") ? IM_FILEFORMATTYPE_JPEG
+                                   : strstr(cases[i].name, ".j2k") ? IM_FILEFORMATTYPE_J2K : IM_FILEFORMATTYPE_JP2));
+    /* the first half alone (its headers whole) says the same */
+    if (len > 8192u) {
+      ImInfo head;
+
+      ASSERT(im_info_mem(&head, d, len / 2u) == IM_OK && head.width == info.width && head.levels == info.levels);
+    }
+    free(d);
+  }
+  ASSERT(im_info_mem(&info, junk, sizeof(junk)) == IM_EBADF);
 
   TEST_SUCCESS
 }

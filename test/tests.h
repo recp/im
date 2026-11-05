@@ -47,6 +47,7 @@ TEST_DECLARE(jpg_cut_segment)
 TEST_DECLARE(load_mem)
 TEST_DECLARE(jpg_options)
 TEST_DECLARE(jp2_options)
+TEST_DECLARE(info_mem)
 #endif
 
 /*****************************************************************************/
@@ -74,6 +75,7 @@ TEST_LIST {
   TEST_ENTRY(load_mem)
   TEST_ENTRY(jpg_options)
   TEST_ENTRY(jp2_options)
+  TEST_ENTRY(info_mem)
 #endif
 };
 
