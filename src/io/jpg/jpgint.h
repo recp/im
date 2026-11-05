@@ -63,8 +63,9 @@ typedef enum jspace {
 /* A Huffman table. One look at the next J_HBITS bits, `fast[]`:
      0                      a longer code: maxcode[] and valoff[] find it
      bits 0–4               bits to take: the code's, and with J_FUSED
-                            its value's too
-     J_FUSED (bit 5)        the value is in bits 16–31 (signed)
+                            its value's too (bits 5–6 zero: `e & 63` is
+                            that, which a 64-bit shift takes for free)
+     J_FUSED (bit 7)        the value is in bits 16–31 (signed)
      bits 8–15              the symbol */
 typedef struct jhuff {
   uint32_t fast[J_HSIZE];
@@ -75,7 +76,7 @@ typedef struct jhuff {
   bool     ok;
 } jhuff_t;
 
-enum { J_FUSED = 1u << 5 };
+enum { J_FUSED = 1u << 7 };
 
 /* A scan's entropy-coded data, its stuffed 0xFFs and fill bytes taken
    out before it's read: segments one after another in `buf`, each ended

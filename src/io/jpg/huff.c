@@ -166,21 +166,26 @@ extend(uint32_t v, uint32_t s) {
 }
 
 /* a code longer than one look's: the canonical search, from the length
-   past it; none (damage): 17 bits taken, symbol 0, as libjpeg */
+   past it; none (damage): 17 bits, symbol 0, as libjpeg. Its length << 8 |
+   its symbol; the bits by value, so a caller's stay in its registers */
 static uint32_t
-huff_long(jbits_t *b, const jhuff_t *h) {
-  uint32_t code = PEEK(b, 16), l;
+huff_long(uint64_t buf, const jhuff_t *h) {
+  uint32_t code = (uint32_t)(buf >> 48), l;
 
   for (l = J_HBITS + 1u; l <= 16u; l++) {
     int32_t c = (int32_t)(code >> (16u - l));
 
-    if (c <= h->maxcode[l]) {
-      DROP(b, l);
-      return h->vals[(uint32_t)(c + h->valoff[l]) & 0xFFu];
-    }
+    if (c <= h->maxcode[l]) return l << 8 | h->vals[(uint32_t)(c + h->valoff[l]) & 0xFFu];
   }
-  DROP(b, 17u);
-  return 0u;
+  return 17u << 8;
+}
+
+IM_INLINE uint32_t
+huff_slow(jbits_t *b, const jhuff_t *h) {
+  uint32_t r = huff_long(b->buf, h);
+
+  DROP(b, r >> 8);
+  return r & 0xFFu;
 }
 
 /* the next symbol (32 bits at hand: a code and a value's bits) */
@@ -191,13 +196,13 @@ huff_sym(jbits_t *b, const jhuff_t *h) {
   if (b->n < 32u) refill(b);
   e = h->fast[PEEK(b, J_HBITS)];
   if (likely(e)) {
-    uint32_t sym = (e >> 8) & 0xFFu, len = e & 31u;
+    uint32_t sym = (e >> 8) & 0xFFu, len = e & 63u;
 
     if (e & J_FUSED) len -= sym & 15u; /* the value's bits stay */
     DROP(b, len);
     return sym;
   }
-  return huff_long(b, h);
+  return huff_slow(b, h);
 }
 
 /* -- tables -------------------------------------------------------------------- */
@@ -321,16 +326,16 @@ block_seq(jbits_t *b, const jhuff_t *dct, const jhuff_t *act, int32_t *dc, int16
   if (b->n < 32) refill(b);
   e = dct->fast[PEEK(b, J_HBITS)];
   if (likely(e & J_FUSED)) {
-    DROP(b, e & 31u);
+    DROP(b, e & 63u);
     diff = (int32_t)e >> 16;
   } else {
     uint32_t s;
 
     if (e) {
-      DROP(b, e & 31u);
+      DROP(b, e & 63u);
       s = (e >> 8) & 15u;
     } else {
-      s = huff_long(b, dct) & 15u;
+      s = huff_slow(b, dct) & 15u;
     }
 
     diff = extend(get_bits(b, s), s);
@@ -344,7 +349,7 @@ block_seq(jbits_t *b, const jhuff_t *dct, const jhuff_t *act, int32_t *dc, int16
     if (b->n < 32) refill(b);
     e = act->fast[PEEK(b, J_HBITS)];
     if (likely(e & J_FUSED)) {
-      DROP(b, e & 31u);
+      DROP(b, e & 63u);
       rs = (e >> 8) & 0xFFu;
       if (rs & 15u) {
         k += rs >> 4;
@@ -353,10 +358,10 @@ block_seq(jbits_t *b, const jhuff_t *dct, const jhuff_t *act, int32_t *dc, int16
       }
     } else {
       if (e) {
-        DROP(b, e & 31u);
+        DROP(b, e & 63u);
         rs = (e >> 8) & 0xFFu;
       } else {
-        rs = huff_long(b, act);
+        rs = huff_slow(b, act);
       }
       if ((s = rs & 15u)) {
         k += rs >> 4;
@@ -798,6 +803,111 @@ ctx_init(jctx_t *x, jpg_t *j, size_t margin) {
   return (x->tail = malloc(margin * 2u + 32u)) != NULL;
 }
 
+/* A one-pass sequential scan (most images), in order, by restart
+   intervals or by the speculative chunks: its MCU's blocks listed once,
+   positions counted, the bits in registers, no dispatch a block; the
+   check for data run out only near a segment's end, where it can be */
+typedef struct jsblk {
+  jcomp_t       *c;
+  const jhuff_t *dc, *ac;
+  int32_t       *pred;
+  uint32_t       dx, dy, nh, nv; /* the block in its MCU; the MCU in blocks */
+} jsblk_t;
+
+enum { J_MCU_BLOCKS = 64 };
+
+/* the scan's MCU, its blocks in order, predicted from `x`'s DCs */
+static uint32_t
+seq_list(jctx_t *x, jsblk_t *list) {
+  jpg_t   *j  = x->j;
+  uint32_t nb = 0u, i;
+
+  for (i = 0; i < j->nscomp; i++) {
+    uint32_t ci = j->scomp[i], dx, dy;
+    jcomp_t *c  = &j->comp[ci];
+    uint32_t nh = j->nscomp == 1u ? 1u : c->h, nv = j->nscomp == 1u ? 1u : c->v;
+
+    for (dy = 0; dy < nv; dy++) {
+      for (dx = 0; dx < nh && nb < J_MCU_BLOCKS; dx++) {
+        jsblk_t *s = &list[nb++];
+
+        s->c    = c;
+        s->dc   = j->dc[c->td];
+        s->ac   = j->ac[c->ta];
+        s->pred = &x->dc[ci];
+        s->dx   = dx;
+        s->dy   = dy;
+        s->nh   = nh;
+        s->nv   = nv;
+      }
+    }
+  }
+  return nb;
+}
+
+/* blocks b0 … b1 - 1 (MCUs × their blocks, `w` MCUs a row) from where the
+   reader is: decoded (zeros once data ran out, as an MCU's end finds) and
+   put in their planes */
+static void
+seq_range(jctx_t *x, const jsblk_t *list, uint32_t nb, uint32_t w, uint32_t b0, uint32_t b1) {
+  IM_ALIGN(16) int16_t blk[64];
+  jpg_t   *j  = x->j;
+  jbits_t  bs = x->r.b; /* here, so the compiler keeps it in registers */
+  uint32_t m = b0 / nb, slot = b0 % nb, mx = m % w, my = m / w, b;
+  uint32_t vdiv = j->nscomp == 1u ? j->comp[j->scomp[0]].v : 1u, row = my / vdiv;
+  size_t   es = j->prec <= 8u ? 1u : 2u;
+
+  for (b = b0; b < b1; b++) {
+    const jsblk_t *s = &list[slot];
+    jcomp_t       *c = s->c;
+    uint32_t       bx = mx * s->nh + s->dx, by = my * s->nv + s->dy;
+
+    memset(blk, 0, sizeof(blk));
+    if (!x->lacking) {
+      if (!slot) x->last_good = row;
+      if (!x->r.tail && bs.p >= x->r.lim) {
+        x->r.b = bs;
+        rd_tail(x);
+        bs = x->r.b;
+      }
+      block_seq(&bs, s->dc, s->ac, s->pred, blk);
+    }
+    if (bx < c->sw && by < c->sh) {
+      j->idct(blk, c->q, (uint8_t *)c->plane + ((size_t)by * 8u * c->stride + (size_t)bx * 8u) * es, c->stride);
+    }
+    if (++slot == nb) {
+      slot = 0u;
+      if (!x->lacking && x->r.tail) {
+        x->r.b = bs;
+        if (rd_past(&x->r)) x->lacking = true;
+      }
+      if (++mx == w) {
+        mx  = 0u;
+        row = ++my / vdiv;
+      }
+    }
+  }
+  x->r.b = bs;
+}
+
+/* the whole scan in order, its restart intervals one by one */
+static void
+scan_seq(jctx_t *x, uint32_t w, uint32_t h) {
+  jsblk_t  list[J_MCU_BLOCKS];
+  jpg_t   *j = x->j;
+  uint32_t nb = seq_list(x, list), total = w * h, per = j->restart ? j->restart : total, n;
+  uint32_t next_rst = 0u, cur = 0u;
+  bool     at_marker = false;
+
+  rd_start(x, 0u);
+  for (n = 0; n < total; n += per) {
+    uint32_t last = total - n > per ? n + per : total;
+
+    if (n) restart(x, &next_rst, &cur, &at_marker);
+    seq_range(x, list, nb, w, n * nb, last * nb);
+  }
+}
+
 /* restart intervals on the pool: each its own segment, the RSTs in order
    (a valid stream's; any other is read in order, as libjpeg's resync goes) */
 typedef struct jpar {
@@ -811,8 +921,12 @@ static bool
 par_item(void *arg, uint32_t worker, uint32_t item) {
   jpar_t  *pa = arg;
   jctx_t  *x  = &pa->ctx[worker];
-  uint32_t k  = item * pa->step, end = k + pa->step, n, i;
+  uint32_t k  = item * pa->step, end = k + pa->step, n, i, nb = 0u;
   uint32_t ints = (pa->total + pa->per - 1u) / pa->per;
+  jsblk_t  list[J_MCU_BLOCKS];
+
+  /* one pass, sequential: the quick loop */
+  if (!x->j->multiscan && x->j->process == J_SEQUENTIAL) nb = seq_list(x, list);
 
   for (; k < end && k < ints; k++) {
     uint32_t last = (k + 1u) * pa->per < pa->total ? (k + 1u) * pa->per : pa->total;
@@ -821,7 +935,8 @@ par_item(void *arg, uint32_t worker, uint32_t item) {
     x->eobrun  = 0u;
     x->lacking = false;
     rd_start(x, k);
-    for (n = k * pa->per; n < last; n++) scan_mcu(x, n, pa->w);
+    if (nb) seq_range(x, list, nb, pa->w, k * pa->per * nb, last * nb);
+    else for (n = k * pa->per; n < last; n++) scan_mcu(x, n, pa->w);
     if (k + 1u == ints) pa->last_good = x->last_good;
   }
   return true;
@@ -1060,16 +1175,16 @@ block_drop(jbits_t *b, const jhuff_t *dct, const jhuff_t *act) {
   if (b->n < 32) refill(b);
   e = dct->fast[PEEK(b, J_HBITS)];
   if (likely(e & J_FUSED)) {
-    DROP(b, e & 31u);
+    DROP(b, e & 63u);
     diff = (int32_t)e >> 16;
   } else {
     uint32_t s;
 
     if (e) {
-      DROP(b, e & 31u);
+      DROP(b, e & 63u);
       s = (e >> 8) & 15u;
     } else {
-      s = huff_long(b, dct) & 15u;
+      s = huff_slow(b, dct) & 15u;
     }
 
     diff = extend(get_bits(b, s), s);
@@ -1080,14 +1195,14 @@ block_drop(jbits_t *b, const jhuff_t *dct, const jhuff_t *act) {
     if (b->n < 32) refill(b);
     e = act->fast[PEEK(b, J_HBITS)];
     if (likely(e & J_FUSED)) {
-      DROP(b, e & 31u);
+      DROP(b, e & 63u);
       rs = (e >> 8) & 0xFFu;
     } else {
       if (e) {
-        DROP(b, e & 31u);
+        DROP(b, e & 63u);
         rs = (e >> 8) & 0xFFu;
       } else {
-        rs = huff_long(b, act);
+        rs = huff_slow(b, act);
       }
       if (rs & 15u) {
         if (b->n < 16) refill(b);
@@ -1121,27 +1236,6 @@ rd_seek(jctx_t *x, uint64_t bit) {
   DROP(&r->b, (uint32_t)(bit & 7u));
 }
 
-/* block `blk` of the scan, to its plane, decoded with `dc` */
-static void
-spec_block(jspec_t *sp, jctx_t *x, uint32_t blk, bool skip) {
-  IM_ALIGN(16) int16_t scratch[64];
-  jpg_t   *j = sp->j;
-  uint32_t m = blk / sp->nblk, slot = blk % sp->nblk, ci = sp->slot_ci[slot];
-  jcomp_t *c = &j->comp[ci];
-  uint32_t mx = m % sp->w, my = m / sp->w, bx, by;
-
-  if (j->nscomp == 1u) {
-    bx = mx;
-    by = my;
-  } else {
-    bx = mx * c->h + sp->slot_h[slot];
-    by = my * c->v + sp->slot_v[slot];
-  }
-  memset(scratch, 0, sizeof(scratch));
-  if (!skip) block_seq(&x->r.b, j->dc[c->td], j->ac[c->ta], &x->dc[ci], scratch);
-  jpg_put(j, c, scratch, bx, by);
-}
-
 /* (1): chunk `item` from its first byte (the first chunk's from the true
    start): boundaries in its window kept, the first past its end */
 static bool
@@ -1151,15 +1245,18 @@ spec_pass1(void *arg, uint32_t worker, uint32_t item) {
   jctx_t   *x  = &sp->ctx[worker];
   jchunk_t *ch = &sp->ch[item];
   jsync_t   st;
-  uint64_t  end = (uint64_t)ch->end * 8u;
+  jbits_t   bs;
+  uint64_t  end = (uint64_t)ch->end * 8u, at;
   bool      last = item + 1u == sp->n;
 
   memset(&st, 0, sizeof(st));
   rd_seek(x, (uint64_t)ch->start * 8u);
+  bs = x->r.b; /* in registers */
+  at = ((uint64_t)(bs.p - x->r.org) + x->r.pre) * 8u;
   for (;;) {
     uint32_t ci = sp->slot_ci[st.slot];
 
-    st.bit = rd_bit(&x->r);
+    st.bit = at + (uint64_t)(bs.p - x->r.b.p) * 8u - bs.n;
     if (item && st.bit < ch->window) {
       if (ch->nrec == ch->cap) {
         uint32_t cap  = ch->cap ? ch->cap * 2u : 1024u;
@@ -1177,8 +1274,7 @@ spec_pass1(void *arg, uint32_t worker, uint32_t item) {
       return true;
     }
     if (st.blk >= sp->total) return true; /* ran off the end */
-    st.dc[ci] = (int32_t)((uint32_t)st.dc[ci]
-                          + (uint32_t)block_drop(&x->r.b, j->dc[j->comp[ci].td], j->ac[j->comp[ci].ta]));
+    st.dc[ci] = (int32_t)((uint32_t)st.dc[ci] + (uint32_t)block_drop(&bs, j->dc[j->comp[ci].td], j->ac[j->comp[ci].ta]));
     st.blk++;
     st.slot = st.slot + 1u == sp->nblk ? 0u : st.slot + 1u;
   }
@@ -1190,21 +1286,13 @@ spec_pass3(void *arg, uint32_t worker, uint32_t item) {
   jspec_t  *sp = arg;
   jctx_t   *x  = &sp->ctx[worker];
   jchunk_t *ch = &sp->ch[item];
-  uint32_t  blk, end = item + 1u < sp->n ? sp->ch[item + 1u].s.blk : sp->total, i;
+  uint32_t  end = item + 1u < sp->n ? sp->ch[item + 1u].s.blk : sp->total, i;
+  jsblk_t   list[J_MCU_BLOCKS];
 
   for (i = 0; i < J_COMPS; i++) x->dc[i] = ch->s.dc[i];
   x->lacking = false;
   rd_seek(x, ch->s.bit);
-  for (blk = ch->s.blk; blk < end; blk++) {
-    if (x->lacking) {
-      spec_block(sp, x, blk, true);
-      continue;
-    }
-    if (!x->r.tail && x->r.b.p >= x->r.lim) rd_tail(x);
-    spec_block(sp, x, blk, false);
-    /* where data runs out: as one pass, the MCUs after are skipped */
-    if ((blk + 1u) % sp->nblk == 0u && rd_past(&x->r)) x->lacking = true;
-  }
+  seq_range(x, list, seq_list(x, list), sp->w, ch->s.blk, end);
   return true;
 }
 
@@ -1409,6 +1497,12 @@ jpg_scan_huff(jpg_t *j, im_pool_t *pool) {
 
   /* in order */
   if (!ctx_init(&x, j, margin)) return false;
+  if (!j->multiscan && j->process == J_SEQUENTIAL && !j->flow) {
+    scan_seq(&x, w, h);
+    j->last_good = x.last_good;
+    free(x.tail);
+    return true;
+  }
   togo = j->restart;
   rd_start(&x, 0u);
   for (n = 0; n < total; n++) {
