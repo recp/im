@@ -31,6 +31,9 @@
 #elif (defined(__x86_64__) || defined(__i386__)) && (defined(__GNUC__) || defined(__clang__)) && !defined(IM_NO_SIMD)
 #  define J_X86 1
 #  include "idct_x86.h"
+#elif defined(__wasm_simd128__) && !defined(IM_NO_SIMD)
+#  define J_WASM 1
+#  include "idct_wasm.h"
 #endif
 
 #define FIX_0_298631336 ((int64_t)2446)
@@ -183,6 +186,8 @@ IM_HIDE void
 jpg_idct8(const int16_t *in, const uint16_t *q, void *out, size_t stride) {
 #if J_NEON
   if (jpg_idct8_neon(in, q, out, stride)) return;
+#elif J_WASM
+  if (jpg_idct8_wasm(in, q, out, stride)) return;
 #endif
   idct8_plain(in, q, out, stride);
 }
