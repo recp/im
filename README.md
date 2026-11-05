@@ -21,9 +21,9 @@ TODO
   - [x] lossless, 2 to 16 bits
   - [x] every sampling, restarts, Adobe/JFIF, CMYK and YCCK, ICC profile
   - [x] cut streams and damage as libjpeg reads them, block smoothing
-  - [x] NEON IDCT, upsampling, colour; restart intervals and speculative Huffman on threads
+  - [x] NEON and SSE4.1/AVX2 IDCT, upsampling, colour
+  - [x] on threads: restart intervals, speculative Huffman, progressive scans row by row
   - [ ] hierarchical, lossless arithmetic, DNL
-  - [ ] SSE/AVX2
 - [x] PNG (In Progress)
   - [x] palette
   - [x] color types
