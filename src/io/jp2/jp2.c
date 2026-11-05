@@ -2428,7 +2428,7 @@ sycc(int32_t offset, int32_t upb, int32_t y, int32_t cb, int32_t cr, int32_t *r,
 static bool
 compose(jpx_t *j, const jp2_t *x, ImImage *im, ImByteOrder order) {
   xchan_t   ch[X_COMPS];
-  uint32_t  nch = 0, ncol, colour[4], use[5], nuse, k, u, w = j->x1 - j->x0, h = j->y1 - j->y0, X, Y, step;
+  uint32_t  nch = 0, ncol, space, colour[4], use[5], nuse, k, u, w = j->x1 - j->x0, h = j->y1 - j->y0, X, Y, step;
   int32_t   opacity = -1;
   bool      ycc = false, premult = false, wide = false, direct;
   uint32_t *cols;
@@ -2455,11 +2455,12 @@ compose(jpx_t *j, const jp2_t *x, ImImage *im, ImByteOrder order) {
 
   /* which are colour, which opacity */
   {
-    uint32_t space = x->enumcs == 17u ? 1u : x->enumcs == 12u ? 4u
-                   : x->enumcs == 16u || x->enumcs == 18u || x->enumcs == 14u || x->enumcs == 24u ? 3u
-                   : x->icc == 0x47524159u ? 1u : x->icc == 0x434D594Bu ? 4u : x->icc == 0x52474220u ? 3u
-                   : nch <= 2u ? 1u : nch == 3u ? 3u : 4u;
     uint32_t found = 0;
+
+    space = x->enumcs == 17u ? 1u : x->enumcs == 12u ? 4u
+          : x->enumcs == 16u || x->enumcs == 18u || x->enumcs == 14u || x->enumcs == 24u ? 3u
+          : x->icc == 0x47524159u ? 1u : x->icc == 0x434D594Bu ? 4u : x->icc == 0x52474220u ? 3u
+          : nch <= 2u ? 1u : nch == 3u ? 3u : 4u;
 
     ncol = space;
     if (ncol > nch) ncol = nch >= 3u ? 3u : 1u;
@@ -2620,18 +2621,18 @@ made:
   im->iccProfile         = icc;
   im->iccProfileSize     = icc ? x->icc_len : 0u;
 
-  /* the colour space as colr says; a profile may say more; a bare
-     codestream by its colours */
-  if (ycc || x->enumcs == 16u)                     im->colorSpace = IM_COLORSPACE_sRGB;
-  else if (x->enumcs == 17u)                       im->colorSpace = IM_COLORSPACE_GRAY;
-  else if (x->enumcs == 12u)                       im->colorSpace = IM_COLORSPACE_CMYK;
-  else if (icc && x->icc == 0x47524159u)           im->colorSpace = IM_COLORSPACE_GRAY;
-  else if (icc && x->icc == 0x434D594Bu)           im->colorSpace = IM_COLORSPACE_CMYK;
-  else if (icc && x->icc == 0x52474220u)           im->colorSpace = IM_COLORSPACE_sRGB;
-  else if (!x->colr)                               im->colorSpace = ncol == 1u ? IM_COLORSPACE_GRAY
-                                                                  : ncol == 3u ? IM_COLORSPACE_sRGB
-                                                                  : IM_COLORSPACE_CMYK;
-  else                                             im->colorSpace = IM_COLORSPACE_UNKNOWN;
+  /* the colour space as colr says, where it fits the colours (a profile
+     may say more); by the colours where there's no colr or it doesn't */
+  if (!x->colr || space != ncol)          im->colorSpace = ncol == 1u ? IM_COLORSPACE_GRAY
+                                                         : ncol == 3u ? IM_COLORSPACE_sRGB
+                                                         : IM_COLORSPACE_CMYK;
+  else if (ycc || x->enumcs == 16u)       im->colorSpace = IM_COLORSPACE_sRGB;
+  else if (x->enumcs == 17u)              im->colorSpace = IM_COLORSPACE_GRAY;
+  else if (x->enumcs == 12u)              im->colorSpace = IM_COLORSPACE_CMYK;
+  else if (icc && x->icc == 0x47524159u)  im->colorSpace = IM_COLORSPACE_GRAY;
+  else if (icc && x->icc == 0x434D594Bu)  im->colorSpace = IM_COLORSPACE_CMYK;
+  else if (icc && x->icc == 0x52474220u)  im->colorSpace = IM_COLORSPACE_sRGB;
+  else                                    im->colorSpace = IM_COLORSPACE_UNKNOWN;
   return true;
 }
 
