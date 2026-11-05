@@ -29,7 +29,8 @@ TODO
   - [x] cut streams and damage as libjpeg reads them, block smoothing
   - [x] NEON, SSE4.1/AVX2 and WebAssembly SIMD128 IDCT, upsampling, colour
   - [x] on threads: restart intervals, speculative Huffman, progressive scans row by row
-  - [ ] hierarchical, lossless arithmetic, DNL
+  - [x] DNL (the height after the first scan; libjpeg refuses it)
+  - [ ] hierarchical, lossless arithmetic
 - [x] PNG (In Progress)
   - [x] palette
   - [x] color types
