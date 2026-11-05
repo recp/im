@@ -18,6 +18,8 @@ TODO
 - [x] Cocoa and Win32 helpers
 - [x] From memory (`im_load_mem`: JPEG, JPEG 2000), with what a PDF asks: threads, a JPEG's colour
       transform (DCTDecode's /ColorTransform), CMYK as stored, RGB padded to RGB0, a palette's indexes
+- [x] Formats picked at build time: `-DIM_FORMATS="jpg;jp2"` (default `all`); only png needs the
+      defl and huff submodules
 - [x] JPEG (libjpeg-turbo's pixels, to the byte)
   - [x] baseline, extended (8 and 12 bits), progressive; Huffman and arithmetic coding
   - [x] lossless, 2 to 16 bits
