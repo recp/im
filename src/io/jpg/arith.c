@@ -409,6 +409,7 @@ jpg_scan_arith(jpg_t *j) {
   for (n = 0; n < total; n++) {
     uint32_t mx = n % w, my = n / w;
 
+    if (j->flow && !mx) jpg_flow_row(j, my);
     if (j->restart) {
       if (!togo) {
         bool at_marker = jpg_resync(&j->sd, &next_rst, &cur);

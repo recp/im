@@ -30,6 +30,11 @@
 #include "../../common.h"
 #include "../../thread/pool.h"
 
+/* threads only from this many pixels (a test build can lower it) */
+#ifndef J_POOL_MIN
+#  define J_POOL_MIN (1u << 18)
+#endif
+
 enum {
   J_COMPS   = 4,         /* components a frame; more aren't decoded */
   J_HBITS   = 11,        /* bits a Huffman table's one look takes */
@@ -148,6 +153,13 @@ typedef struct jpg {
   /* threads: at most `threads`, the pool's (NULL: the caller's alone) */
   uint32_t   threads;
   im_pool_t *pool;
+  /* a multi-scan image's scans on threads: those kept; a kept one's
+     place among them, the earlier ones it waits for (a mask) */
+  struct jdeferred *defer;
+  uint32_t   ndefer;
+  struct jflow *flow;
+  uint32_t   flow_self;
+  uint64_t   flow_deps;
 
   /* the IDCT's: 8- or 12-bit */
   void    (*idct)(const int16_t *in, const uint16_t *q, void *out, size_t stride);
@@ -166,6 +178,7 @@ IM_HIDE bool jpg_resync(const jdata_t *d, uint32_t *next_rst, uint32_t *cur);
 IM_HIDE bool jpg_scan_lossless(jpg_t *j);
 
 /* arith.c */
+IM_HIDE void jpg_flow_row(jpg_t *j, uint32_t row);
 IM_HIDE bool jpg_scan_arith(jpg_t *j);
 
 /* idct.c */

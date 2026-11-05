@@ -1412,6 +1412,7 @@ jpg_scan_huff(jpg_t *j, im_pool_t *pool) {
   togo = j->restart;
   rd_start(&x, 0u);
   for (n = 0; n < total; n++) {
+    if (j->flow && !(n % w)) jpg_flow_row(j, n / w);
     if (j->restart) {
       if (!togo) {
         restart(&x, &next_rst, &cur, &at_marker);

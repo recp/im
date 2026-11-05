@@ -514,6 +514,8 @@ marker_at(const uint8_t **pp, const uint8_t *end) {
   return p[1];
 }
 
+static void free_deferred(jpg_t *j);
+
 static void
 jpg_free(jpg_t *j) {
   uint32_t i;
@@ -529,6 +531,7 @@ jpg_free(jpg_t *j) {
   free(j->icc);
   free(j->sd.buf);
   free(j->sd.seg);
+  free_deferred(j);
 }
 
 /* the scan whose data is unstuffed in `j->sd`, as its process codes it */
@@ -536,6 +539,209 @@ static bool
 scan(jpg_t *j) {
   if (j->process == J_LOSSLESS) return jpg_scan_lossless(j);
   return j->arith ? jpg_scan_arith(j) : jpg_scan_huff(j, j->pool);
+}
+
+/* -- a multi-scan image's scans on threads -------------------------------------- */
+
+/* Each scan kept with its own data and the tables it reads (a DHT may
+   change them between scans), then all decoded at once, row by row: a
+   scan waits, before each of its rows, for the earlier ones sharing a
+   component and an overlapping band of coefficients (a refinement needs
+   what came before; disjoint bands of a block are apart) to have done
+   that row. Handed out in stream order, a scan only waits for one that's
+   running. In order as far as anything shows: each scan its own state,
+   the last one's last good row the image's. At most J_BATCH at a time
+   (their dependencies a mask), more after those are done. */
+enum { J_BATCH = 64 };
+
+typedef struct jdeferred {
+  jpg_t   *copy;    /* the scan as its SOS left the decoder */
+  jhuff_t *own[8];  /* its tables' copies */
+} jdeferred_t;
+
+typedef struct jflow {
+  th_thread_mutex m;
+  th_thread_cond  cv;
+  jpg_t          *j;
+  uint32_t        waiting;
+  uint32_t        done[J_BATCH]; /* iMCU rows each has finished */
+} jflow_t;
+
+static bool scan(jpg_t *j);
+static bool run_deferred(jpg_t *j);
+
+/* the coefficients a scan's blocks touch: its band; a Huffman AC first
+   scan's up to 15 past it on damage (a run lands there, as libjpeg's); a
+   refinement's whole block (the Huffman one reads it for its mask, the
+   arithmetic one below its band for the last nonzero) */
+static uint32_t
+touch_lo(const jpg_t *s) {
+  return s->ss && s->ah ? 0u : s->ss;
+}
+
+static uint32_t
+touch_hi(const jpg_t *s) {
+  if (s->ss && s->ah) return 63u;
+  if (s->ss && !s->arith) return s->se + 15u < 63u ? s->se + 15u : 63u;
+  return s->se;
+}
+
+static void
+free_copy(jdeferred_t *d) {
+  uint32_t k;
+
+  for (k = 0; k < 8u; k++) free(d->own[k]);
+  if (d->copy) {
+    free(d->copy->sd.buf);
+    free(d->copy->sd.seg);
+    free(d->copy);
+  }
+  memset(d, 0, sizeof(*d));
+}
+
+/* the scan whose SOS was just read, from `p`: kept (`next`: where the
+   next marker is) */
+static bool
+defer_scan(jpg_t *j, const uint8_t *p, const uint8_t *end, const uint8_t **next) {
+  jdeferred_t *d;
+  jpg_t       *c;
+  uint32_t     i, nown = 0u;
+
+  if (!j->defer && !(j->defer = calloc(J_BATCH, sizeof(jdeferred_t)))) return false;
+  d = &j->defer[j->ndefer];
+  if (!(c = d->copy = malloc(sizeof(*c)))) return false;
+  *c = *j;
+  memset(&c->sd, 0, sizeof(c->sd));
+  c->pool      = NULL;
+  c->defer     = NULL;
+  c->icc       = NULL;
+  c->flow_deps = 0u;
+  c->flow_self = j->ndefer;
+  if (!jpg_unstuff(&c->sd, p, end)) goto fail;
+  if (next) *next = c->sd.next;
+  /* the tables it reads, copied */
+  for (i = 0; i < c->nscomp && !c->arith; i++) {
+    jcomp_t  *k    = &c->comp[c->scomp[i]];
+    jhuff_t **t[2] = { &c->dc[k->td & 3u], &c->ac[k->ta & 3u] };
+    uint32_t  w;
+
+    for (w = 0; w < 2u; w++) {
+      jhuff_t *orig = *t[w], *dup;
+      uint32_t o;
+      bool     have = false;
+
+      if (!orig) continue;
+      for (o = 0; o < nown; o++) have = have || d->own[o] == orig;
+      if (have) continue;
+      if (!(dup = malloc(sizeof(*dup)))) goto fail;
+      *dup = *orig;
+      /* every slot of its kind the scan has pointing at it: at the copy */
+      for (o = 0; o < 4u; o++) {
+        if (w == 0u && c->dc[o] == orig) c->dc[o] = dup;
+        if (w == 1u && c->ac[o] == orig) c->ac[o] = dup;
+      }
+      d->own[nown++] = dup;
+    }
+  }
+  /* what it waits for */
+  for (i = 0; i < j->ndefer; i++) {
+    const jpg_t *e     = j->defer[i].copy;
+    bool         share = false;
+    uint32_t     a, b;
+
+    for (a = 0; a < c->nscomp; a++) {
+      for (b = 0; b < e->nscomp; b++) share = share || c->scomp[a] == e->scomp[b];
+    }
+    if (share && touch_lo(c) <= touch_hi(e) && touch_lo(e) <= touch_hi(c)) c->flow_deps |= 1ull << i;
+  }
+  if (++j->ndefer == J_BATCH) return run_deferred(j);
+  return true;
+
+fail:
+  free_copy(d);
+  return false;
+}
+
+/* before scan `j`'s MCU row `row`: the rows before it done, the earlier
+   scans it needs past it */
+IM_HIDE void
+jpg_flow_row(jpg_t *j, uint32_t row) {
+  jflow_t *f    = j->flow;
+  uint32_t imcu = j->nscomp == 1u ? row / j->comp[j->scomp[0]].v : row, i;
+
+  thread_lock(&f->m);
+  if (f->done[j->flow_self] < imcu) {
+    f->done[j->flow_self] = imcu;
+    if (f->waiting) thread_cond_broadcast(&f->cv);
+  }
+  for (;;) {
+    uint64_t deps  = j->flow_deps;
+    bool     ready = true;
+
+    for (i = 0; deps; i++, deps >>= 1) ready = ready && (!(deps & 1u) || f->done[i] > imcu);
+    if (ready) break;
+    f->waiting++;
+    thread_cond_wait(&f->cv, &f->m);
+    f->waiting--;
+  }
+  thread_unlock(&f->m);
+}
+
+static bool
+flow_item(void *arg, uint32_t worker, uint32_t item) {
+  jflow_t *f = arg;
+  bool     ok;
+
+  (void)worker;
+  ok = scan(f->j->defer[item].copy);
+  /* done, or given up: nothing waits for it any more */
+  thread_lock(&f->m);
+  f->done[item] = UINT32_MAX;
+  if (f->waiting) thread_cond_broadcast(&f->cv);
+  thread_unlock(&f->m);
+  return ok;
+}
+
+static bool
+run_deferred(jpg_t *j) {
+  uint32_t i, n = j->ndefer;
+  bool     ok;
+
+  if (!n) return true;
+  if (n == 1u) {
+    /* alone: the threads for it (its restart intervals) */
+    jpg_t *c = j->defer[0].copy;
+
+    c->pool = j->pool;
+    ok      = scan(c);
+  } else {
+    jflow_t f;
+
+    memset(f.done, 0, sizeof(f.done));
+    f.j       = j;
+    f.waiting = 0u;
+    thread_mutex_init(&f.m);
+    thread_cond_init(&f.cv);
+    for (i = 0; i < n; i++) j->defer[i].copy->flow = &f;
+    ok = im_pool_run(j->pool, flow_item, &f, n);
+    thread_cond_destroy(&f.cv);
+    thread_mutex_destroy(&f.m);
+  }
+  j->last_good = j->defer[n - 1u].copy->last_good;
+  for (i = 0; i < n; i++) free_copy(&j->defer[i]);
+  j->ndefer = 0u;
+  return ok;
+}
+
+static void
+free_deferred(jpg_t *j) {
+  uint32_t i;
+
+  if (!j->defer) return;
+  for (i = 0; i < j->ndefer; i++) free_copy(&j->defer[i]);
+  free(j->defer);
+  j->defer  = NULL;
+  j->ndefer = 0u;
 }
 
 /* the stream's byte `k` from `p` (`have` there): past its end libjpeg's
@@ -662,7 +868,7 @@ decode_stream(jpg_t *j, ImImage *im, ImByteOrder order, uint8_t **padp) {
       if (first) {
         uint32_t i;
 
-        if (j->threads > 1u && (uint64_t)j->width * j->height >= (1u << 18)) j->pool = im_pool_new(j->threads);
+        if (j->threads > 1u && (uint64_t)j->width * j->height >= J_POOL_MIN) j->pool = im_pool_new(j->threads);
         j->multiscan = j->process != J_LOSSLESS && (j->process == J_PROGRESSIVE || j->nscomp < j->ncomp);
         for (i = 0; i < j->ncomp && j->multiscan; i++) {
           jcomp_t *c = &j->comp[i];
@@ -680,7 +886,17 @@ decode_stream(jpg_t *j, ImImage *im, ImByteOrder order, uint8_t **padp) {
       if (tail) {
         static const uint8_t fake[3] = { 0xD9u, 0xFFu, 0xD9u };
 
-        if (!jpg_unstuff(&j->sd, odd ? fake : fake + 1, fake + 3) || !scan(j)) return false;
+        if (j->pool && j->multiscan) {
+          if (!defer_scan(j, odd ? fake : fake + 1, fake + 3, NULL)) return false;
+        } else if (!jpg_unstuff(&j->sd, odd ? fake : fake + 1, fake + 3) || !scan(j)) {
+          return false;
+        }
+        j->nscans++;
+        break;
+      }
+      if (j->pool && j->multiscan) {
+        /* kept for the waves; where the next marker is */
+        if (!defer_scan(j, p, end, &p)) return false;
         j->nscans++;
         break;
       }
@@ -694,6 +910,7 @@ decode_stream(jpg_t *j, ImImage *im, ImByteOrder order, uint8_t **padp) {
     }
   }
   if (!j->nscans) return false;
+  if (j->ndefer && !run_deferred(j)) return false;
   if (j->multiscan && !idct_all(j)) return false;
   if (!jpg_out(j, guess_space(j), im, order)) return false;
 
