@@ -243,6 +243,10 @@ typedef struct ImImage {
   size_t            iccProfileSize;
   ImPhysicalDim    *physicalDim;
   ImTimeStamp      *timeStamp;
+
+  /* the opacity apart (IM_OPTION_OPACITY's IM_OPACITY_APART): a sample a
+     pixel, as deep as the colours', `width` a row; malloc'd, NULL none */
+  void             *alpha;
 } ImImage;
 
 IM_EXPORT

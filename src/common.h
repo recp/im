@@ -75,6 +75,8 @@ typedef struct im_open_config_t {
   bool              cmykAsStored;
   bool              rgbPadded;
   bool              paletteIndexes;
+  bool              eightBits;
+  int32_t           opacity;        /* ImOpacity */
 } im_open_config_t;
 
 /* the options as a decoder reads them (load.c) */

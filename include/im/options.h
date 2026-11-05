@@ -53,12 +53,12 @@ typedef enum im_option_type_t {
   IM_OPTION_THREADS,
 
   /* JPEG: whether its YCbCr (YCCK) becomes RGB (CMYK), over what the file
-     says (int): -1 as the file says (the default), 0 no, 1 yes. A PDF's
-     DCTDecode /ColorTransform is this */
+     says (int): -1 as the file says (the default), 0 no, 1 yes: a
+     container's word on it, where it gives one */
   IM_OPTION_JPEG_COLOR_TRANSFORM,
 
   /* CMYK as the file stores it (bool): an Adobe JPEG's inverted CMYK left
-     inverted (as a PDF expects, its /Decode inverts it); false: 0 no ink */
+     inverted (for a caller that inverts it itself); false: 0 no ink */
   IM_OPTION_CMYK_AS_STORED,
 
   /* RGB as RGB0 (bool): a 4th sample after each pixel's three, its
@@ -68,7 +68,22 @@ typedef enum im_option_type_t {
   /* JPEG 2000: a palette's indexes as they are (bool), one gray channel,
      not its colours; false */
   IM_OPTION_PALETTE_INDEXES,
+
+  /* samples deeper than 8 bits in 8 (bool), OpenJPEG's way:
+     (v >> d) + ((v >> (d - 1)) & 1), held to 255; false: 16 bits */
+  IM_OPTION_EIGHT_BITS,
+
+  /* an opacity channel (int, ImOpacity): interleaved (the default; CMYK's
+     dropped), apart in ImImage's `alpha` (the colours un-premultiplied;
+     CMYK's kept), or not decoded at all */
+  IM_OPTION_OPACITY,
 } im_option_type_t;
+
+typedef enum ImOpacity {
+  IM_OPACITY_INTERLEAVED = 0,
+  IM_OPACITY_APART       = 1,
+  IM_OPACITY_NONE        = 2
+} ImOpacity;
 
 typedef struct im_option_base_t {
   im_option_type_t type;

@@ -20,15 +20,15 @@
  * every code-block style but HT, packet headers in PPM or PPT, SOP and EPH,
  * ROI's max-shift; the 5/3 and 9/7 wavelets, both colour transforms,
  * subsampled components; a JP2's palette, component mapping and channel
- * definitions, sYCC. The arithmetic is OpenJPEG's (PDFium's decoder): its
- * 9/7 constants and order of operations in single precision (nothing
- * fused), its rounding and its sYCC conversion, so 8-bit pixels come out
- * as PDFium's do. A truncated stream decodes as far as it goes.
+ * definitions, sYCC. The arithmetic is OpenJPEG's: its 9/7 constants and
+ * order of operations in single precision (nothing fused), its rounding
+ * and its sYCC conversion, so 8-bit pixels come out as OpenJPEG's do. A
+ * truncated stream decodes as far as it goes.
  *
  * Out: gray, gray + alpha, RGB, RGBA (the opacity channel last, left
  * premultiplied where the JP2 says it is), CMYK; 8 bits a sample, or 16
  * where a channel is deeper than 8; a palette expanded, sYCC made RGB, the
- * JP2's ICC profile kept. The PDF engine's decoder (jpx.c), ported.
+ * JP2's ICC profile kept.
  */
 
 #include "jp2.h"
@@ -2457,7 +2457,7 @@ typedef struct xchan {
   uint32_t bits;
 } xchan_t;
 
-/* a sample of 8 bits or fewer to 8 (the PDF engine's: fewer spread over
+/* a sample of 8 bits or fewer to 8 (fewer spread over
    0–255) */
 static uint8_t
 eight(int32_t v, uint32_t bits) {
@@ -2467,6 +2467,20 @@ eight(int32_t v, uint32_t bits) {
   max = (1 << bits) - 1;
   v   = v < 0 ? 0 : v > max ? max : v;
   return (uint8_t)((v * 255 + max / 2) / max);
+}
+
+/* OpenJPEG's 8 bits: a deeper sample shifted, rounded by the bit below; a
+   shallower one spread, or (indexes) as it is */
+static uint8_t
+eight_shift(int32_t v, uint32_t bits, bool raw) {
+  if (bits > 8u) {
+    uint32_t adj = bits - 8u;
+    int32_t  px  = (v >> adj) + ((v >> (adj - 1u)) & 1);
+
+    return (uint8_t)(px < 0 ? 0 : px > 255 ? 255 : px);
+  }
+  if (bits == 8u || raw) return (uint8_t)(v < 0 ? 0 : v > 255 ? 255 : v);
+  return eight(v, bits);
 }
 
 /* a sample of 16 bits or fewer to 16, fewer spread over 0–65535 as above */
@@ -2506,6 +2520,8 @@ typedef struct jxopts {
   ImByteOrder order;
   uint32_t    threads;
   bool        raw, pad;
+  bool        eight;   /* deeper samples in 8 bits, OpenJPEG's way */
+  int32_t     opacity; /* ImOpacity */
 } jxopts_t;
 
 /* the planes as `im`'s pixels: the colours then the opacity, a sample 8
@@ -2519,6 +2535,7 @@ compose(jpx_t *j, const jp2_t *x, ImImage *im, const jxopts_t *o) {
   bool      ycc = false, premult = false, wide = false, direct;
   uint32_t *cols;
   uint8_t  *px, *icc = NULL;
+  void     *alpha = NULL;
   size_t    n = (size_t)w * h, len, i;
 
   /* the channels: through a palette where the JP2 maps one */
@@ -2575,16 +2592,17 @@ compose(jpx_t *j, const jp2_t *x, ImImage *im, const jxopts_t *o) {
     } else if (nch > ncol) {
       opacity = (int32_t)ncol; /* the first one past the colours */
     }
-    /* sYCC: said so, or three with the second subsampled (PDFium's guess) */
+    /* sYCC: said so, or three with the second subsampled (opj_decompress's guess) */
     ycc = ncol == 3u && (x->enumcs == 18u || (!x->colr && j->ncomp == 3u && j->dx[0] == j->dy[0] && j->dx[1] != 1u));
   }
 
-  /* CMYK goes without its opacity: im has no format for the two */
-  if (ncol == 4u) opacity = -1;
+  /* not asked for: not there; CMYK, interleaved, goes without (im has no
+     format for the two), apart keeps it */
+  if (o->opacity == IM_OPACITY_NONE || (ncol == 4u && o->opacity != IM_OPACITY_APART)) opacity = -1;
   nuse = ncol;
   for (u = 0; u < ncol; u++) use[u] = colour[u];
   if (opacity >= 0) use[nuse++] = (uint32_t)opacity;
-  for (u = 0; u < nuse; u++) wide = wide || ch[use[u]].bits > 8u;
+  for (u = 0; u < nuse; u++) wide = wide || (ch[use[u]].bits > 8u && !o->eight);
 
   step = nuse;
   len  = n * step * (wide ? 2u : 1u);
@@ -2672,10 +2690,13 @@ compose(jpx_t *j, const jp2_t *x, ImImage *im, const jxopts_t *o) {
         /* indexes: as they are */
         int32_t s = v[0] < 0 ? 0 : v[0];
 
-        if (wide) ((uint16_t *)px)[at] = (uint16_t)(s > 65535 ? 65535 : s);
+        if (o->eight) px[at] = eight_shift(v[0], ch[use[0]].bits, true);
+        else if (wide) ((uint16_t *)px)[at] = (uint16_t)(s > 65535 ? 65535 : s);
         else px[at] = (uint8_t)(s > 255 ? 255 : s);
       } else if (wide) {
         for (u = 0; u < nuse; u++) ((uint16_t *)px)[at + u] = sixteen(v[u], ch[use[u]].bits);
+      } else if (o->eight) {
+        for (u = 0; u < nuse; u++) px[at + u] = eight_shift(v[u], ch[use[u]].bits, false);
       } else {
         for (u = 0; u < nuse; u++) px[at + u] = eight(v[u], ch[use[u]].bits);
       }
@@ -2684,12 +2705,51 @@ compose(jpx_t *j, const jp2_t *x, ImImage *im, const jxopts_t *o) {
   free(cols);
 
 made:
+  /* the opacity apart: the colours drawn together (un-premultiplied where
+     the JP2 says premultiplied, to the nearest), the last sample of
+     each pixel to its own plane */
+  if (o->opacity == IM_OPACITY_APART && opacity >= 0) {
+    uint32_t top = wide ? 65535u : 255u;
+
+    if (!(alpha = malloc(n * (wide ? 2u : 1u)))) {
+      free(px);
+      return false;
+    }
+    for (i = 0; i < n; i++) {
+      if (wide) {
+        uint16_t *p = (uint16_t *)(void *)px, al = p[i * step + ncol];
+
+        for (u = 0; u < ncol; u++) {
+          uint64_t c = p[i * step + u];
+
+          if (premult) c = al ? (c > al ? top : (c * top + al / 2u) / al) : 0u;
+          p[i * ncol + u] = (uint16_t)c;
+        }
+        ((uint16_t *)alpha)[i] = al;
+      } else {
+        uint8_t al = px[i * step + ncol];
+
+        for (u = 0; u < ncol; u++) {
+          uint32_t c = px[i * step + u];
+
+          if (premult) c = al ? (c > al ? top : (c * top + al / 2u) / al) : 0u;
+          px[i * ncol + u] = (uint8_t)c;
+        }
+        ((uint8_t *)alpha)[i] = al;
+      }
+    }
+    step    = ncol;
+    len     = n * step * (wide ? 2u : 1u);
+    opacity = -1;
+  }
+
   /* 16-bit samples in the order asked for; the host's if any */
   if (order != IM_BYTEORDER_BIG && order != IM_BYTEORDER_LITTLE) order = IM_BYTEORDER_HOST;
   if (wide && order != IM_BYTEORDER_HOST && (order == IM_BYTEORDER_BIG) != X_HOST_BIG) {
     uint16_t *p = (uint16_t *)px;
 
     for (i = 0; i < n * step; i++) p[i] = bswapu16(p[i]);
+    for (i = 0; alpha && i < n; i++) ((uint16_t *)alpha)[i] = bswapu16(((uint16_t *)alpha)[i]);
   }
 
   /* RGB as RGB0: each pixel spread to four, from the last (in place) */
@@ -2698,6 +2758,7 @@ made:
 
     if (!q) {
       free(px);
+      free(alpha);
       return false;
     }
     px = q;
@@ -2727,6 +2788,7 @@ made:
   if (!o->raw && !ycc && x->icc_data && x->icc_len) {
     if (!(icc = malloc(x->icc_len))) {
       free(px);
+      free(alpha);
       return false;
     }
     memcpy(icc, x->icc_data, x->icc_len);
@@ -2748,6 +2810,7 @@ made:
                          : IM_FORMAT_CMYK;
   im->iccProfile         = icc;
   im->iccProfileSize     = icc ? x->icc_len : 0u;
+  im->alpha              = alpha;
 
   /* the colour space as colr says, where it fits the colours (a profile
      may say more); by the colours where there's no colr or it doesn't */
@@ -2892,6 +2955,8 @@ opts_of(const im_open_config_t *c) {
   o.threads = c->threads;
   o.raw     = c->paletteIndexes;
   o.pad     = c->rgbPadded;
+  o.eight   = c->eightBits;
+  o.opacity = c->opacity;
   return o;
 }
 

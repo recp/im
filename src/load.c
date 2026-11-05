@@ -55,6 +55,8 @@ im_config(im_option_base_t *options[], ImOpenIntent openIntent) {
         case IM_OPTION_CMYK_AS_STORED:       conf.cmykAsStored   = ((im_option_bool_t*)opt)->on;         break;
         case IM_OPTION_RGB_PADDED:           conf.rgbPadded      = ((im_option_bool_t*)opt)->on;         break;
         case IM_OPTION_PALETTE_INDEXES:      conf.paletteIndexes = ((im_option_bool_t*)opt)->on;         break;
+        case IM_OPTION_EIGHT_BITS:           conf.eightBits      = ((im_option_bool_t*)opt)->on;         break;
+        case IM_OPTION_OPACITY:              conf.opacity        = ((im_option_int_t*)opt)->value;       break;
         default: break;
       }
     }
@@ -144,6 +146,8 @@ im_free(ImImage * __restrict im) {
 
   if (im->timeStamp)
     free(im->timeStamp);
+
+  free(im->alpha);
 
   if (im->transparency) {
     if (im->transparency->value.pal.alpha)
