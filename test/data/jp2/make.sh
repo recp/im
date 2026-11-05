@@ -38,11 +38,31 @@ enc sycc420.jp2 yuv420p -pred dwt53
 enc palette.jp2 pal8 -pred dwt53
 enc alpha.jp2 rgba -pred dwt53 -prog cprl
 enc gray16.jp2 gray16le -pred dwt53
+# im's own: four components bare (CMYK), gray with opacity, 10 bits
+enc cmyk.j2k rgba -pred dwt53 -format j2k
+enc gray-alpha.jp2 ya8 -pred dwt97int
+enc rgb10.jp2 gbrp10le -pred dwt53
 # rct.jp2's bits read with every code-block style
 python3 - <<'PY'
 d = bytearray(open('rct.jp2', 'rb').read())
 d[d.find(b'\xff\x52') + 12] = 0x3F
 open('styles.jp2', 'wb').write(d)
+PY
+# alpha.jp2 saying its opacity is premultiplied (a cdef box in its jp2h)
+python3 - <<'PY'
+import struct
+d, out, pos = open('alpha.jp2', 'rb').read(), bytearray(), 0
+while pos + 8 <= len(d):
+    n, t = struct.unpack('>I4s', d[pos:pos + 8])
+    n = n or len(d) - pos
+    box = d[pos:pos + n]
+    if t == b'jp2h':
+        cdef = struct.pack('>H', 4) + b''.join(struct.pack('>HHH', c, 0, c + 1) for c in range(3)) + struct.pack('>HHH', 3, 2, 0)
+        box += struct.pack('>I4s', 8 + len(cdef), b'cdef') + cdef
+        box = struct.pack('>I4s', len(box), b'jp2h') + box[8:]
+    out += box
+    pos += n
+open('premult.jp2', 'wb').write(out)
 PY
 rm src.ppm
 # imageio.jp2: ImageIO's encoder (sips; the committed one macOS 27's) on a

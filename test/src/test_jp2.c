@@ -17,9 +17,11 @@
 /*
  * JPEG 2000 (io/jp2) on data/jp2's fixtures (make.sh made them): each one's
  * pixels hashed as the PDF engine's test_jpx hashes its decode, which is
- * PDFium's (OpenJPEG's) to the byte; 16-bit samples as ffmpeg decodes them;
- * ImageIO's file, large enough for the threads, and its ICC profile; every
- * fifth cut of two files decoding as far as it goes, or not at all.
+ * PDFium's (OpenJPEG's) to the byte, with im's own layouts (CMYK, gray and
+ * opacity, deeper samples in 16 bits, a premultiplied opacity kept); 16-bit
+ * samples as ffmpeg decodes them; ImageIO's file, large enough for the
+ * threads, and its ICC profile; every fifth cut of two files decoding as
+ * far as it goes, or not at all.
  */
 
 #include "../include/common.h"
@@ -64,27 +66,33 @@ fixture(const char *name, ImByteOrder order) {
 }
 
 /* the PDF engine's test_jpx hash of `im`: its colours (an 0xFF after an
-   RGB pixel's three, the engine's RGBX), 16-bit samples brought to 8 as
-   the engine does (their top 8 bits and the next one); its opacity apart */
-static void
-pdf_hash(const ImImage *im, uint32_t *colour, uint32_t *alpha) {
-  uint32_t ncol, comps, i, u;
+   RGB pixel's three, the engine's RGBX), 16-bit samples taken back to their
+   `depth` and brought to 8 as the engine does (their top 8 bits and the
+   next one); its opacity apart. False: a 16-bit sample isn't one of the
+   depth's spread over 0–65535 */
+static bool
+pdf_hash(const ImImage *im, uint32_t depth, uint32_t *colour, uint32_t *alpha) {
+  uint32_t ncol, comps, max, i, u;
   size_t   n;
   bool     wide;
 
   comps   = im->componentsPerPixel;
   ncol    = im->alphaInfo == IM_ALPHA_NONE ? comps : comps - 1u;
   wide    = im->bitsPerComponent == 16u;
+  max     = (1u << depth) - 1u;
   n       = (size_t)im->width * im->height;
   *colour = *alpha = FNV_BASIS;
 
   for (i = 0; i < n; i++) {
     for (u = 0; u < comps; u++) {
-      uint32_t v;
+      uint32_t v, s;
 
       if (wide) {
-        v = ((const uint16_t *)im->data.data)[i * comps + u];
-        v = (v >> 8) + ((v >> 7) & 1u);
+        s = ((const uint16_t *)im->data.data)[i * comps + u];
+        v = depth == 16u ? s : (uint32_t)(((uint64_t)s * max + 32767u) / 65535u);
+        if (depth < 16u && (uint32_t)(((uint64_t)v * 65535u + max / 2u) / max) != s)
+          return false;
+        v = (v >> (depth - 8u)) + ((v >> (depth - 9u)) & 1u);
         v = v > 255u ? 255u : v;
       } else {
         v = ((const uint8_t *)im->data.data)[i * comps + u];
@@ -96,40 +104,52 @@ pdf_hash(const ImImage *im, uint32_t *colour, uint32_t *alpha) {
 
     if (ncol == 3u) *colour = fnv(*colour, 0xFFu);
   }
+
+  return true;
 }
 
 TEST_IMPL(jp2_fixtures) {
+  enum { RGB = IM_COLORSPACE_sRGB, GRAY = IM_COLORSPACE_GRAY, CMYK = IM_COLORSPACE_CMYK };
+  enum { JP2 = IM_FILEFORMATTYPE_JP2, J2K = IM_FILEFORMATTYPE_J2K };
+  enum { NONE = IM_ALPHA_NONE, LAST = IM_ALPHA_LAST, PREMUL = IM_ALPHA_PREMUL_LAST };
   static const struct {
-    const char      *name;
-    ImFormat         format;
-    uint32_t         bits;
-    ImFileFormatType type;
-    uint32_t         hash, alpha;
+    const char *name;
+    ImFormat    format;
+    uint32_t    bits, depth, type, space, alpha_info;
+    uint32_t    hash, alpha;
   } cases[] = {
     /* 5/3, the reversible transform */
-    { "rct.jp2",         IM_FORMAT_RGB,  8,  IM_FILEFORMATTYPE_JP2, 0x6047FBEDu, 0 },
+    { "rct.jp2",         IM_FORMAT_RGB,        8,  8,  JP2, RGB,  NONE,   0x6047FBEDu, 0 },
     /* a bare codestream: 9/7, tiles, RPCL, SOP and EPH */
-    { "ict-tiles.j2k",   IM_FORMAT_RGB,  8,  IM_FILEFORMATTYPE_J2K, 0x868E41C2u, 0 },
+    { "ict-tiles.j2k",   IM_FORMAT_RGB,        8,  8,  J2K, RGB,  NONE,   0x868E41C2u, 0 },
     /* layers, PCRL */
-    { "gray-layers.jp2", IM_FORMAT_GRAY, 8,  IM_FILEFORMATTYPE_JP2, 0x937121C4u, 0 },
+    { "gray-layers.jp2", IM_FORMAT_GRAY,       8,  8,  JP2, GRAY, NONE,   0x937121C4u, 0 },
     /* sYCC, chroma subsampled */
-    { "sycc420.jp2",     IM_FORMAT_RGB,  8,  IM_FILEFORMATTYPE_JP2, 0x5CE39A76u, 0 },
+    { "sycc420.jp2",     IM_FORMAT_RGB,        8,  8,  JP2, RGB,  NONE,   0x5CE39A76u, 0 },
     /* pclr and cmap, expanded */
-    { "palette.jp2",     IM_FORMAT_RGB,  8,  IM_FILEFORMATTYPE_JP2, 0xE1C2F643u, 0 },
+    { "palette.jp2",     IM_FORMAT_RGB,        8,  8,  JP2, RGB,  NONE,   0xE1C2F643u, 0 },
     /* an opacity channel, CPRL */
-    { "alpha.jp2",       IM_FORMAT_RGBA, 8,  IM_FILEFORMATTYPE_JP2, 0x6047FBEDu, 0x4BCBF784u },
+    { "alpha.jp2",       IM_FORMAT_RGBA,       8,  8,  JP2, RGB,  LAST,   0x6047FBEDu, 0x4BCBF784u },
     /* 16-bit samples, kept */
-    { "gray16.jp2",      IM_FORMAT_GRAY, 16, IM_FILEFORMATTYPE_JP2, 0xC1EBF56Eu, 0 },
+    { "gray16.jp2",      IM_FORMAT_GRAY,       16, 16, JP2, GRAY, NONE,   0xC1EBF56Eu, 0 },
     /* every code-block style (rct.jp2's bits read with them) */
-    { "styles.jp2",      IM_FORMAT_RGB,  8,  IM_FILEFORMATTYPE_JP2, 0xE0E906C5u, 0 },
+    { "styles.jp2",      IM_FORMAT_RGB,        8,  8,  JP2, RGB,  NONE,   0xE0E906C5u, 0 },
     /* ict-tiles.j2k's packet headers in PPT, */
-    { "ppt.j2k",         IM_FORMAT_RGB,  8,  IM_FILEFORMATTYPE_J2K, 0x868E41C2u, 0 },
+    { "ppt.j2k",         IM_FORMAT_RGB,        8,  8,  J2K, RGB,  NONE,   0x868E41C2u, 0 },
     /* in PPM, */
-    { "ppm.j2k",         IM_FORMAT_RGB,  8,  IM_FILEFORMATTYPE_J2K, 0x868E41C2u, 0 },
+    { "ppm.j2k",         IM_FORMAT_RGB,        8,  8,  J2K, RGB,  NONE,   0x868E41C2u, 0 },
     /* its tiles in two tile-parts each */
-    { "parts.j2k",       IM_FORMAT_RGB,  8,  IM_FILEFORMATTYPE_J2K, 0x868E41C2u, 0 },
+    { "parts.j2k",       IM_FORMAT_RGB,        8,  8,  J2K, RGB,  NONE,   0x868E41C2u, 0 },
     /* gray-layers.jp2's packets under a POC */
-    { "poc.j2k",         IM_FORMAT_GRAY, 8,  IM_FILEFORMATTYPE_J2K, 0x937121C4u, 0 },
+    { "poc.j2k",         IM_FORMAT_GRAY,       8,  8,  J2K, GRAY, NONE,   0x937121C4u, 0 },
+    /* four components bare: CMYK (its opacity, as the engine has it, none) */
+    { "cmyk.j2k",        IM_FORMAT_CMYK,       8,  8,  J2K, CMYK, NONE,   0x6047FBEDu, 0 },
+    /* gray and opacity, 9/7 */
+    { "gray-alpha.jp2",  IM_FORMAT_GRAY_ALPHA, 8,  8,  JP2, GRAY, LAST,   0x8BC82C1Eu, 0x4BCBF784u },
+    /* 10-bit samples, spread over 16 */
+    { "rgb10.jp2",       IM_FORMAT_RGB,        16, 10, JP2, RGB,  NONE,   0x6047FBEDu, 0 },
+    /* alpha.jp2's opacity premultiplied, by cdef: kept so */
+    { "premult.jp2",     IM_FORMAT_RGBA,       8,  8,  JP2, RGB,  PREMUL, 0x6047FBEDu, 0x4BCBF784u },
   };
   size_t i;
 
@@ -140,21 +160,23 @@ TEST_IMPL(jp2_fixtures) {
     im = fixture(cases[i].name, IM_BYTEORDER_ANY);
     ASSERT(im && im->data.data);
 
-    comps = cases[i].format == IM_FORMAT_RGBA ? 4u
-          : cases[i].format == IM_FORMAT_RGB  ? 3u : 1u;
+    comps = cases[i].format == IM_FORMAT_RGBA || cases[i].format == IM_FORMAT_CMYK ? 4u
+          : cases[i].format == IM_FORMAT_RGB        ? 3u
+          : cases[i].format == IM_FORMAT_GRAY_ALPHA ? 2u : 1u;
 
     ASSERT(im->width == 37u && im->height == 23u);
     ASSERT(im->format == cases[i].format);
-    ASSERT(im->fileFormatType == cases[i].type);
+    ASSERT(im->fileFormatType == (ImFileFormatType)cases[i].type);
+    ASSERT(im->colorSpace == (ImColorSpace)cases[i].space);
     ASSERT(im->componentsPerPixel == comps);
     ASSERT(im->bitsPerComponent == cases[i].bits);
     ASSERT(im->bitsPerPixel == comps * cases[i].bits);
     ASSERT(im->bytesPerPixel == comps * cases[i].bits / 8u);
     ASSERT(im->len == (size_t)37u * 23u * im->bytesPerPixel);
-    ASSERT(im->alphaInfo == (cases[i].alpha ? IM_ALPHA_LAST : IM_ALPHA_NONE));
+    ASSERT(im->alphaInfo == (ImAlphaInfo)cases[i].alpha_info);
     ASSERT(!im->iccProfile && !im->pal);
 
-    pdf_hash(im, &hash, &alpha);
+    ASSERT(pdf_hash(im, cases[i].depth, &hash, &alpha));
     if (hash != cases[i].hash || (cases[i].alpha && alpha != cases[i].alpha)) {
       fprintf(stderr, "  %s: 0x%08X 0x%08X\n", cases[i].name, hash, alpha);
     }
@@ -222,7 +244,7 @@ TEST_IMPL(jp2_threads) {
   ASSERT(im->format == IM_FORMAT_RGB && im->bitsPerComponent == 8u);
   ASSERT(im->fileFormatType == IM_FILEFORMATTYPE_JP2);
 
-  pdf_hash(im, &hash, &alpha);
+  ASSERT(pdf_hash(im, 8u, &hash, &alpha));
   if (hash != 0xF1F2CB8Du) fprintf(stderr, "  imageio.jp2: 0x%08X\n", hash);
   ASSERT(hash == 0xF1F2CB8Du);
 
