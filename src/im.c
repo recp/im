@@ -125,21 +125,26 @@ typedef ImResult (*imloader)(ImImage**, const char*, im_open_config_t*);
 
 /* static const struct { imloader fn; } extmap[256] = { */
 static const imloader extmap[256] = {
+  [0x04] = jp2_dec,         /* jpf  */
   [0x06] = dib_dec,         /* dib  */
   [0x1F] = ppm_dec,         /* ppm  */
   [0x30] = tga_dec,         /* vda  */
   [0x3C] = pbm_dec,         /* pbm  */
   [0x54] = heic_dec,        /* heic */
   [0x58] = jp2_dec,         /* jp2  */
+  [0x5A] = jp2_dec,         /* jpx  */
   [0x64] = tga_dec,         /* icb  */
   [0x68] = pgm_dec,         /* pgm  */
+  [0x69] = jp2_dec,         /* j2k  */
   [0x79] = bmp_dec,         /* bmp  */
   [0x7A] = jxl_dec,         /* jxl  */
   [0x99] = qoi_dec,         /* qoi  */
   [0x9D] = tga_dec,         /* vst  */
   [0xA9] = png_dec,         /* png  */
+  [0xBB] = jp2_dec,         /* jpc  */
   [0xEA] = tga_dec,         /* tga  */
   [0xF0] = pam_dec,         /* pam  */
+  [0xF1] = jp2_dec,         /* j2c  */
   [0xF7] = jpg_dec,         /* jpg  */
   [0xFB] = pfm_dec,         /* pfm  */
   [0xFC] = jpg_dec,         /* jpeg */
@@ -177,6 +182,11 @@ static void __attribute__((constructor)) verify_hashes(void) {
   print_ext_hash("jpeg");
   print_ext_hash("jxl");
   print_ext_hash("jp2");
+  print_ext_hash("j2k");
+  print_ext_hash("j2c");
+  print_ext_hash("jpc");
+  print_ext_hash("jpf");
+  print_ext_hash("jpx");
   printf("-------------------\n");
 }
 #endif
