@@ -5,6 +5,7 @@ set(TESTFILES
   runner.c
   src/test_jp2.c
   src/test_jpg.c
+  src/test_load.c
   )
 
 set(TEST_MAIN tests)

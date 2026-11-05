@@ -37,6 +37,11 @@ TEST_DECLARE(jpg_16bit)
 TEST_DECLARE(jpg_icc)
 TEST_DECLARE(jpg_truncated)
 
+/* load */
+TEST_DECLARE(load_mem)
+TEST_DECLARE(jpg_options)
+TEST_DECLARE(jp2_options)
+
 /*****************************************************************************/
 
 TEST_LIST {
@@ -51,6 +56,11 @@ TEST_LIST {
   TEST_ENTRY(jpg_16bit)
   TEST_ENTRY(jpg_icc)
   TEST_ENTRY(jpg_truncated)
+
+  /* load */
+  TEST_ENTRY(load_mem)
+  TEST_ENTRY(jpg_options)
+  TEST_ENTRY(jp2_options)
 };
 
 #endif /* tests_h */
