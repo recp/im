@@ -34,6 +34,10 @@
 #include "jp2.h"
 #include "../../file.h"
 
+#if defined(_MSC_VER) && !defined(__clang__)
+#  include <intrin.h>
+#endif
+
 #ifdef __APPLE__
 #  include "../apple/coreimg.h"
 #endif
@@ -1212,13 +1216,36 @@ mq_reset(t1_t *t) {
     }                                                                                                                  \
   } while (0)
 
+/* the leading zeros of a nonzero 32-bit word */
+static JPX_INLINE uint32_t
+mq_clz(uint32_t v) {
+#if defined(_MSC_VER) && !defined(__clang__)
+  unsigned long i;
+
+  _BitScanReverse(&i, v);
+  return 31u - (uint32_t)i;
+#else
+  return (uint32_t)__builtin_clz(v);
+#endif
+}
+
+/* a back to 0x8000 and up: the bits it needs at once, as many as the byte
+   holds (a byte in where it's done) — the bit-at-a-time loop's steps */
 #define MQ_RENORM()                                                                                                    \
   do {                                                                                                                 \
-    if (!ct) MQ_BYTEIN();                                                                                              \
-    a <<= 1;                                                                                                           \
-    c <<= 1;                                                                                                           \
-    ct--;                                                                                                              \
-  } while (!(a & 0x8000u))
+    uint32_t n_ = mq_clz(a) - 16u;                                                                                     \
+                                                                                                                       \
+    while (n_) {                                                                                                       \
+      uint32_t s_;                                                                                                     \
+                                                                                                                       \
+      if (!ct) MQ_BYTEIN();                                                                                            \
+      s_ = n_ < ct ? n_ : ct;                                                                                          \
+      a <<= s_;                                                                                                        \
+      c <<= s_;                                                                                                        \
+      ct -= s_;                                                                                                        \
+      n_ -= s_;                                                                                                        \
+    }                                                                                                                  \
+  } while (0)
 
 #define MQ_DECODE(d, ctx)                                                                                              \
   do {                                                                                                                 \
@@ -1899,7 +1926,6 @@ idwt_cols(jpx_t *j, xscratch_t *s, void *ctx, uint32_t item) {
 /* the next item, without the lock: a round's start and end are under it,
    its items taken by one atomic add each */
 #if defined(_MSC_VER) && !defined(__clang__)
-#  include <intrin.h>
 #  define X_TAKE(p)     ((uint32_t)_InterlockedExchangeAdd((volatile long *)(p), 1))
 #  define X_RESET(p)    ((void)_InterlockedExchange((volatile long *)(p), 0))
 #else
