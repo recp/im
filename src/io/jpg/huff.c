@@ -1000,21 +1000,37 @@ par_item(void *arg, uint32_t worker, uint32_t item) {
 
 /* -- lossless (H.1, H.2): differences, then the predictors ------------------- */
 
-/* libjpeg's jdlhuff.c, jddiffct.c and jdlossls.c: an MCU row of
-   differences at a time (restarts come between rows); where data ran out
-   the rows after are zeros; each component predicted row by row, from the
-   row above (kept as it was predicted, modulo 2^16) and the sample before,
-   the first row after a scan's start, a restart or a row of zeros by the
-   one before alone, from 2^(P - Pt - 1); samples out shifted by Pt */
-typedef struct jloss {
-  int32_t  *diff[J_COMPS];  /* a component's rows of an MCU row */
-  uint16_t *prev[J_COMPS];  /* its row above, unshifted */
-  bool      first[J_COMPS]; /* its next row predicted as a first one */
-  uint32_t  y[J_COMPS];     /* its next sample row */
-} jloss_t;
+/* (jpgint.h's jloss_t) the scan's components' rows, each row predicted
+   as a first one */
+IM_HIDE bool
+jpg_loss_start(jpg_t *j, jloss_t *L) {
+  uint32_t i;
 
-static void
-undifference(jpg_t *j, jloss_t *L, uint32_t ci, const int32_t *d) {
+  memset(L, 0, sizeof(*L));
+  for (i = 0; i < j->nscomp; i++) {
+    uint32_t ci = j->scomp[i];
+    jcomp_t *c  = &j->comp[ci];
+
+    if (!(L->diff[ci] = calloc((size_t)c->bw * c->v, sizeof(int32_t))) || !(L->prev[ci] = calloc(c->bw, sizeof(uint16_t)))) {
+      return false;
+    }
+  }
+  for (i = 0; i < J_COMPS; i++) L->first[i] = true;
+  return true;
+}
+
+IM_HIDE void
+jpg_loss_end(jloss_t *L) {
+  uint32_t i;
+
+  for (i = 0; i < J_COMPS; i++) {
+    free(L->diff[i]);
+    free(L->prev[i]);
+  }
+}
+
+IM_HIDE void
+jpg_undiff(jpg_t *j, jloss_t *L, uint32_t ci, const int32_t *d) {
   jcomp_t  *c = &j->comp[ci];
   uint16_t *prev = L->prev[ci];
   uint32_t  w = c->cw, x, psv = j->ss, al = j->al;
@@ -1076,6 +1092,7 @@ loss_diff(jbits_t *b, const jhuff_t *h) {
   return extend(get_bits(b, s), s);
 }
 
+/* libjpeg's jdlhuff.c: where data ran out the rows after are zeros */
 IM_HIDE bool
 jpg_scan_lossless(jpg_t *j) {
   jctx_t   x;
@@ -1084,7 +1101,6 @@ jpg_scan_lossless(jpg_t *j) {
   bool     at_marker = false, ok = false, single = j->nscomp == 1u;
   size_t   margin;
 
-  memset(&L, 0, sizeof(L));
   for (i = 0; i < j->nscomp; i++) {
     const jcomp_t *c = &j->comp[j->scomp[i]];
 
@@ -1095,17 +1111,7 @@ jpg_scan_lossless(jpg_t *j) {
   if (j->restart && j->restart % per_row) return false; /* libjpeg: JERR_BAD_RESTART */
   margin = (size_t)blocks * per_row * 5u + 64u; /* an MCU row: 17 + 16 bits a sample at most */
   if (!ctx_init(&x, j, margin)) return false;
-  for (i = 0; i < j->nscomp; i++) {
-    uint32_t ci = j->scomp[i];
-    jcomp_t *c  = &j->comp[ci];
-
-    if (!(L.diff[ci] = calloc((size_t)c->bw * c->v, sizeof(int32_t))) || !(L.prev[ci] = calloc(c->bw, sizeof(uint16_t)))) {
-      goto done;
-    }
-    L.first[ci] = true;
-    L.y[ci]     = 0u;
-  }
-  for (i = 0; i < J_COMPS; i++) L.first[i] = true;
+  if (!jpg_loss_start(j, &L)) goto done;
   rows_to_go = j->restart / per_row;
   rd_start(&x, 0u);
 
@@ -1168,16 +1174,13 @@ jpg_scan_lossless(jpg_t *j) {
       uint32_t rows = single ? mrows : c->v, r;
 
       if (!single && irow + 1u == nirows && c->ch % c->v) rows = c->ch % c->v;
-      for (r = 0; r < rows; r++) undifference(j, &L, ci, L.diff[ci] + (size_t)r * c->bw);
+      for (r = 0; r < rows; r++) jpg_undiff(j, &L, ci, L.diff[ci] + (size_t)r * c->bw);
     }
   }
   ok = true;
 
 done:
-  for (i = 0; i < J_COMPS; i++) {
-    free(L.diff[i]);
-    free(L.prev[i]);
-  }
+  jpg_loss_end(&L);
   free(x.tail);
   return ok;
 }

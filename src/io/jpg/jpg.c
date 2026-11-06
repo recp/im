@@ -271,7 +271,6 @@ read_sof(jpg_t *j, uint32_t m, const uint8_t *s, uint32_t len) {
   case 3:  j->process = J_LOSSLESS;    break;
   default: j->process = J_SEQUENTIAL;  break;
   }
-  if (j->process == J_LOSSLESS && j->arith) return false; /* libjpeg has none: not yet */
   if (!j->width || !j->ncomp || j->ncomp > J_COMPS || len != 6u + j->ncomp * 3u) return false;
   if (j->process == J_LOSSLESS ? j->prec < 2u || j->prec > 16u : j->prec != 8u && j->prec != 12u) return false;
 
@@ -493,7 +492,7 @@ read_sos(jpg_t *j, const uint8_t *s, uint32_t len) {
     for (i = 0; i < n; i++) {
       const jcomp_t *c = &j->comp[j->scomp[i]];
 
-      if (c->td > 3u || !j->dc[c->td] || !j->dc[c->td]->ok) return false;
+      if (c->td > 3u || (!j->arith && (!j->dc[c->td] || !j->dc[c->td]->ok))) return false;
     }
     return true;
   }
@@ -603,7 +602,7 @@ jpg_free(jpg_t *j) {
 /* the scan whose data is unstuffed in `j->sd`, as its process codes it */
 static bool
 scan(jpg_t *j) {
-  if (j->process == J_LOSSLESS) return jpg_scan_lossless(j);
+  if (j->process == J_LOSSLESS) return j->arith ? jpg_scan_arith_lossless(j) : jpg_scan_lossless(j);
   return j->arith ? jpg_scan_arith(j) : jpg_scan_huff(j, j->pool);
 }
 

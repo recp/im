@@ -213,11 +213,30 @@ IM_HIDE const uint8_t *jpg_scan_end(const uint8_t *p, const uint8_t *end);
 IM_HIDE bool jpg_scan_huff(jpg_t *j, im_pool_t *pool);
 IM_HIDE bool jpg_resync(const jdata_t *d, uint32_t *next_rst, uint32_t *cur);
 
+/* lossless (H.2): a scan's components' rows of differences, the
+   predictors on them (libjpeg's jddiffct.c, jdlossls.c): an MCU row of
+   differences at a time (restarts come between rows); each component
+   predicted row by row from the row above (kept as it was predicted,
+   modulo 2^16) and the sample before, the first row after a scan's start,
+   a restart or a row of zeros by the one before alone, from
+   2^(P - Pt - 1); samples out shifted by Pt */
+typedef struct jloss {
+  int32_t  *diff[J_COMPS];  /* a component's rows of an MCU row */
+  uint16_t *prev[J_COMPS];  /* its row above, unshifted */
+  bool      first[J_COMPS]; /* its next row predicted as a first one */
+  uint32_t  y[J_COMPS];     /* its next sample row */
+} jloss_t;
+
+IM_HIDE bool jpg_loss_start(jpg_t *j, jloss_t *L);
+IM_HIDE void jpg_loss_end(jloss_t *L);
+/* a row of component ci's differences predicted, to its plane */
+IM_HIDE void jpg_undiff(jpg_t *j, jloss_t *L, uint32_t ci, const int32_t *d);
 IM_HIDE bool jpg_scan_lossless(jpg_t *j);
 
 /* arith.c */
 IM_HIDE void jpg_flow_row(jpg_t *j, uint32_t row);
 IM_HIDE bool jpg_scan_arith(jpg_t *j);
+IM_HIDE bool jpg_scan_arith_lossless(jpg_t *j);
 
 /* idct.c */
 

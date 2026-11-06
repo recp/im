@@ -15,11 +15,12 @@
  */
 
 /*
- * Arithmetic-coded scans (Annex D, F.2.4, G.2): the QM coder, the
- * statistics a table's, its conditioning (DAC), sequential and progressive
- * blocks, restarts. As libjpeg's jdarith.c: past a segment's end zeros; a
- * magnitude or a run past the block (damage) and the MCUs after are left
- * as they are, up to the next restart; a DC refinement read regardless.
+ * Arithmetic-coded scans (Annex D, F.2.4, G.2, H.1.2.3): the QM coder,
+ * the statistics a table's, its conditioning (DAC), sequential and
+ * progressive blocks, lossless differences, restarts. As libjpeg's
+ * jdarith.c: past a segment's end zeros; a magnitude or a run past the
+ * block (damage) and the MCUs after are left as they are, up to the next
+ * restart; a DC refinement read regardless.
  */
 
 #include "jpgint.h"
@@ -153,6 +154,7 @@ typedef struct jac {
   int64_t        c, a;
   int32_t        ct;        /* -1: damage, nothing read to the next restart */
   uint8_t        dc_stats[16][64], ac_stats[16][256], fixed[4];
+  uint8_t        ll_stats[4][160]; /* lossless: 158 bins a table (H.1.2.3.2) */
   int32_t        last_dc[J_COMPS], dc_ctx[J_COMPS];
 } jac_t;
 
@@ -456,4 +458,156 @@ jpg_scan_arith(jpg_t *j) {
   j->last_good = j->nscomp == 1u ? (h - 1u) / j->comp[j->scomp[0]].v : h - 1u;
   free(e);
   return true;
+}
+
+/* -- lossless (H.1.2.3) ----------------------------------------------------------- */
+
+/* a difference's class for the contexts (F.1.4.4.1.2's bounds): 0 zero,
+   1 small positive, 2 small negative, 3 large positive, 4 large negative */
+static uint8_t
+ll_class(const jpg_t *j, uint32_t tbl, int32_t d) {
+  uint32_t a = d < 0 ? (uint32_t)-d : (uint32_t)d, l = j->dc_l[tbl];
+
+  if (a <= (l ? 1u << (l - 1u) : 0u)) return 0;
+  if (a > 1u << j->dc_u[tbl]) return d < 0 ? 4 : 3;
+  return d < 0 ? 2 : 1;
+}
+
+/* a difference by its neighbours' classes, the left one's `ca` and the
+   one above's `cb` (Table H.3: S0 from both, the magnitudes' from the one
+   above alone); false: the magnitude past 15 bits */
+static bool
+ll_diff(jac_t *e, uint8_t *stats, uint32_t ca, uint32_t cb, int32_t *out) {
+  uint8_t *st = stats + 20u * ca + 4u * cb;
+  int      sign, m, v;
+
+  if (decode(e, st) == 0) {
+    *out = 0;
+    return true;
+  }
+  sign = decode(e, st + 1);
+  st += 2 + sign;
+  if ((m = decode(e, st)) != 0) {
+    st = stats + (cb >= 3u ? 129 : 100);
+    while (decode(e, st)) {
+      if ((m <<= 1) == 0x8000) return false;
+      st += 1;
+    }
+  }
+  v = m;
+  st += 14;
+  while (m >>= 1) {
+    if (decode(e, st)) v |= m;
+  }
+  v += 1;
+  *out = sign ? -v : v;
+  return true;
+}
+
+/* Row by row as the Huffman one's (jpg_scan_lossless): each difference
+   conditioned on those coded to its left and above in its component, the
+   left zero at a row's start, the above zero on a scan's or a restart's
+   first row; the statistics reset with the coder. Past the data zeros
+   are read; a magnitude past 15 bits (damage) zeros to the next restart */
+IM_HIDE bool
+jpg_scan_arith_lossless(jpg_t *j) {
+  jac_t   *e;
+  jloss_t  L;
+  uint8_t *above[J_COMPS] = { NULL };
+  uint32_t i, per_row, nrows, nirows, irow, rows_to_go = 0u, cur = 0u, next_rst = 0u;
+  bool     single = j->nscomp == 1u, ok = false;
+
+  per_row = single ? j->comp[j->scomp[0]].cw : j->mcux;
+  nrows   = single ? j->comp[j->scomp[0]].ch : j->mcuy;
+  if (j->restart && j->restart % per_row) return false; /* as the Huffman one */
+  if (!(e = calloc(1, sizeof(*e)))) return false;
+  e->j = j;
+  if (!jpg_loss_start(j, &L)) goto done;
+  for (i = 0; i < j->nscomp; i++) {
+    if (!(above[j->scomp[i]] = calloc(j->comp[j->scomp[i]].bw, 1))) goto done;
+  }
+  e->ct = -16;
+  seg_at(e, 0u);
+  rows_to_go = j->restart / per_row;
+
+  nirows = single ? (nrows + j->comp[j->scomp[0]].v - 1u) / j->comp[j->scomp[0]].v : nrows;
+  for (irow = 0; irow < nirows; irow++) {
+    uint32_t mrows = 1u, yo;
+
+    if (single) {
+      uint32_t v = j->comp[j->scomp[0]].v;
+
+      mrows = irow + 1u < nirows ? v : (nrows % v ? nrows % v : v);
+    }
+    for (yo = 0; yo < mrows; yo++) {
+      uint32_t mx;
+
+      if (j->restart && !rows_to_go) {
+        bool at_marker = jpg_resync(&j->sd, &next_rst, &cur);
+
+        memset(e->ll_stats, 0, sizeof(e->ll_stats));
+        e->c  = 0;
+        e->a  = 0;
+        e->ct = -16;
+        seg_at(e, at_marker ? UINT32_MAX : cur);
+        for (i = 0; i < J_COMPS; i++) L.first[i] = true;
+        for (i = 0; i < j->nscomp; i++) memset(above[j->scomp[i]], 0, j->comp[j->scomp[i]].bw);
+        rows_to_go = j->restart / per_row;
+      }
+      for (mx = 0; mx < per_row; mx++) {
+        for (i = 0; i < j->nscomp; i++) {
+          uint32_t ci = j->scomp[i], tbl;
+          jcomp_t *c  = &j->comp[ci];
+          uint32_t nh = single ? 1u : c->h, nv = single ? 1u : c->v, a, b;
+
+          tbl = c->td;
+          for (b = 0; b < nv; b++) {
+            uint32_t r = single ? yo : b;
+            int32_t *row = L.diff[ci] + (size_t)r * c->bw;
+
+            for (a = 0; a < nh; a++) {
+              uint32_t x = mx * nh + a, ca, cb;
+              int32_t  d = 0;
+
+              ca = x ? ll_class(j, tbl, row[x - 1u]) : 0u;
+              cb = single || !r ? above[ci][x] : ll_class(j, tbl, L.diff[ci][(size_t)(r - 1u) * c->bw + x]);
+              if (e->ct != -1 && !ll_diff(e, e->ll_stats[tbl], ca, cb, &d)) {
+                e->ct = -1;
+                d     = 0;
+              }
+              row[x] = d;
+            }
+          }
+        }
+      }
+      /* a lone component's row is the next one's above at once */
+      if (single) {
+        uint32_t ci = j->scomp[0], x;
+        int32_t *row = L.diff[ci] + (size_t)yo * j->comp[ci].bw;
+
+        for (x = 0; x < j->comp[ci].bw; x++) above[ci][x] = ll_class(j, j->comp[ci].td, row[x]);
+      }
+      if (j->restart) rows_to_go--;
+    }
+    for (i = 0; i < j->nscomp; i++) {
+      uint32_t ci = j->scomp[i], rows = single ? mrows : j->comp[ci].v, r, x;
+      jcomp_t *c  = &j->comp[ci];
+
+      if (!single) {
+        const int32_t *last = L.diff[ci] + (size_t)(c->v - 1u) * c->bw;
+
+        for (x = 0; x < c->bw; x++) above[ci][x] = ll_class(j, c->td, last[x]);
+        if (irow + 1u == nirows && c->ch % c->v) rows = c->ch % c->v;
+      }
+      for (r = 0; r < rows; r++) jpg_undiff(j, &L, ci, L.diff[ci] + (size_t)r * c->bw);
+    }
+  }
+  j->last_good = nirows - 1u;
+  ok = true;
+
+done:
+  for (i = 0; i < J_COMPS; i++) free(above[i]);
+  jpg_loss_end(&L);
+  free(e);
+  return ok;
 }
