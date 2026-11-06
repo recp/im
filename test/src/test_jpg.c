@@ -20,7 +20,7 @@
  * byte (deeper samples spread over 16 bits, shallower over 8, Adobe's CMYK
  * un-inverted): every sampling libjpeg upsamples, progressive, restarts,
  * 12-bit, arithmetic coding, lossless at 2 to 16 bits (and arithmetic
- * coded, as its Huffman twin), CMYK and YCCK, a
+ * coded, as its Huffman twin), hierarchical sequences, CMYK and YCCK, a
  * height from a DNL (420.jpg's and prog.jpg's pixels),
  * streams cut short (the rest grey; a progressive one smoothed), a large
  * one on threads; 16-bit samples in either order; an ICC profile's chunks
@@ -135,6 +135,11 @@ TEST_IMPL(jpg_fixtures) {
     { "ll-arith.jpg",     RGB,  8,  sRGB,   37,  23,  0x03A59D62u }, /* lossless, arithmetic: the picture */
     { "ll-arith-rst.jpg", RGB,  8,  sRGB,   37,  23,  0x03A59D62u },
     { "ll-arith-420.jpg", RGB,  8,  sRGB,   37,  23,  0x133624F4u }, /* its Huffman twin's */
+    { "hier.jpg",         RGB,  8,  sRGB,   37,  23,  0x7413C595u }, /* hierarchical: half, then differential */
+    { "hier-prog.jpg",    RGB,  8,  sRGB,   37,  23,  0x7413C595u },
+    { "hier-arith.jpg",   RGB,  8,  sRGB,   37,  23,  0x7413C595u },
+    { "hier-ll.jpg",      RGB,  8,  sRGB,   37,  23,  0x5D2E1AB9u },
+    { "hier-dct-ll.jpg",  RGB,  8,  sRGB,   37,  23,  0xCC4F1DDDu },
     { "cmyk.jpg",         CMYK, 8,  CMYKCS, 37,  23,  0x9D19D764u }, /* Adobe's: un-inverted */
     { "ycck.jpg",         CMYK, 8,  CMYKCS, 37,  23,  0x1FEDD2ACu },
     { "cmyk-plain.jpg",   CMYK, 8,  CMYKCS, 37,  23,  0x9EAC2000u },
@@ -282,6 +287,61 @@ TEST_IMPL(jpg_truncated) {
 
 /* cut inside a segment after a scan (here a DHT between progressive
    scans): the scans so far, as if EOI came where the segment begins */
+/* hierarchical: the lossless one the picture (ll1.jpg's pixels) where
+   its reference's samples are copied, one less at most where they're
+   interpolated (its encoder rounds there, the spec truncates); DHP's size
+   in the headers' word; cut in its last frame, the rest of that frame's
+   differences none; without DHP, a second frame refused */
+TEST_IMPL(jpg_hierarchical) {
+  ImImage *a = fixture("hier-ll.jpg", IM_BYTEORDER_LITTLE), *b = fixture("ll1.jpg", IM_BYTEORDER_LITTLE);
+  ImInfo   info;
+  uint8_t *d;
+  size_t   len, x, y, k, at;
+
+  ASSERT(a && b && a->len == b->len && a->width == 37u);
+  for (y = 0; y < a->height; y++) {
+    for (x = 0; x < a->width; x++) {
+      for (k = 0; k < 3u; k++) {
+        int u = ((const uint8_t *)a->data.data)[(y * a->width + x) * 3u + k];
+        int v = ((const uint8_t *)b->data.data)[(y * a->width + x) * 3u + k];
+
+        ASSERT((x | y) & 1u ? v - u == 0 || v - u == 1 : u == v);
+      }
+    }
+  }
+  im_free(a);
+  im_free(b);
+
+  ASSERT((d = read_all("hier-arith.jpg", &len)));
+  ASSERT(im_info_mem(&info, d, len) == IM_OK);
+  ASSERT(info.width == 37u && info.height == 23u && info.components == 3u && info.coding == IM_CODING_HIERARCHICAL);
+  ASSERT(info.arithmetic);
+  free(d);
+
+  ASSERT((d = read_all("hier.jpg", &len)));
+  /* cut in the differential frame's data */
+  {
+    ImImage *cut = NULL;
+
+    ASSERT(im_load_mem(&cut, d, len - 200u, NULL, IM_OPEN_INTENT_READONLY) == IM_OK);
+    ASSERT(cut && cut->width == 37u && cut->height == 23u);
+    im_free(cut);
+  }
+  /* DHP made an APP5: two frames, refused */
+  for (at = 2; at + 1u < len && !(d[at] == 0xFFu && d[at + 1u] == 0xDEu); at++) {
+  }
+  ASSERT(at + 1u < len);
+  d[at + 1u] = 0xE5u;
+  {
+    ImImage *two = NULL;
+
+    ASSERT(im_load_mem(&two, d, len, NULL, IM_OPEN_INTENT_READONLY) != IM_OK && !two);
+  }
+  free(d);
+
+  TEST_SUCCESS
+}
+
 TEST_IMPL(jpg_cut_segment) {
   uint8_t *d;
   size_t   n, at = 2u, scans = 0u, dht = 0u;

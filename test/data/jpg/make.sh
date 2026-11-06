@@ -95,6 +95,19 @@ rm -rf cmyk mkcmyk
 ${JPEG:-jpeg} -p -a -c $s ll-arith.jpg >/dev/null
 ${JPEG:-jpeg} -p -a -c -s 1x1,2x2,2x2 -z 19 $s ll-arith-420.jpg >/dev/null
 ${JPEG:-jpeg} -p -a -c -z 37 $s ll-arith-rst.jpg >/dev/null
+# hierarchical (Annex J), the same tool's: a frame half the size, then a
+# differential one at the whole size (EXP both ways), sequential,
+# progressive and arithmetic (their pixels the same: the same
+# coefficients); lossless both (its encoder rounds the reference's
+# interpolated samples up, so the picture is there only where they're
+# copied: even rows' even columns; one less elsewhere); and the DCT at the
+# whole size with a lossless differential frame after it (lossless only
+# with its encoder's own IDCT)
+${JPEG:-jpeg} -q 90 -h -y 2 $s hier.jpg >/dev/null
+${JPEG:-jpeg} -q 90 -h -y 2 -v $s hier-prog.jpg >/dev/null
+${JPEG:-jpeg} -q 90 -y 2 -a $s hier-arith.jpg >/dev/null
+${JPEG:-jpeg} -p -h -y 2 -c $s hier-ll.jpg >/dev/null
+${JPEG:-jpeg} -q 90 -h -y 0 -c $s hier-dct-ll.jpg >/dev/null
 # a picture large enough for threads, a restart each MCU row
 sips -s format png "/System/Library/Desktop Pictures/iMac Blue.heic" --out big.png >/dev/null
 sips --resampleWidth 777 big.png --out big.png >/dev/null
