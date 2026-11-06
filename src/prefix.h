@@ -41,6 +41,7 @@
 #  define jpg_idct12            IM_PFX(jpg_idct12)
 #  define jpg_idct8             IM_PFX(jpg_idct8)
 #  define jpg_idct8_best        IM_PFX(jpg_idct8_best)
+#  define jpg_idct_diff         IM_PFX(jpg_idct_diff)
 #  define jpg_idct_for          IM_PFX(jpg_idct_for)
 #  define jpg_loss_end          IM_PFX(jpg_loss_end)
 #  define jpg_loss_start        IM_PFX(jpg_loss_start)

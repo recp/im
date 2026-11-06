@@ -267,7 +267,7 @@ typedef enum ImCoding {
   IM_CODING_EXTENDED,     /* SOF1, SOF9 */
   IM_CODING_PROGRESSIVE,  /* SOF2, SOF10 */
   IM_CODING_LOSSLESS,     /* SOF3, SOF11 */
-  IM_CODING_HIERARCHICAL, /* SOF5–7, SOF13–15 (not decoded yet) */
+  IM_CODING_HIERARCHICAL, /* DHP's frames: then SOF5–7, SOF13–15 ones */
   IM_CODING_JPEG2000
 } ImCoding;
 

@@ -43,7 +43,8 @@ jpg_put(jpg_t *j, jcomp_t *c, int16_t *blk, uint32_t bx, uint32_t by) {
 
   if (bx >= c->sw || by >= c->sh) return; /* an MCU's padding: never shown */
   at = ((size_t)by * c->stride + bx) * c->ss;
-  if (j->prec <= 8u) c->idct(blk, c->q, (uint8_t *)c->plane + at, c->stride);
+  if (j->diff) c->idct(blk, c->q, (int32_t *)c->plane + at, c->stride);
+  else if (j->prec <= 8u) c->idct(blk, c->q, (uint8_t *)c->plane + at, c->stride);
   else c->idct(blk, c->q, (uint16_t *)c->plane + at, c->stride);
 }
 
@@ -243,7 +244,7 @@ idct_all(jpg_t *j) {
   uint32_t i, rows = 0u;
 
   t.j      = j;
-  t.smooth = smoothing_ok(j, t.latch, t.prev);
+  t.smooth = !j->hier && smoothing_ok(j, t.latch, t.prev); /* a hierarchical frame as its encoder made it */
   for (i = 0; i < j->ncomp; i++) rows = j->comp[i].sh > rows ? j->comp[i].sh : rows;
   t.band     = j->pool ? rows / (im_pool_size(j->pool) * 4u) : rows;
   t.band     = t.band ? t.band : 1u;
@@ -255,12 +256,20 @@ idct_all(jpg_t *j) {
 /* -- markers ----------------------------------------------------------------------- */
 
 static bool frame_size(jpg_t *j);
+static bool frame_done(jpg_t *j);
+static uint32_t hier_comp(const jpg_t *j, uint32_t id);
 
 static bool
 read_sof(jpg_t *j, uint32_t m, const uint8_t *s, uint32_t len) {
   uint32_t i;
+  bool     diff = m == 0xC5u || m == 0xC6u || m == 0xC7u || m >= 0xCDu;
 
-  if (j->frame || len < 6u) return false;
+  /* one frame, but a hierarchical sequence's one after another (the one
+     before finished first); a differential one only in such a sequence */
+  if (len < 6u || (j->frame && (!j->hier || !frame_done(j))) || (diff && !j->hier)) return false;
+  j->diff   = diff;
+  j->grow   = j->expand;
+  j->expand = 0u;
   j->prec   = s[0];
   j->height = be16(s + 1);
   j->width  = be16(s + 3);
@@ -286,6 +295,18 @@ read_sof(jpg_t *j, uint32_t m, const uint8_t *s, uint32_t len) {
     if (c->h > j->hmax) j->hmax = c->h;
     if (c->v > j->vmax) j->vmax = c->v;
   }
+  if (j->hier) {
+    /* DHP's precision, no bigger than it, its components (each one's
+       samples there before a differential frame of it) */
+    if (j->prec != j->hprec || j->width > j->hwidth || !j->height || j->height > j->hheight) return false;
+    for (i = 0; i < j->ncomp; i++) {
+      uint32_t k = hier_comp(j, j->comp[i].id);
+
+      if (k == J_COMPS || (diff && !(j->hseen >> k & 1u))) return false;
+    }
+    for (i = 0; !diff && i < j->ncomp; i++) j->hseen |= 1u << hier_comp(j, j->comp[i].id);
+    if (!j->nframes++) j->hdct = j->process != J_LOSSLESS;
+  }
   j->frame = true;
   /* no height: a DNL after the first scan gives it (frame_size then) */
   return j->height ? frame_size(j) : true;
@@ -305,7 +326,7 @@ frame_size(jpg_t *j) {
 
   /* a data unit: a block, or (lossless) a sample */
   unit    = lossless ? 1u : 8u;
-  j->ds   = lossless ? 1u : 8u / j->scale;
+  j->ds   = lossless ? 1u : 8u / (j->hier ? 1u : j->scale); /* a hierarchical sequence full size */
   j->ow   = lossless ? j->width : (uint32_t)(((uint64_t)j->width * j->ds + 7u) / 8u);
   j->oh   = lossless ? j->height : (uint32_t)(((uint64_t)j->height * j->ds + 7u) / 8u);
   j->mcux = (j->width + unit * j->hmax - 1u) / (unit * j->hmax);
@@ -329,7 +350,7 @@ frame_size(jpg_t *j) {
     c->uv     = (uint8_t)(c->v * c->ss / j->ds);
     c->ow     = lossless ? c->cw : (uint32_t)(((uint64_t)j->width * c->h * c->ss + j->hmax * 8u - 1u) / (j->hmax * 8u));
     c->oh     = lossless ? c->ch : (uint32_t)(((uint64_t)j->height * c->v * c->ss + j->vmax * 8u - 1u) / (j->vmax * 8u));
-    c->idct   = jpg_idct_for(c->ss, j->prec);
+    c->idct   = j->diff ? jpg_idct_diff(j->prec) : jpg_idct_for(c->ss, j->prec);
     c->stride = (size_t)c->bw * c->ss;
     samples   = (uint64_t)c->bw * unit * c->bh * unit;
     if (samples > J_SAMPLES) return false;
@@ -346,10 +367,205 @@ frame_alloc(jpg_t *j) {
   for (i = 0; i < j->ncomp; i++) {
     jcomp_t *c = &j->comp[i];
 
-    if (!(c->plane = malloc(c->stride * c->bh * c->ss * (j->prec > 8u ? 2u : 1u)))) {
+    if (!(c->plane = malloc(c->stride * c->bh * c->ss * (j->diff ? 4u : j->prec > 8u ? 2u : 1u)))) {
       return false;
     }
     if (j->multiscan && !(c->coefs = calloc((size_t)c->bw * c->bh * 64u, sizeof(int16_t)))) return false;
+  }
+  return true;
+}
+
+/* -- hierarchical (Annex J) --------------------------------------------------------- */
+
+/* DHP's component of this id; J_COMPS none */
+static uint32_t
+hier_comp(const jpg_t *j, uint32_t id) {
+  uint32_t k;
+
+  for (k = 0; k < j->hncomp && j->hid[k] != id; k++) {
+  }
+  return k < j->hncomp ? k : J_COMPS;
+}
+
+/* DHP (B.3.2): a frame header for the whole sequence, before any frame */
+static bool
+read_dhp(jpg_t *j, const uint8_t *s, uint32_t len) {
+  uint32_t i, k;
+
+  if (j->frame || j->hier || len < 6u) return false;
+  j->hprec   = s[0];
+  j->hheight = be16(s + 1);
+  j->hwidth  = be16(s + 3);
+  j->hncomp  = s[5];
+  if (!j->hwidth || !j->hheight || !j->hncomp || j->hncomp > J_COMPS || len != 6u + j->hncomp * 3u) return false;
+  for (i = 0; i < j->hncomp; i++) {
+    j->hid[i] = s[6u + i * 3u];
+    j->hh[i]  = s[7u + i * 3u] >> 4;
+    j->hv[i]  = s[7u + i * 3u] & 15u;
+    if (j->hh[i] < 1u || j->hh[i] > 4u || j->hv[i] < 1u || j->hv[i] > 4u) return false;
+    for (k = 0; k < i; k++) {
+      if (j->hid[k] == j->hid[i]) return false;
+    }
+  }
+  if ((uint64_t)j->hwidth * j->hheight > J_SAMPLES) return false;
+  j->hier = true;
+  return true;
+}
+
+/* a component's samples twice as wide (J.1.1.2): a new one between each
+   two, their mean truncated; the last column repeated for the right edge */
+static bool
+grow_h(jpg_t *j, uint32_t k) {
+  uint32_t  w = j->rw[k], h = j->rh[k], x, y;
+  uint16_t *in = j->ref[k], *out = malloc((size_t)w * 2u * h * sizeof(uint16_t));
+
+  if (!out) return false;
+  for (y = 0; y < h; y++) {
+    const uint16_t *r = in + (size_t)y * w;
+    uint16_t       *o = out + (size_t)y * w * 2u;
+
+    for (x = 0; x < w; x++) {
+      o[2u * x]      = r[x];
+      o[2u * x + 1u] = (uint16_t)(((uint32_t)r[x] + r[x + 1u < w ? x + 1u : x]) >> 1);
+    }
+  }
+  free(in);
+  j->ref[k] = out;
+  j->rw[k]  = w * 2u;
+  return true;
+}
+
+/* twice as tall: the bottom row repeated */
+static bool
+grow_v(jpg_t *j, uint32_t k) {
+  uint32_t  w = j->rw[k], h = j->rh[k], x, y;
+  uint16_t *in = j->ref[k], *out = malloc((size_t)w * h * 2u * sizeof(uint16_t));
+
+  if (!out) return false;
+  for (y = 0; y < h; y++) {
+    const uint16_t *r = in + (size_t)y * w, *n = y + 1u < h ? r + w : r;
+    uint16_t       *o = out + (size_t)y * 2u * w;
+
+    memcpy(o, r, (size_t)w * sizeof(uint16_t));
+    for (x = 0; x < w; x++) o[w + x] = (uint16_t)(((uint32_t)r[x] + n[x]) >> 1);
+  }
+  free(in);
+  j->ref[k] = out;
+  j->rh[k]  = h * 2u;
+  return true;
+}
+
+/* a frame's component into DHP's: its samples (a differential frame's
+   added, modulo 2^16, to those before, grown first as EXP said; both
+   ways: across, then down) */
+static bool
+frame_comp(jpg_t *j, const jcomp_t *c) {
+  uint32_t  k = hier_comp(j, c->id), w = c->cw, h = c->ch, x, y;
+  uint16_t *out;
+
+  if (j->diff) {
+    if (!j->ref[k]) return false; /* its first frame never decoded */
+    if (((j->grow & 1u) && !grow_h(j, k)) || ((j->grow & 2u) && !grow_v(j, k))) return false;
+    if (j->rw[k] < w || j->rh[k] < h) return false;
+  }
+  if (!(out = malloc((size_t)w * h * sizeof(uint16_t)))) return false;
+  for (y = 0; y < h; y++) {
+    uint16_t *o = out + (size_t)y * w;
+
+    if (j->diff) {
+      const int32_t  *d = (const int32_t *)c->plane + (size_t)y * c->stride;
+      const uint16_t *r = j->ref[k] + (size_t)y * j->rw[k];
+
+      for (x = 0; x < w; x++) o[x] = (uint16_t)((uint32_t)r[x] + (uint32_t)d[x]);
+    } else if (j->prec <= 8u) {
+      const uint8_t *p = (const uint8_t *)c->plane + (size_t)y * c->stride;
+
+      for (x = 0; x < w; x++) o[x] = p[x];
+    } else {
+      memcpy(o, (const uint16_t *)c->plane + (size_t)y * c->stride, (size_t)w * sizeof(uint16_t));
+    }
+  }
+  free(j->ref[k]);
+  j->ref[k] = out;
+  j->rw[k]  = w;
+  j->rh[k]  = h;
+  return true;
+}
+
+/* the frame done: its multi-scan blocks to samples, its components into
+   DHP's; ready for the next frame */
+static bool
+frame_done(jpg_t *j) {
+  uint32_t i;
+  bool     ok = true;
+
+  if (j->comp[0].plane) { /* its first scan came: decoded */
+    if (j->multiscan && !idct_all(j)) ok = false;
+    for (i = 0; ok && i < j->ncomp; i++) ok = frame_comp(j, &j->comp[i]);
+  }
+  for (i = 0; i < J_COMPS; i++) {
+    free(j->comp[i].plane);
+    free(j->comp[i].coefs);
+  }
+  memset(j->comp, 0, sizeof(j->comp));
+  j->frame     = false;
+  j->multiscan = false;
+  return ok;
+}
+
+/* DHP's components as the planes out: each one's last samples (grown to
+   its size where the sequence stops short of it), held to the precision
+   (past it below zero modulo 2^16: 0); a DCT sequence upsampled as a DCT
+   image, a lossless one as a lossless one */
+static bool
+hier_planes(jpg_t *j) {
+  uint32_t i, max = (1u << j->prec) - 1u;
+
+  j->width   = j->hwidth;
+  j->height  = j->hheight;
+  j->ncomp   = j->hncomp;
+  j->process = j->hdct ? J_SEQUENTIAL : J_LOSSLESS;
+  j->hmax = j->vmax = 1u;
+  for (i = 0; i < j->ncomp; i++) {
+    j->comp[i].id = j->hid[i];
+    j->comp[i].h  = j->hh[i];
+    j->comp[i].v  = j->hv[i];
+    if (j->hh[i] > j->hmax) j->hmax = j->hh[i];
+    if (j->hv[i] > j->vmax) j->vmax = j->hv[i];
+  }
+  j->ds   = j->hdct ? 8u : 1u;
+  j->ow   = j->width;
+  j->oh   = j->height;
+  j->mcux = (j->width + 8u * j->hmax - 1u) / (8u * j->hmax);
+  for (i = 0; i < j->ncomp; i++) {
+    jcomp_t *c = &j->comp[i];
+    uint32_t w = (uint32_t)(((uint64_t)j->width * c->h + j->hmax - 1u) / j->hmax);
+    uint32_t h = (uint32_t)(((uint64_t)j->height * c->v + j->vmax - 1u) / j->vmax), x, y;
+
+    if (!j->ref[i]) return false;
+    while (j->rw[i] < w) {
+      if (!grow_h(j, i)) return false;
+    }
+    while (j->rh[i] < h) {
+      if (!grow_v(j, i)) return false;
+    }
+    c->cw = c->ow = w;
+    c->ch = c->oh = h;
+    c->uh = c->h;
+    c->uv = c->v;
+    c->ss = 1u;
+    c->stride = w;
+    if (!(c->plane = malloc((size_t)w * h * (j->prec > 8u ? 2u : 1u)))) return false;
+    for (y = 0; y < h; y++) {
+      const uint16_t *r = j->ref[i] + (size_t)y * j->rw[i];
+
+      for (x = 0; x < w; x++) {
+        uint32_t v = r[x] > max ? (r[x] >= 0x8000u ? 0u : max) : r[x];
+
+        if (j->prec <= 8u) ((uint8_t *)c->plane)[(size_t)y * w + x] = (uint8_t)v;
+        else ((uint16_t *)c->plane)[(size_t)y * w + x] = (uint16_t)v;
+      }
+    }
   }
   return true;
 }
@@ -487,8 +703,9 @@ read_sos(jpg_t *j, const uint8_t *s, uint32_t len) {
   j->al     = s[3u + n * 2u] & 15u;
 
   if (j->process == J_LOSSLESS) {
-    /* Ss the predictor, Al the point transform (libjpeg's checks) */
-    if (j->ss < 1u || j->ss > 7u || j->se != 0u || j->ah != 0u || j->al >= j->prec) return false;
+    /* Ss the predictor, Al the point transform (libjpeg's checks); a
+       differential frame's no predictor (J.1.3.2: 0) */
+    if ((j->diff ? j->ss != 0u : j->ss < 1u || j->ss > 7u) || j->se != 0u || j->ah != 0u || j->al >= j->prec) return false;
     for (i = 0; i < n; i++) {
       const jcomp_t *c = &j->comp[j->scomp[i]];
 
@@ -588,6 +805,7 @@ jpg_free(jpg_t *j) {
   for (i = 0; i < J_COMPS; i++) {
     free(j->comp[i].plane);
     free(j->comp[i].coefs);
+    free(j->ref[i]);
   }
   for (i = 0; i < 4u; i++) {
     free(j->dc[i]);
@@ -938,10 +1156,21 @@ decode_stream(jpg_t *j, ImImage *im, ImByteOrder order, uint8_t **padp) {
     switch (m) {
     case 0xC0: case 0xC1: case 0xC2: case 0xC3:
     case 0xC9: case 0xCA: case 0xCB:
-      if (!read_sof(j, m, s, len)) return false;
-      break;
     case 0xC5: case 0xC6: case 0xC7: case 0xCD: case 0xCE: case 0xCF:
-      return false; /* hierarchical: not yet */
+      if (!read_sof(j, m, s, len)) return false;
+      first = true; /* a hierarchical sequence's next frame */
+      break;
+    case 0xDE:
+      /* DHP before any frame; one past it, or one that doesn't parse, is
+         passed over as other markers are (a sequence's frames then refused
+         past the first) */
+      if (!j->frame && !j->hier) (void)read_dhp(j, s, len);
+      break;
+    case 0xDF: /* EXP (B.3.3): the next frame's references grown */
+      if (!j->hier) break; /* none to grow: passed over */
+      if ((j->frame && first) || len != 1u) return false; /* not inside a frame's header */
+      j->expand = (uint8_t)((s[0] >> 4 ? 1u : 0u) | (s[0] & 15u ? 2u : 0u));
+      break;
     case 0xC4:
       if (!read_dht(j, s, len)) return false;
       break;
@@ -977,7 +1206,7 @@ decode_stream(jpg_t *j, ImImage *im, ImByteOrder order, uint8_t **padp) {
         /* the height a DNL gives, where the frame gave none */
         if (!j->height && (tail || !(j->height = dnl_height(p, end)) || !frame_size(j))) return false;
       }
-      if (!read_sos(j, s, len) || (first && !jpg_out_ok(j, space_of(j)))) return false;
+      if (!read_sos(j, s, len) || (first && !j->hier && !jpg_out_ok(j, space_of(j)))) return false;
       if (j->dry) {
         /* the structure alone: the data passed over */
         if (!tail) p = jpg_scan_end(p, end);
@@ -992,7 +1221,7 @@ decode_stream(jpg_t *j, ImImage *im, ImByteOrder order, uint8_t **padp) {
         if ((uint64_t)j->width * j->height > (uint64_t)J_DRY * (uint64_t)(j->end - j->data) && !dry_run(j)) {
           return false;
         }
-        if ((uint64_t)j->width * j->height >= J_POOL_MIN) {
+        if ((uint64_t)j->width * j->height >= J_POOL_MIN && !j->hier && !j->pool) { /* a hierarchical one on one thread */
           if (j->runner.run) j->pool = im_pool_wrap(&j->runner);
           else if (j->threads > 1u) j->pool = im_pool_new(j->threads);
         }
@@ -1034,8 +1263,12 @@ decode_stream(jpg_t *j, ImImage *im, ImByteOrder order, uint8_t **padp) {
   }
   if (!j->nscans) return false;
   if (j->dry) return true;
-  if (j->ndefer && !run_deferred(j)) return false;
-  if (j->multiscan && !idct_all(j)) return false;
+  if (j->hier) {
+    if ((j->frame && !frame_done(j)) || !hier_planes(j)) return false;
+  } else {
+    if (j->ndefer && !run_deferred(j)) return false;
+    if (j->multiscan && !idct_all(j)) return false;
+  }
   if (!jpg_out(j, space_of(j), im, order)) return false;
 
   /* the profile, the density (pixels a metre) */
@@ -1056,11 +1289,12 @@ decode_stream(jpg_t *j, ImImage *im, ImByteOrder order, uint8_t **padp) {
   return true;
 }
 
-/* the frame header's word, and the DNL's where it gives no height */
+/* the frame header's word, and the DNL's where it gives no height; a
+   hierarchical sequence's DHP's (its first frame's coding) */
 IM_HIDE bool
 jpg_info(const uint8_t *data, size_t len, ImInfo *info) {
   const uint8_t *p = data, *end = data + len;
-  bool           sof = false;
+  bool           sof = false, dhp = false;
 
   memset(info, 0, sizeof(*info));
   if (len < 4u || p[0] != 0xFFu || p[1] != 0xD8u) return false;
@@ -1072,22 +1306,34 @@ jpg_info(const uint8_t *data, size_t len, ImInfo *info) {
     if ((m >= 0xD0u && m <= 0xD7u) || m == 0x01u) continue;
     l = be16(p);
     if (l < 2u || (size_t)(end - p) < l) return false;
-    if (m >= 0xC0u && m <= 0xCFu && m != 0xC4u && m != 0xC8u && m != 0xCCu && !sof) {
+    if (m == 0xDEu && !sof && !dhp) {
+      if (l < 8u) return false;
+      info->bitsPerComponent = p[2];
+      info->height           = be16(p + 3);
+      info->width            = be16(p + 5);
+      info->components       = p[7];
+      dhp                    = true;
+    } else if (m >= 0xC0u && m <= 0xCFu && m != 0xC4u && m != 0xC8u && m != 0xCCu && !sof) {
       const uint8_t *s = p + 2;
       uint32_t       kind = m & 3u;
 
       if (l < 8u) return false;
       info->fileFormatType   = IM_FILEFORMATTYPE_JPEG;
+      info->arithmetic       = m >= 0xC8u;
+      sof                    = true;
+      if (dhp) {
+        info->coding = IM_CODING_HIERARCHICAL;
+        p += l;
+        continue;
+      }
       info->bitsPerComponent = s[0];
       info->height           = be16(s + 1);
       info->width            = be16(s + 3);
       info->components       = s[5];
-      info->arithmetic       = m >= 0xC8u;
       info->coding           = (m & 4u) ? IM_CODING_HIERARCHICAL
                              : kind == 3u ? IM_CODING_LOSSLESS
                              : kind == 2u ? IM_CODING_PROGRESSIVE
                              : m == 0xC0u ? IM_CODING_BASELINE : IM_CODING_EXTENDED;
-      sof = true;
     } else if (m == 0xDAu) {
       if (!sof) return false;
       /* no height: the DNL after the first scan */

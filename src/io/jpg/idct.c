@@ -120,8 +120,10 @@
     o4 = t13 - t0;                                                             \
   } while (0)
 
-/* `T` the sample type, `P` PASS1_BITS, `C` the centre, `M` the maximum */
-#define IDCT_BODY(T, P, C, M)                                                  \
+/* `T` the sample type, `P` PASS1_BITS, `C` the centre, `M` the maximum;
+   `L` what a sample's sum becomes (LIMIT: range-limited and centred) */
+#define IDCT_BODY(T, P, C, M) IDCT_BODY_L(T, P, C, M, LIMIT)
+#define IDCT_BODY_L(T, P, C, M, L)                                             \
   int32_t  ws[64];                                                             \
   T       *o = out;                                                            \
   uint32_t i;                                                                  \
@@ -159,7 +161,7 @@
     uint32_t       k;                                                          \
                                                                                \
     if (!(w[1] | w[2] | w[3] | w[4] | w[5] | w[6] | w[7])) {                   \
-      T v = LIMIT(DESCALE((int64_t)w[0], P + 3), C, M);                        \
+      T v = (T)L(DESCALE((int64_t)w[0], P + 3), C, M);                         \
                                                                                \
       for (k = 0; k < 8u; k++) o[k] = v;                                       \
       continue;                                                                \
@@ -167,7 +169,7 @@
     IDCT_1D((int64_t)w[0], (int64_t)w[1], (int64_t)w[2], (int64_t)w[3],        \
             (int64_t)w[4], (int64_t)w[5], (int64_t)w[6], (int64_t)w[7],        \
             r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7]);                   \
-    for (k = 0; k < 8u; k++) o[k] = LIMIT(DESCALE(r[k], CONST_BITS + P + 3), C, M); \
+    for (k = 0; k < 8u; k++) o[k] = (T)L(DESCALE(r[k], CONST_BITS + P + 3), C, M); \
   }
 
 /* libjpeg's range limit: the value's low bits (two more than a sample's)
@@ -232,6 +234,18 @@ jpg_idct8_best(void) {
 IM_HIDE void
 jpg_idct12(const int16_t *in, const uint16_t *q, void *out, size_t stride) {
   IDCT_BODY(uint16_t, 1, 2048, 4095)
+}
+
+/* a differential frame's (J.2.3.1): no level shift, no range limit, the
+   differences as they come (32 bits a sample) */
+#define UNLIMITED(x, C, M) ((int32_t)(x))
+
+static void idct8_diff(const int16_t *in, const uint16_t *q, void *out, size_t stride) { IDCT_BODY_L(int32_t, 2, 0, 0, UNLIMITED) }
+static void idct12_diff(const int16_t *in, const uint16_t *q, void *out, size_t stride) { IDCT_BODY_L(int32_t, 1, 0, 0, UNLIMITED) }
+
+IM_HIDE jpg_idct_fn
+jpg_idct_diff(uint32_t prec) {
+  return prec <= 8u ? idct8_diff : idct12_diff;
 }
 
 /* -- smaller blocks ----------------------------------------------------------------- */

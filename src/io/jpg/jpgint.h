@@ -142,6 +142,19 @@ typedef struct jpg {
   bool      arith, frame, multiscan;
   jcomp_t   comp[J_COMPS];
 
+  /* hierarchical (Annex J): DHP's frame; each of its components' samples
+     as the frames so far made them (modulo 2^16), at their size */
+  bool      hier, diff;       /* a DHP came; the frame is a differential one */
+  bool      hdct;             /* the first frame DCT-based (lossless: false) */
+  uint8_t   expand;           /* EXP's for the next frame: 1 across, 2 down */
+  uint8_t   grow;             /* and this frame's */
+  uint32_t  nframes;
+  uint8_t   hseen;            /* DHP's components a first frame has had (a mask) */
+  uint32_t  hprec, hwidth, hheight, hncomp;
+  uint8_t   hid[J_COMPS], hh[J_COMPS], hv[J_COMPS];
+  uint16_t *ref[J_COMPS];
+  uint32_t  rw[J_COMPS], rh[J_COMPS];
+
   /* tables */
   uint16_t  quant[4][64];     /* natural order */
   uint8_t   qdef;             /* those a DQT gave (a mask) */
@@ -248,6 +261,8 @@ IM_HIDE void jpg_idct12(const int16_t *in, const uint16_t *q, void *out, size_t 
 
 /* the IDCT to a block `side` samples across (8, 4, 2, 1) at `prec` bits */
 IM_HIDE jpg_idct_fn jpg_idct_for(uint32_t side, uint32_t prec);
+/* a differential frame's IDCT (hierarchical): signed 32-bit samples out */
+IM_HIDE jpg_idct_fn jpg_idct_diff(uint32_t prec);
 
 /* sample.c */
 IM_HIDE bool jpg_out_ok(const jpg_t *j, jspace_t space);

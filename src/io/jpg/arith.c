@@ -272,7 +272,8 @@ block_seq(jac_t *e, uint32_t ci, int16_t *blk) {
   uint32_t       k;
 
   if (!dc_diff(e, ci, c->td, &diff)) return false;
-  if (diff) e->last_dc[ci] = (e->last_dc[ci] + diff) & 0xffff;
+  if (e->j->diff) e->last_dc[ci] = diff & 0xffff; /* a differential frame's: none predicted */
+  else if (diff) e->last_dc[ci] = (e->last_dc[ci] + diff) & 0xffff;
   blk[0] = (int16_t)e->last_dc[ci];
   for (k = 1; k <= 63u; k++) {
     uint8_t *st = e->ac_stats[c->ta] + 3u * (k - 1u);
@@ -295,7 +296,8 @@ block_dc_first(jac_t *e, uint32_t ci, int16_t *blk) {
   int32_t diff;
 
   if (!dc_diff(e, ci, e->j->comp[ci].td, &diff)) return false;
-  if (diff) e->last_dc[ci] = (e->last_dc[ci] + diff) & 0xffff;
+  if (e->j->diff) e->last_dc[ci] = diff & 0xffff;
+  else if (diff) e->last_dc[ci] = (e->last_dc[ci] + diff) & 0xffff;
   blk[0] = (int16_t)((uint32_t)e->last_dc[ci] << e->j->al);
   return true;
 }

@@ -426,7 +426,7 @@ block_dc_first(jctx_t *x, jbits_t *b, uint32_t ci, int16_t *blk) {
   uint32_t     s = huff_sym(b, j->dc[j->comp[ci].td]) & 15u;
   int32_t      diff = extend(get_bits(b, s), s);
 
-  x->dc[ci] = (int32_t)((uint32_t)x->dc[ci] + (uint32_t)diff);
+  x->dc[ci] = j->diff ? diff : (int32_t)((uint32_t)x->dc[ci] + (uint32_t)diff); /* J.2.3.1: none predicted */
   blk[0]    = (int16_t)((uint32_t)x->dc[ci] << j->al);
 }
 
@@ -726,6 +726,7 @@ mcu(jctx_t *x, uint32_t mx, uint32_t my, bool skip) {
               block_ac_refine(x, b, c, blk);
             }
           } else {
+            if (j->diff) x->dc[ci] = 0; /* a differential frame's DC: none predicted */
             block_seq(b, j->dc[c->td], j->ac[c->ta], &x->dc[ci], blk);
           }
         }
@@ -911,7 +912,8 @@ seq_range(jctx_t *x, const jsblk_t *list, uint32_t nb, uint32_t w, uint32_t b0, 
   jbits_t  bs = x->r.b; /* here, so the compiler keeps it in registers */
   uint32_t m = b0 / nb, slot = b0 % nb, mx = m % w, my = m / w, b;
   uint32_t vdiv = j->nscomp == 1u ? j->comp[j->scomp[0]].v : 1u, row = my / vdiv;
-  size_t   es = j->prec <= 8u ? 1u : 2u;
+  size_t   es = j->diff ? 4u : j->prec <= 8u ? 1u : 2u;
+  bool     diff = j->diff;
 
   for (b = b0; b < b1; b++) {
     const jsblk_t *s = &list[slot];
@@ -926,6 +928,7 @@ seq_range(jctx_t *x, const jsblk_t *list, uint32_t nb, uint32_t w, uint32_t b0, 
         rd_tail(x);
         bs = x->r.b;
       }
+      if (diff) *s->pred = 0; /* a differential frame's DC: none predicted */
       block_seq(&bs, s->dc, s->ac, s->pred, blk);
     }
     if (bx < c->sw && by < c->sh) {
@@ -1039,6 +1042,14 @@ jpg_undiff(jpg_t *j, jloss_t *L, uint32_t ci, const int32_t *d) {
 
   (void)out;
   if (L->y[ci] >= c->bh) return;
+  if (j->diff) {
+    /* a differential frame's (J.2.3.2): no prediction, the point transform */
+    int32_t *o = (int32_t *)c->plane + (size_t)L->y[ci] * c->stride;
+
+    for (x = 0; x < w; x++) o[x] = (int32_t)((uint32_t)d[x] << al);
+    L->y[ci]++;
+    return;
+  }
   if (L->first[ci]) {
     ra = (d[0] + (1 << (j->prec - al - 1u))) & 0xFFFF;
     prev[0] = (uint16_t)ra;
