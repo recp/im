@@ -63,7 +63,31 @@ while pos + 8 <= len(d):
     pos += n
 open('premult.jp2', 'wb').write(out)
 PY
-rm src.ppm
+# HT code-blocks (T.814), OpenJPH's encoder (ojph_compress; it writes the
+# cleanup passes alone): reversible, wrapped here in a JPH file (its
+# ftyp's brand "jph "); irreversible in 16 x 16 tiles, LRCP, 8 x 8 blocks;
+# 16-bit gray. Each OpenJPEG's samples, at every reduction too
+ojph_compress -i src.ppm -o ht-rev.j2c -reversible true -num_decomps 3 -block_size '{16,16}' >/dev/null
+ojph_compress -i src.ppm -o ht-irv-tiles.j2c -qstep 0.01 -num_decomps 2 -tile_size '{16,16}' -block_size '{8,8}' -prog_order LRCP >/dev/null
+python3 - <<'PY'
+import struct
+d = open('src.ppm', 'rb').read()
+w, h = 37, 23
+px = d[len(d) - w * h * 3:]
+g = bytearray()
+for i in range(w * h):
+    v = (px[3 * i] * 7 + px[3 * i + 1] * 20 + px[3 * i + 2] * 3) * 65535 // (255 * 30)
+    g += bytes([v >> 8, v & 255])
+open('g16.pgm', 'wb').write(b'P5\n%d %d\n65535\n' % (w, h) + g)
+cs = open('ht-rev.j2c', 'rb').read()
+def box(t, b): return struct.pack('>I4s', 8 + len(b), t) + b
+ihdr = struct.pack('>IIHBBBB', h, w, 3, 7, 7, 0, 0)
+colr = struct.pack('>BBBI', 1, 0, 0, 16)
+open('ht-rev.jph', 'wb').write(box(b'jP  ', b'\r\n\x87\n') + box(b'ftyp', b'jph ' + struct.pack('>I', 0) + b'jph ')
+                               + box(b'jp2h', box(b'ihdr', ihdr) + box(b'colr', colr)) + box(b'jp2c', cs))
+PY
+ojph_compress -i g16.pgm -o ht-gray16.j2c -reversible true -num_decomps 2 >/dev/null
+rm -f src.ppm g16.pgm ht-rev.j2c
 # imageio.jp2: ImageIO's encoder (sips; the committed one macOS 27's) on a
 # 640 × 480 picture, large enough for the decoder's threads, with an sRGB
 # profile in its colr box

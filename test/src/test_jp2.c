@@ -146,6 +146,12 @@ TEST_IMPL(jp2_fixtures) {
     { "gray-alpha.jp2",  IM_FORMAT_GRAY_ALPHA, 8,  8,  JP2, GRAY, LAST,   0x8BC82C1Eu, 0x4BCBF784u },
     /* 10-bit samples, spread over 16 */
     { "rgb10.jp2",       IM_FORMAT_RGB,        16, 10, JP2, RGB,  NONE,   0x6047FBEDu, 0 },
+    /* HT code-blocks (T.814): reversible in a JPH file, */
+    { "ht-rev.jph",      IM_FORMAT_RGB,        8,  8,  JP2, RGB,  NONE,   0x6047FBEDu, 0 }, /* the picture: rct.jp2's */
+    /* irreversible in tiles, */
+    { "ht-irv-tiles.j2c", IM_FORMAT_RGB,       8,  8,  J2K, RGB,  NONE,   0x110B261Au, 0 },
+    /* 16-bit gray */
+    { "ht-gray16.j2c",   IM_FORMAT_GRAY,       16, 16, J2K, GRAY, NONE,   0x6354FB64u, 0 },
     /* alpha.jp2's opacity premultiplied, by cdef: kept so */
     { "premult.jp2",     IM_FORMAT_RGBA,       8,  8,  JP2, RGB,  PREMUL, 0x6047FBEDu, 0x4BCBF784u },
   };
