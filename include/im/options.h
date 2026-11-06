@@ -91,8 +91,9 @@ typedef enum im_option_type_t {
   /* decoded smaller (uint): the width and height over 1 (the default), 2,
      4 or 8, rounded up; other values 1. JPEG by a smaller IDCT (libjpeg's
      scaled decode; a lossless one keeps its size); JPEG 2000 its finest
-     resolution levels left out (OpenJPEG's reduce; no more than it has).
-     The image's width and height say what came */
+     resolution levels left out (OpenJPEG's reduce; no more than it has;
+     one a palette maps at its size). The image's width and height say
+     what came */
   IM_OPTION_SCALE,
 } im_option_type_t;
 

@@ -25,7 +25,8 @@
  * bits OpenJPEG's rounding of the 16 (taken back to their depth); the
  * opacity apart (the colours un-premultiplied) or not decoded; one thread
  * what many give; im_info_mem the headers' word; decoded smaller, as
- * libjpeg's and OpenJPEG's (their pixels hashed).
+ * libjpeg's and OpenJPEG's (their pixels hashed; a JPEG 2000 palette's at
+ * its own size).
  */
 
 #include "../include/common.h"
@@ -643,7 +644,7 @@ TEST_IMPL(scale) {
     { "jp2", "rct.jp2",        8,   5,   3, 0x0644D8EAu },
     { "jp2", "ict-tiles.j2k",  4,  10,   6, 0x1272B1A3u },
     { "jp2", "sycc420.jp2",    2,  19,  12, 0xD7A5A5ABu },
-    { "jp2", "palette.jp2",    4,  10,   6, 0xF4B0DCECu },
+    { "jp2", "palette.jp2",    4,  37,  23, 0x757C52B2u }, /* a palette's: its own size */
     { "jp2", "alpha.jp2",      8,   5,   3, 0x3CBFFA9Bu },
     { "jp2", "gray16.jp2",     2,  19,  12, 0xB817F4B4u },
     { "jp2", "poc.j2k",        4,  10,   6, 0xA377A9A6u },
@@ -702,6 +703,16 @@ TEST_IMPL(scale) {
 
     ASSERT(a && a->width == 37u && a->height == 23u);
     im_free(a);
+  }
+  /* a palette's indexes too: their own size, the full decode's */
+  {
+    im_option_int_t  two = im_option_int(IM_OPTION_SCALE, 2);
+    im_option_bool_t ix  = im_option_bool(IM_OPTION_PALETTE_INDEXES, true);
+    ImImage         *a = mem("jp2", "palette.jp2", &ix.base, NULL), *b = mem("jp2", "palette.jp2", &ix.base, &two.base);
+
+    ASSERT(a && b && b->width == 37u && b->height == 23u && a->len == b->len && !memcmp(a->data.data, b->data.data, a->len));
+    im_free(a);
+    im_free(b);
   }
 
   TEST_SUCCESS

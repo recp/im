@@ -3999,8 +3999,11 @@ jpx_decode(const uint8_t *data, size_t len, ImImage *im, const jxopts_t *o) {
   if (!read_codestream(j, cs, cs_len)) goto done;
 
   /* made smaller: a level left out for each halving asked, no more than
-     every component has (a tile's own fewer: refused, as OpenJPEG) */
+     every component has (a tile's own fewer: refused, as OpenJPEG); none
+     where a palette maps a component (a coarser level's samples aren't
+     indexes: its own size, indexes or colours) */
   j->reduce = o->scale == 8u ? 3u : o->scale == 4u ? 2u : o->scale == 2u ? 1u : 0u;
+  if (x.pal && x.nmap) j->reduce = 0u;
   for (c = 0; c < j->ncomp; c++) {
     if (j->cod.cc[c].levels < j->reduce) j->reduce = j->cod.cc[c].levels;
   }
