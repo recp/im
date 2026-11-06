@@ -198,6 +198,9 @@ typedef struct jpg {
   struct jdeferred *defer;
   uint32_t   ndefer;
   struct jflow *flow;
+  bool       idct_done;         /* the blocks' IDCTs made with the scans */
+  bool       out_done;          /* and the pixels out */
+  struct jsout *out;            /* those made ready for it */
   uint32_t   flow_self;
   uint64_t   flow_deps;
 
@@ -268,6 +271,10 @@ IM_HIDE jpg_idct_fn jpg_idct_diff(uint32_t prec);
 /* sample.c */
 IM_HIDE bool jpg_out_ok(const jpg_t *j, jspace_t space);
 IM_HIDE bool jpg_out(jpg_t *j, jspace_t space, ImImage *im, ImByteOrder order);
+typedef struct jsout jsout_t;
+IM_HIDE jsout_t *jpg_out_begin(jpg_t *j, jspace_t space, ImByteOrder order);
+IM_HIDE void jpg_out_rows(jsout_t *o, uint32_t worker, uint32_t y0, uint32_t y1);
+IM_HIDE bool jpg_out_end(jsout_t *o, ImImage *im, bool run);
 
 /* a block of the scan's component `c` at (bx, by) done: into its plane
    (one pass) or kept (multi-scan) */

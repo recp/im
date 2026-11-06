@@ -396,7 +396,7 @@ pixels8(const uint8_t *const *row, uint32_t ncomp, jspace_t space, const jycc_t 
 #endif
 
 /* the output's work: bands of rows on the pool, a worker's own rows */
-typedef struct jsout {
+struct jsout {
   jpg_t   *j;
   jupc_t   up[J_COMPS];
   jycc_t   t;
@@ -408,11 +408,12 @@ typedef struct jsout {
   uint32_t band, max;
   bool     wide, invert, swap;
   bool     pad;      /* RGB as RGB0: a row made, then spread to four */
+  ImByteOrder order;
   uint32_t on;       /* samples a pixel out */
   uint8_t *rows[IM_POOL_MAX];
   uint8_t *rgb[IM_POOL_MAX];
   jrow_t   scratch[IM_POOL_MAX];
-} jsout_t;
+};
 
 /* an RGB row as RGB0, the 4th sample `x` */
 static void
@@ -449,11 +450,11 @@ pad16(const uint16_t *in, uint32_t w, uint16_t *out) {
   }
 }
 
-static bool
-out_band(void *arg, uint32_t worker, uint32_t item) {
-  jsout_t *o = arg;
+/* rows y0 … y1 - 1 out, with worker `worker`'s rows */
+IM_HIDE void
+jpg_out_rows(jsout_t *o, uint32_t worker, uint32_t y0, uint32_t y1) {
   jpg_t   *j = o->j;
-  uint32_t n = j->ncomp, w = j->ow, y0 = item * o->band, y1 = y0 + o->band, y, i;
+  uint32_t n = j->ncomp, w = j->ow, y, i;
   uint8_t *rows = o->rows[worker];
 
   if (y1 > j->oh) y1 = j->oh;
@@ -494,6 +495,13 @@ out_band(void *arg, uint32_t worker, uint32_t item) {
       if (o->pad) pad16(p, w, (uint16_t *)(void *)(o->px + (size_t)y * o->pitch));
     }
   }
+}
+
+static bool
+out_band(void *arg, uint32_t worker, uint32_t item) {
+  jsout_t *o = arg;
+
+  jpg_out_rows(o, worker, item * o->band, item * o->band + o->band);
   return true;
 }
 
@@ -513,16 +521,33 @@ jpg_out_ok(const jpg_t *j, jspace_t space) {
          && !(unit == 2u && (((uintptr_t)j->dest | j->dest_stride) & 1u));
 }
 
+static void
+out_free(jsout_t *o) {
+  uint32_t i;
+
+  if (o->own) free(o->px);
+  for (i = 0; i < IM_POOL_MAX; i++) {
+    free(o->rows[i]);
+    free(o->scratch[i].pad);
+    free(o->scratch[i].sums);
+    free(o->rgb[i]);
+  }
+  ycc_free(&o->t);
+  free(o);
+}
+
 /* the planes as `im`'s pixels: gray, RGB or CMYK; 8 bits a sample, or 16
-   (deeper samples spread over 0–65535) in `order` (the host's if any) */
-IM_HIDE bool
-jpg_out(jpg_t *j, jspace_t space, ImImage *im, ImByteOrder order) {
+   (deeper samples spread over 0–65535) in `order` (the host's if any).
+   Made ready first (the pixels' memory, the tables, each worker's rows),
+   the rows then (jpg_out_rows: while the planes are still being made, a
+   multi-scan image's), `im` last */
+IM_HIDE jsout_t*
+jpg_out_begin(jpg_t *j, jspace_t space, ImByteOrder order) {
   jsout_t *o;
   uint32_t n = j->ncomp, w = j->ow, h = j->oh, i, nw = im_pool_size(j->pool);
   size_t   len;
-  bool     ok = false;
 
-  if (!jpg_out_ok(j, space) || !(o = calloc(1, sizeof(*o)))) return false;
+  if (!jpg_out_ok(j, space) || !(o = calloc(1, sizeof(*o)))) return NULL;
   if (order != IM_BYTEORDER_BIG && order != IM_BYTEORDER_LITTLE) order = IM_BYTEORDER_HOST;
   o->j      = j;
   o->space  = space;
@@ -535,6 +560,7 @@ jpg_out(jpg_t *j, jspace_t space, ImImage *im, ImByteOrder order) {
   o->rowlen = (size_t)j->hmax * 8u * (j->mcux + 1u) + 16u;
   o->band   = j->pool ? h / (nw * 8u) : h;
   o->band   = o->band < 8u ? 8u : o->band;
+  o->order  = order;
   len       = (size_t)w * h * o->on * (o->wide ? 2u : 1u);
   for (i = 0; i < n; i++) o->up[i] = up_method(j, &j->comp[i]);
   if ((space == J_YCC || space == J_YCCK) && !ycc_tables(&o->t, o->max, o->wide ? 65536u : 256u)) goto done;
@@ -558,8 +584,26 @@ jpg_out(jpg_t *j, jspace_t space, ImImage *im, ImByteOrder order) {
       goto done;
     }
   }
-  if (!im_pool_run(j->pool, out_band, o, (h + o->band - 1u) / o->band)) goto done;
+  return o;
 
+done:
+  out_free(o);
+  return NULL;
+}
+
+/* `im` from the rows (made first where `run`); `o` freed (`im` NULL: only
+   that) */
+IM_HIDE bool
+jpg_out_end(jsout_t *o, ImImage *im, bool run) {
+  jpg_t      *j = o->j;
+  uint32_t    n = j->ncomp, w = j->ow, h = j->oh;
+  size_t      len = (size_t)w * h * o->on * (o->wide ? 2u : 1u);
+  ImByteOrder order = o->order;
+
+  if (!im || (run && !im_pool_run(j->pool, out_band, o, (h + o->band - 1u) / o->band))) {
+    out_free(o);
+    return false;
+  }
   im->width              = w;
   im->height             = h;
   im->data.data          = o->own ? o->px : NULL;
@@ -573,18 +617,14 @@ jpg_out(jpg_t *j, jspace_t space, ImImage *im, ImByteOrder order) {
   im->alphaInfo          = o->pad ? IM_ALPHA_NONE_SKIP_LAST : IM_ALPHA_NONE;
   im->format             = n == 1u ? IM_FORMAT_GRAY : n == 3u ? (o->pad ? IM_FORMAT_RGB0 : IM_FORMAT_RGB) : IM_FORMAT_CMYK;
   im->colorSpace         = n == 1u ? IM_COLORSPACE_GRAY : n == 3u ? IM_COLORSPACE_sRGB : IM_COLORSPACE_CMYK;
-  o->px                  = NULL;
-  ok                     = true;
+  o->own                 = false; /* im's now */
+  out_free(o);
+  return true;
+}
 
-done:
-  if (o->own) free(o->px);
-  for (i = 0; i < IM_POOL_MAX; i++) {
-    free(o->rows[i]);
-    free(o->scratch[i].pad);
-    free(o->scratch[i].sums);
-    free(o->rgb[i]);
-  }
-  ycc_free(&o->t);
-  free(o);
-  return ok;
+IM_HIDE bool
+jpg_out(jpg_t *j, jspace_t space, ImImage *im, ImByteOrder order) {
+  jsout_t *o = jpg_out_begin(j, space, order);
+
+  return o && jpg_out_end(o, im, true);
 }

@@ -216,40 +216,53 @@ typedef struct jidct {
   uint32_t band, items[J_COMPS + 1]; /* items before component i */
 } jidct_t;
 
-static bool
-idct_item(void *arg, uint32_t worker, uint32_t item) {
-  jidct_t *t = arg;
+/* component ci's block rows by0 … by1 - 1 */
+static void
+idct_rows(const jidct_t *t, uint32_t ci, uint32_t by0, uint32_t by1) {
   jpg_t   *j = t->j;
-  uint32_t ci = 0, by0, by1, bx, by;
-  jcomp_t *c;
+  jcomp_t *c = &j->comp[ci];
+  uint32_t bx, by;
 
-  (void)worker;
-  while (item >= t->items[ci + 1u]) ci++;
-  c   = &j->comp[ci];
-  by0 = (item - t->items[ci]) * t->band;
-  by1 = by0 + t->band < c->sh ? by0 + t->band : c->sh;
   if (t->smooth) {
     smooth_comp(j, ci, t->latch[ci], t->prev[ci], by0, by1);
-    return true;
+    return;
   }
   for (by = by0; by < by1; by++) {
     for (bx = 0; bx < c->sw; bx++) jpg_put(j, c, c->coefs + ((size_t)by * c->bw + bx) * 64u, bx, by);
   }
+}
+
+static bool
+idct_item(void *arg, uint32_t worker, uint32_t item) {
+  jidct_t *t = arg;
+  uint32_t ci = 0, by0;
+
+  (void)worker;
+  while (item >= t->items[ci + 1u]) ci++;
+  by0 = (item - t->items[ci]) * t->band;
+  idct_rows(t, ci, by0, by0 + t->band < t->j->comp[ci].sh ? by0 + t->band : t->j->comp[ci].sh);
   return true;
+}
+
+/* the bands: each component's block rows in items, a few a worker */
+static void
+idct_plan(jpg_t *j, jidct_t *t) {
+  uint32_t i, rows = 0u;
+
+  t->j      = j;
+  t->smooth = !j->hier && smoothing_ok(j, t->latch, t->prev); /* a hierarchical frame as its encoder made it */
+  for (i = 0; i < j->ncomp; i++) rows = j->comp[i].sh > rows ? j->comp[i].sh : rows;
+  t->band     = j->pool ? rows / (im_pool_size(j->pool) * 4u) : rows;
+  t->band     = t->band ? t->band : 1u;
+  t->items[0] = 0u;
+  for (i = 0; i < j->ncomp; i++) t->items[i + 1u] = t->items[i] + (j->comp[i].sh + t->band - 1u) / t->band;
 }
 
 static bool
 idct_all(jpg_t *j) {
-  jidct_t  t;
-  uint32_t i, rows = 0u;
+  jidct_t t;
 
-  t.j      = j;
-  t.smooth = !j->hier && smoothing_ok(j, t.latch, t.prev); /* a hierarchical frame as its encoder made it */
-  for (i = 0; i < j->ncomp; i++) rows = j->comp[i].sh > rows ? j->comp[i].sh : rows;
-  t.band     = j->pool ? rows / (im_pool_size(j->pool) * 4u) : rows;
-  t.band     = t.band ? t.band : 1u;
-  t.items[0] = 0u;
-  for (i = 0; i < j->ncomp; i++) t.items[i + 1u] = t.items[i] + (j->comp[i].sh + t.band - 1u) / t.band;
+  idct_plan(j, &t);
   return im_pool_run(j->pool, idct_item, &t, t.items[j->ncomp]);
 }
 
@@ -856,10 +869,28 @@ typedef struct jflow {
   jpg_t          *j;
   uint32_t        waiting;
   uint32_t        done[J_BATCH]; /* iMCU rows each has finished */
+  /* the last batch's: its blocks' IDCTs after its scans, as items too, a
+     band of iMCU rows of each component once the slowest scan has passed
+     them; woken (their own) only when it reaches the first one waiting */
+  th_thread_cond  tail_cv;
+  jidct_t        *idct;
+  uint32_t        nscan;
+  uint32_t        least;     /* the slowest scan's rows done */
+  uint32_t        tail_need; /* the least a waiting band needs past */
+  uint32_t        tail_band; /* iMCU rows a band */
+  uint32_t        tail_rows; /* iMCU rows in all */
+  uint32_t        nband;
+  /* and the pixels out, a band's rows after its IDCTs and the next band's
+     (their context): items in turn, a band's IDCTs then the one before's
+     rows */
+  jsout_t        *out;
+  uint8_t        *made;      /* a band's components done */
+  uint32_t        lead;      /* the bands done from the first */
+  uint32_t        out_need;  /* the least iMCU row a waiting band's rows need */
 } jflow_t;
 
 static bool scan(jpg_t *j);
-static bool run_deferred(jpg_t *j);
+static bool run_deferred(jpg_t *j, bool last);
 
 /* the coefficients a scan's blocks touch: its band; a Huffman AC first
    scan's up to 15 past it on damage (a run lands there, as libjpeg's); a
@@ -945,12 +976,26 @@ defer_scan(jpg_t *j, const uint8_t *p, const uint8_t *end, const uint8_t **next)
     }
     if (share && touch_lo(c) <= touch_hi(e) && touch_lo(e) <= touch_hi(c)) c->flow_deps |= 1ull << i;
   }
-  if (++j->ndefer == J_BATCH) return run_deferred(j);
+  if (++j->ndefer == J_BATCH) return run_deferred(j, false);
   return true;
 
 fail:
   free_copy(d);
   return false;
+}
+
+/* (locked) the slowest scan's rows again; the bands waiting woken when it
+   reaches the first one's */
+static void
+flow_least(jflow_t *f) {
+  uint32_t i, least = UINT32_MAX;
+
+  for (i = 0; i < f->nscan; i++) least = f->done[i] < least ? f->done[i] : least;
+  f->least = least;
+  if (least > f->tail_need) {
+    f->tail_need = UINT32_MAX;
+    thread_cond_broadcast(&f->tail_cv);
+  }
 }
 
 /* before scan `j`'s MCU row `row`: the rows before it done, the earlier
@@ -964,6 +1009,7 @@ jpg_flow_row(jpg_t *j, uint32_t row) {
   if (f->done[j->flow_self] < imcu) {
     f->done[j->flow_self] = imcu;
     if (f->waiting) thread_cond_broadcast(&f->cv);
+    if (f->idct) flow_least(f);
   }
   for (;;) {
     uint64_t deps  = j->flow_deps;
@@ -978,23 +1024,92 @@ jpg_flow_row(jpg_t *j, uint32_t row) {
   thread_unlock(&f->m);
 }
 
+/* an IDCT band past the scans (band b of component ci, item k): once the
+   slowest has passed its iMCU rows (smoothing: all done, the last one's
+   last good row known) */
+static bool
+flow_idct(jflow_t *f, uint32_t b, uint32_t ci) {
+  jpg_t         *j  = f->j;
+  uint32_t       r0 = b * f->tail_band, r1, need;
+  const jcomp_t *c  = &j->comp[ci];
+
+  r1   = r0 + f->tail_band < f->tail_rows ? r0 + f->tail_band : f->tail_rows;
+  need = f->idct->smooth ? UINT32_MAX - 1u : r1 - 1u;
+  thread_lock(&f->m);
+  while (f->least <= need) {
+    f->tail_need = need < f->tail_need ? need : f->tail_need;
+    thread_cond_wait(&f->tail_cv, &f->m);
+  }
+  thread_unlock(&f->m);
+  if (r0 * c->v < c->sh) idct_rows(f->idct, ci, r0 * c->v, r1 * c->v < c->sh ? r1 * c->v : c->sh);
+  if (f->out) {
+    /* the band done once all its components are: the rows out waiting
+       for it woken */
+    thread_lock(&f->m);
+    if (++f->made[b] == j->ncomp) {
+      while (f->lead < f->nband && f->made[f->lead] == j->ncomp) f->lead++;
+      if ((f->lead == f->nband ? UINT32_MAX : f->lead * f->tail_band) > f->out_need) {
+        f->out_need = UINT32_MAX;
+        thread_cond_broadcast(&f->tail_cv);
+      }
+    }
+    thread_unlock(&f->m);
+  }
+  return true;
+}
+
+/* band b's rows out, once the IDCTs of its iMCU rows and the next one
+   (the context a row's upsampling reads) are done */
+static void
+flow_out(jflow_t *f, uint32_t worker, uint32_t b) {
+  jpg_t   *j = f->j;
+  uint32_t per = j->ds * j->vmax, y0 = b * f->tail_band * per, y1 = y0 + f->tail_band * per, need;
+
+  if (b + 1u == f->nband || y1 > j->oh) y1 = j->oh;
+  if (y0 >= y1) return;
+  need = (y1 - 1u + j->vmax) / per;
+  need = need < f->tail_rows ? need : f->tail_rows - 1u;
+  thread_lock(&f->m);
+  while ((f->lead == f->nband ? UINT32_MAX : f->lead * f->tail_band) <= need) {
+    f->out_need = need < f->out_need ? need : f->out_need;
+    thread_cond_wait(&f->tail_cv, &f->m);
+  }
+  thread_unlock(&f->m);
+  jpg_out_rows(f->out, worker, y0, y1);
+}
+
 static bool
 flow_item(void *arg, uint32_t worker, uint32_t item) {
   jflow_t *f = arg;
   bool     ok;
 
-  (void)worker;
+  if (item >= f->nscan) {
+    uint32_t k = item - f->nscan, nc = f->j->ncomp, g, p;
+
+    if (!f->out) return flow_idct(f, k / nc, k % nc);
+    /* in turn: band 0's IDCTs; then each band's IDCTs and the one
+       before's rows; the last band's rows */
+    if (k < nc) return flow_idct(f, 0u, k);
+    g = 1u + (k - nc) / (nc + 1u);
+    p = (k - nc) % (nc + 1u);
+    if (p) return flow_idct(f, g, p - 1u);
+    flow_out(f, worker, g - 1u);
+    return true;
+  }
   ok = scan(f->j->defer[item].copy);
-  /* done, or given up: nothing waits for it any more */
+  /* done, or given up: nothing waits for it any more (the last one's last
+     good row known to smoothing first) */
   thread_lock(&f->m);
+  if (item + 1u == f->nscan) f->j->last_good = f->j->defer[item].copy->last_good;
   f->done[item] = UINT32_MAX;
   if (f->waiting) thread_cond_broadcast(&f->cv);
+  if (f->idct) flow_least(f);
   thread_unlock(&f->m);
   return ok;
 }
 
 static bool
-run_deferred(jpg_t *j) {
+run_deferred(jpg_t *j, bool last) {
   uint32_t i, n = j->ndefer;
   bool     ok;
 
@@ -1006,17 +1121,46 @@ run_deferred(jpg_t *j) {
     c->pool = j->pool;
     ok      = scan(c);
   } else {
-    jflow_t f;
+    jflow_t  f;
+    jidct_t  t;
+    uint32_t tail = 0u;
 
-    memset(f.done, 0, sizeof(f.done));
-    f.j       = j;
-    f.waiting = 0u;
+    memset(&f, 0, sizeof(f));
+    f.j         = j;
+    f.nscan     = n;
+    f.tail_need = UINT32_MAX;
+    /* the last batch's IDCTs behind its scans, by bands of iMCU rows, a
+       few a worker, each component's in turn */
+    if (last && j->multiscan && !j->hier) {
+      idct_plan(j, &t);
+      f.idct = &t;
+      for (i = 0; i < j->ncomp; i++) {
+        uint32_t r = (j->comp[i].sh + j->comp[i].v - 1u) / j->comp[i].v;
+
+        f.tail_rows = r > f.tail_rows ? r : f.tail_rows;
+      }
+      f.tail_band  = f.tail_rows / (im_pool_size(j->pool) * 4u);
+      f.tail_band  = f.tail_band ? f.tail_band : 1u;
+      f.nband      = (f.tail_rows + f.tail_band - 1u) / f.tail_band;
+      tail         = f.nband * j->ncomp;
+      j->idct_done = true;
+      /* the rows out with them, where they're made ready */
+      if (j->out && (f.made = calloc(f.nband, 1u))) {
+        f.out       = j->out;
+        f.out_need  = UINT32_MAX;
+        tail       += f.nband;
+        j->out_done = true;
+      }
+    }
     thread_mutex_init(&f.m);
     thread_cond_init(&f.cv);
+    thread_cond_init(&f.tail_cv);
     for (i = 0; i < n; i++) j->defer[i].copy->flow = &f;
-    ok = im_pool_run(j->pool, flow_item, &f, n);
+    ok = im_pool_run(j->pool, flow_item, &f, n + tail);
+    thread_cond_destroy(&f.tail_cv);
     thread_cond_destroy(&f.cv);
     thread_mutex_destroy(&f.m);
+    free(f.made);
   }
   j->last_good = j->defer[n - 1u].copy->last_good;
   for (i = 0; i < n; i++) free_copy(&j->defer[i]);
@@ -1276,10 +1420,23 @@ decode_stream(jpg_t *j, ImImage *im, ImByteOrder order, uint8_t **padp) {
   if (j->hier) {
     if ((j->frame && !frame_done(j)) || !hier_planes(j)) return false;
   } else {
-    if (j->ndefer && !run_deferred(j)) return false;
-    if (j->multiscan && !idct_all(j)) return false;
+    bool ok;
+
+    /* a multi-scan image's pixels out with its last scans where they're
+       on threads (jpg_out's way split: made ready, the rows, im) */
+    if (j->ndefer > 1u && !(j->out = jpg_out_begin(j, space_of(j), order))) return false;
+    ok = !j->ndefer || run_deferred(j, true);
+    ok = ok && (!j->multiscan || j->idct_done || idct_all(j));
+    if (j->out) {
+      jsout_t *o = j->out;
+
+      j->out = NULL;
+      if (!jpg_out_end(o, ok ? im : NULL, !j->out_done)) return false;
+    } else if (!ok || !jpg_out(j, space_of(j), im, order)) {
+      return false;
+    }
   }
-  if (!jpg_out(j, space_of(j), im, order)) return false;
+  if (j->hier && !jpg_out(j, space_of(j), im, order)) return false;
 
   /* the profile, the density (pixels a metre) */
   join_icc(j);

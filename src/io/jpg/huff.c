@@ -420,7 +420,7 @@ typedef struct jctx {
 } jctx_t;
 
 /* a progressive scan's part of a block (G.1.2, as libjpeg's jdphuff.c) */
-static void
+IM_INLINE void
 block_dc_first(jctx_t *x, jbits_t *b, uint32_t ci, int16_t *blk) {
   const jpg_t *j = x->j;
   uint32_t     s = huff_sym(b, j->dc[j->comp[ci].td]) & 15u;
@@ -430,12 +430,12 @@ block_dc_first(jctx_t *x, jbits_t *b, uint32_t ci, int16_t *blk) {
   blk[0]    = (int16_t)((uint32_t)x->dc[ci] << j->al);
 }
 
-static void
+IM_INLINE void
 block_dc_refine(const jpg_t *j, jbits_t *b, int16_t *blk) {
   if (get_bits(b, 1u)) blk[0] = (int16_t)(blk[0] | (1 << j->al));
 }
 
-static void
+IM_INLINE void
 block_ac_first(jctx_t *x, jbits_t *b, const jcomp_t *c, int16_t *blk) {
   const jpg_t   *j = x->j;
   const jhuff_t *h = j->ac[c->ta];
@@ -627,37 +627,162 @@ nonzero_zz(const jctx_t *x, const int16_t *blk) {
 }
 #endif
 
+/* a byte's set bits' places, in order, a byte each (the rest 0) */
+static const uint64_t jbitpos[256] = {
+  0x0000000000000000ull, 0x0000000000000000ull, 0x0000000000000001ull, 0x0000000000000100ull,
+  0x0000000000000002ull, 0x0000000000000200ull, 0x0000000000000201ull, 0x0000000000020100ull,
+  0x0000000000000003ull, 0x0000000000000300ull, 0x0000000000000301ull, 0x0000000000030100ull,
+  0x0000000000000302ull, 0x0000000000030200ull, 0x0000000000030201ull, 0x0000000003020100ull,
+  0x0000000000000004ull, 0x0000000000000400ull, 0x0000000000000401ull, 0x0000000000040100ull,
+  0x0000000000000402ull, 0x0000000000040200ull, 0x0000000000040201ull, 0x0000000004020100ull,
+  0x0000000000000403ull, 0x0000000000040300ull, 0x0000000000040301ull, 0x0000000004030100ull,
+  0x0000000000040302ull, 0x0000000004030200ull, 0x0000000004030201ull, 0x0000000403020100ull,
+  0x0000000000000005ull, 0x0000000000000500ull, 0x0000000000000501ull, 0x0000000000050100ull,
+  0x0000000000000502ull, 0x0000000000050200ull, 0x0000000000050201ull, 0x0000000005020100ull,
+  0x0000000000000503ull, 0x0000000000050300ull, 0x0000000000050301ull, 0x0000000005030100ull,
+  0x0000000000050302ull, 0x0000000005030200ull, 0x0000000005030201ull, 0x0000000503020100ull,
+  0x0000000000000504ull, 0x0000000000050400ull, 0x0000000000050401ull, 0x0000000005040100ull,
+  0x0000000000050402ull, 0x0000000005040200ull, 0x0000000005040201ull, 0x0000000504020100ull,
+  0x0000000000050403ull, 0x0000000005040300ull, 0x0000000005040301ull, 0x0000000504030100ull,
+  0x0000000005040302ull, 0x0000000504030200ull, 0x0000000504030201ull, 0x0000050403020100ull,
+  0x0000000000000006ull, 0x0000000000000600ull, 0x0000000000000601ull, 0x0000000000060100ull,
+  0x0000000000000602ull, 0x0000000000060200ull, 0x0000000000060201ull, 0x0000000006020100ull,
+  0x0000000000000603ull, 0x0000000000060300ull, 0x0000000000060301ull, 0x0000000006030100ull,
+  0x0000000000060302ull, 0x0000000006030200ull, 0x0000000006030201ull, 0x0000000603020100ull,
+  0x0000000000000604ull, 0x0000000000060400ull, 0x0000000000060401ull, 0x0000000006040100ull,
+  0x0000000000060402ull, 0x0000000006040200ull, 0x0000000006040201ull, 0x0000000604020100ull,
+  0x0000000000060403ull, 0x0000000006040300ull, 0x0000000006040301ull, 0x0000000604030100ull,
+  0x0000000006040302ull, 0x0000000604030200ull, 0x0000000604030201ull, 0x0000060403020100ull,
+  0x0000000000000605ull, 0x0000000000060500ull, 0x0000000000060501ull, 0x0000000006050100ull,
+  0x0000000000060502ull, 0x0000000006050200ull, 0x0000000006050201ull, 0x0000000605020100ull,
+  0x0000000000060503ull, 0x0000000006050300ull, 0x0000000006050301ull, 0x0000000605030100ull,
+  0x0000000006050302ull, 0x0000000605030200ull, 0x0000000605030201ull, 0x0000060503020100ull,
+  0x0000000000060504ull, 0x0000000006050400ull, 0x0000000006050401ull, 0x0000000605040100ull,
+  0x0000000006050402ull, 0x0000000605040200ull, 0x0000000605040201ull, 0x0000060504020100ull,
+  0x0000000006050403ull, 0x0000000605040300ull, 0x0000000605040301ull, 0x0000060504030100ull,
+  0x0000000605040302ull, 0x0000060504030200ull, 0x0000060504030201ull, 0x0006050403020100ull,
+  0x0000000000000007ull, 0x0000000000000700ull, 0x0000000000000701ull, 0x0000000000070100ull,
+  0x0000000000000702ull, 0x0000000000070200ull, 0x0000000000070201ull, 0x0000000007020100ull,
+  0x0000000000000703ull, 0x0000000000070300ull, 0x0000000000070301ull, 0x0000000007030100ull,
+  0x0000000000070302ull, 0x0000000007030200ull, 0x0000000007030201ull, 0x0000000703020100ull,
+  0x0000000000000704ull, 0x0000000000070400ull, 0x0000000000070401ull, 0x0000000007040100ull,
+  0x0000000000070402ull, 0x0000000007040200ull, 0x0000000007040201ull, 0x0000000704020100ull,
+  0x0000000000070403ull, 0x0000000007040300ull, 0x0000000007040301ull, 0x0000000704030100ull,
+  0x0000000007040302ull, 0x0000000704030200ull, 0x0000000704030201ull, 0x0000070403020100ull,
+  0x0000000000000705ull, 0x0000000000070500ull, 0x0000000000070501ull, 0x0000000007050100ull,
+  0x0000000000070502ull, 0x0000000007050200ull, 0x0000000007050201ull, 0x0000000705020100ull,
+  0x0000000000070503ull, 0x0000000007050300ull, 0x0000000007050301ull, 0x0000000705030100ull,
+  0x0000000007050302ull, 0x0000000705030200ull, 0x0000000705030201ull, 0x0000070503020100ull,
+  0x0000000000070504ull, 0x0000000007050400ull, 0x0000000007050401ull, 0x0000000705040100ull,
+  0x0000000007050402ull, 0x0000000705040200ull, 0x0000000705040201ull, 0x0000070504020100ull,
+  0x0000000007050403ull, 0x0000000705040300ull, 0x0000000705040301ull, 0x0000070504030100ull,
+  0x0000000705040302ull, 0x0000070504030200ull, 0x0000070504030201ull, 0x0007050403020100ull,
+  0x0000000000000706ull, 0x0000000000070600ull, 0x0000000000070601ull, 0x0000000007060100ull,
+  0x0000000000070602ull, 0x0000000007060200ull, 0x0000000007060201ull, 0x0000000706020100ull,
+  0x0000000000070603ull, 0x0000000007060300ull, 0x0000000007060301ull, 0x0000000706030100ull,
+  0x0000000007060302ull, 0x0000000706030200ull, 0x0000000706030201ull, 0x0000070603020100ull,
+  0x0000000000070604ull, 0x0000000007060400ull, 0x0000000007060401ull, 0x0000000706040100ull,
+  0x0000000007060402ull, 0x0000000706040200ull, 0x0000000706040201ull, 0x0000070604020100ull,
+  0x0000000007060403ull, 0x0000000706040300ull, 0x0000000706040301ull, 0x0000070604030100ull,
+  0x0000000706040302ull, 0x0000070604030200ull, 0x0000070604030201ull, 0x0007060403020100ull,
+  0x0000000000070605ull, 0x0000000007060500ull, 0x0000000007060501ull, 0x0000000706050100ull,
+  0x0000000007060502ull, 0x0000000706050200ull, 0x0000000706050201ull, 0x0000070605020100ull,
+  0x0000000007060503ull, 0x0000000706050300ull, 0x0000000706050301ull, 0x0000070605030100ull,
+  0x0000000706050302ull, 0x0000070605030200ull, 0x0000070605030201ull, 0x0007060503020100ull,
+  0x0000000007060504ull, 0x0000000706050400ull, 0x0000000706050401ull, 0x0000070605040100ull,
+  0x0000000706050402ull, 0x0000070605040200ull, 0x0000070605040201ull, 0x0007060504020100ull,
+  0x0000000706050403ull, 0x0000070605040300ull, 0x0000070605040301ull, 0x0007060504030100ull,
+  0x0000070605040302ull, 0x0007060504030200ull, 0x0007060504030201ull, 0x0706050403020100ull
+};
+
+/* `s` bits, none to 63, without a branch on none (the reader's next
+   place shouldn't wait for one) */
+IM_INLINE uint64_t
+take_bits(jbits_t *b, uint32_t s) {
+  uint64_t v;
+
+  if (unlikely(s > 56u)) {
+    v = (uint64_t)get_bits(b, 32u) << (s - 32u);
+    return v | get_bits(b, s - 32u);
+  }
+  if (b->n < s) refill(b);
+  v = (b->buf >> 1) >> (63u - s);
+  DROP(b, s);
+  return v;
+}
+
+/* the block's correction bits, `cb`'s low `ncb` in order, onto its first
+   `ncb` nonzero coefficients in zigzag order (`nz`) */
 IM_INLINE void
-corr_now(jbits_t *b, int16_t *blk, uint64_t m, uint32_t left, int32_t p1) {
-  while (left) {
-    uint32_t take = left > 32u ? 32u : left, bits = get_bits(b, take), i;
+corr_apply(int16_t *blk, uint64_t nz, uint64_t cb, uint32_t ncb, int32_t p1) {
+  for (; ncb; ncb--) {
+    int16_t *q  = &blk[jpg_natural[ctz64(nz)]];
+    int32_t  cv = *q;
+    uint32_t on = (uint32_t)(cb >> (ncb - 1u)) & 1u & (uint32_t)((cv & p1) == 0);
 
-    left -= take;
-    for (i = take; i--;) {
-      int16_t *q  = &blk[jpg_natural[ctz64(m)]];
-      int32_t  cv = *q;
-      uint32_t on = ((bits >> i) & 1u) & (uint32_t)((cv & p1) == 0);
-
-      *q = (int16_t)(cv + ((cv >= 0 ? p1 : -p1) & -(int32_t)on));
-      m &= m - 1u;
-    }
+    *q = (int16_t)(cv + ((cv >= 0 ? p1 : -p1) & -(int32_t)on));
+    nz &= nz - 1u;
   }
 }
 
-static void
+/* Over a whole block, each coefficient nonzero before the scan has one
+   correction bit, in zigzag order, whichever symbol passes it: so a symbol
+   only counts its corrections (the reader's next place), and they're put
+   on together at the block's end (a new coefficient is where there was
+   none, never corrected) */
+IM_INLINE void
 block_ac_refine(jctx_t *x, jbits_t *b, const jcomp_t *c, int16_t *blk) {
   const jpg_t   *j    = x->j;
   const jhuff_t *h    = j->ac[c->ta];
   int32_t        p1   = 1 << j->al;
-  uint32_t       k    = j->ss, se = j->se;
+  uint32_t       k    = j->ss, se = j->se, ncb = 0u;
   uint64_t       band = (~0ull << k) & (~0ull >> (63u - se));
-  uint64_t       nz   = nonzero_zz(x, blk) & band;
+  uint64_t       nz   = nonzero_zz(x, blk) & band, cb = 0u;
 
-  if (!x->eobrun) {
+  if (!nz) {
+    /* none before (most of a smooth image's): nothing to correct, a run
+       counts positions */
+    if (x->eobrun) {
+      x->eobrun--;
+      return;
+    }
     while (k <= se) {
-      uint32_t rs = huff_sym(b, h), s = rs & 15u, r = rs >> 4, r0 = r, t;
+      uint32_t rs = huff_sym(b, h), s = rs & 15u, r = rs >> 4, t;
+
+      if (s) {
+        t = k + r > se ? se + 1u : k + r;
+        blk[jpg_natural[t]] = (int16_t)(get_bits(b, 1u) ? p1 : -p1);
+      } else if (r != 15u) {
+        x->eobrun = 1u << r;
+        if (r) x->eobrun += get_bits(b, r);
+        x->eobrun--;
+        return;
+      } else {
+        t = k + 15u > se ? se + 1u : k + 15u;
+      }
+      k = t + 1u;
+    }
+    return;
+  }
+  if (!x->eobrun) {
+    /* the band's zeros' places in order (a run's end: the next r + 1th),
+       eight at a time by their bytes */
+    IM_ALIGN(16) uint8_t zp[64 + 8];
+    uint64_t zm = ~nz & band, bc, pre;
+    uint32_t nzero = popcount64(zm), z = 0u, g;
+
+    bc  = zm - ((zm >> 1) & 0x5555555555555555ull);
+    bc  = (bc & 0x3333333333333333ull) + ((bc >> 2) & 0x3333333333333333ull);
+    bc  = (bc + (bc >> 4)) & 0x0F0F0F0F0F0F0F0Full; /* each byte's count */
+    pre = (bc * 0x0101010101010101ull) << 8;         /* the bytes' before it */
+    for (g = 0; g < 8u; g++) {
+      uint64_t at = jbitpos[(zm >> (8u * g)) & 0xFFu] + 0x0808080808080808ull * g;
+
+      memcpy(zp + ((pre >> (8u * g)) & 0xFFu), &at, 8u);
+    }
+    while (k <= se) {
+      uint32_t rs = huff_sym(b, h), s = rs & 15u, r = rs >> 4, t, nc;
       int32_t  v = 0;
-      uint64_t zeros;
 
       if (s) {
         v = get_bits(b, 1u) ? p1 : -p1;
@@ -666,25 +791,33 @@ block_ac_refine(jctx_t *x, jbits_t *b, const jcomp_t *c, int16_t *blk) {
         if (r) x->eobrun += get_bits(b, r);
         break;
       }
-      zeros = ~nz & band & (~0ull << k);
-      while (r--) zeros &= zeros - 1u;
-      if (likely(zeros)) {
-        t = ctz64(zeros);
-        corr_now(b, blk, nz & (~0ull << k) & ((1ull << t) - 1u), t - k - r0, p1);
+      if (likely(z + r < nzero)) {
+        t  = zp[z + r];
+        nc = t - k - r;
+        z += r + 1u;
       } else {
-        uint64_t m = nz & (~0ull << k);
-
-        t = se + 1u;
-        corr_now(b, blk, m, popcount64(m), p1);
+        t  = se + 1u;
+        nc = popcount64(nz & (~0ull << k));
       }
+      cb = cb << nc | take_bits(b, nc);
+      ncb += nc;
       if (v) blk[jpg_natural[t]] = (int16_t)v;
       k = t + 1u;
     }
   }
   if (x->eobrun) {
-    if (k <= se) corr_now(b, blk, nz & (~0ull << k), popcount64(nz & (~0ull << k)), p1);
+    uint64_t m = k <= se ? nz & (~0ull << k) : 0u;
+
     x->eobrun--;
+    if (!m) {
+      /* in a run, nothing before: nothing more (most of a smooth image's) */
+      if (ncb) corr_apply(blk, nz, cb, ncb, p1);
+      return;
+    }
+    cb = cb << popcount64(m) | take_bits(b, popcount64(m));
+    ncb += popcount64(m);
   }
+  corr_apply(blk, nz, cb, ncb, p1);
 }
 
 /* -- a scan -------------------------------------------------------------------- */
@@ -798,6 +931,117 @@ scan_mcu(jctx_t *x, uint32_t n, uint32_t w) {
   }
 }
 
+/* MCUs n0 … n1 - 1 of a progressive scan, no restart among them, from
+   where the reader is: as scan_mcu one by one, but the reader in
+   registers, the block's part chosen once, the blocks' places stepped
+   along a row, the check for data run out only near the segment's end
+   (where it can be); a first AC scan's blocks in an EOB run passed over
+   together. A scan with a flow waits at each row's start as before */
+enum { J_DC_FIRST, J_DC_REFINE, J_AC_FIRST, J_AC_REFINE };
+enum { J_MCU_BLOCKS = 64 };
+
+typedef struct jpblk {
+  jcomp_t *c;
+  uint32_t ci, dx, dy, nh, nv;
+} jpblk_t;
+
+static void
+prog_range(jctx_t *x, uint32_t w, uint32_t n0, uint32_t n1) {
+  jpg_t         *j    = x->j;
+  jbits_t        bs   = x->r.b;
+  const uint32_t kind = j->ss == 0u ? (j->ah ? J_DC_REFINE : J_DC_FIRST) : (j->ah ? J_AC_REFINE : J_AC_FIRST);
+  uint32_t       n = n0, mx = n0 % w, my = n0 / w, nb = 0u, i;
+  jpblk_t        list[J_MCU_BLOCKS];
+
+  /* an MCU's blocks, where the scan has more than one component */
+  for (i = 0; j->nscomp > 1u && i < j->nscomp; i++) {
+    uint32_t ci = j->scomp[i], dx, dy;
+    jcomp_t *c  = &j->comp[ci];
+
+    for (dy = 0; dy < c->v; dy++) {
+      for (dx = 0; dx < c->h && nb < J_MCU_BLOCKS; dx++) {
+        jpblk_t *e = &list[nb++];
+
+        e->c  = c;
+        e->ci = ci;
+        e->dx = dx;
+        e->dy = dy;
+        e->nh = c->h;
+        e->nv = c->v;
+      }
+    }
+  }
+  while (n < n1 && !x->lacking) {
+    uint32_t stop = n1 - n < w - mx ? n1 : n + (w - mx);
+
+    if (!mx && j->flow) jpg_flow_row(j, my);
+    x->last_good = j->nscomp == 1u ? my / j->comp[j->scomp[0]].v : my;
+    if (j->nscomp == 1u) {
+      /* one component: its blocks along the row */
+      jcomp_t *c   = &j->comp[j->scomp[0]];
+      int16_t *blk = c->coefs + ((size_t)my * c->bw + mx) * 64u;
+
+      while (n < stop) {
+        if (kind == J_AC_FIRST && x->eobrun) {
+          uint32_t k = stop - n < x->eobrun ? stop - n : x->eobrun;
+
+          x->eobrun -= k;
+          n += k;
+          blk += 64u * (size_t)k;
+          continue;
+        }
+        if (!x->r.tail && bs.p >= x->r.lim) {
+          x->r.b = bs;
+          rd_tail(x);
+          bs = x->r.b;
+        }
+        switch (kind) {
+        case J_DC_FIRST:  block_dc_first(x, &bs, j->scomp[0], blk); break;
+        case J_DC_REFINE: block_dc_refine(j, &bs, blk); break;
+        case J_AC_FIRST:  block_ac_first(x, &bs, c, blk); break;
+        default:          block_ac_refine(x, &bs, c, blk); break;
+        }
+        n++;
+        blk += 64u;
+        if (x->r.tail) {
+          x->r.b = bs;
+          if (rd_past(&x->r)) {
+            x->lacking = true;
+            break;
+          }
+        }
+      }
+    } else {
+      /* DC scans of several: an MCU's blocks in turn */
+      for (; n < stop; n++, mx++) {
+        if (!x->r.tail && bs.p >= x->r.lim) {
+          x->r.b = bs;
+          rd_tail(x);
+          bs = x->r.b;
+        }
+        for (i = 0; i < nb; i++) {
+          const jpblk_t *e   = &list[i];
+          int16_t       *blk = e->c->coefs + ((size_t)(my * e->nv + e->dy) * e->c->bw + mx * e->nh + e->dx) * 64u;
+
+          if (kind == J_DC_FIRST) block_dc_first(x, &bs, e->ci, blk);
+          else block_dc_refine(j, &bs, blk);
+        }
+        if (x->r.tail) {
+          x->r.b = bs;
+          if (rd_past(&x->r)) {
+            x->lacking = true;
+            n++;
+            break;
+          }
+        }
+      }
+    }
+    mx = n % w;
+    my = n / w;
+  }
+  x->r.b = bs;
+}
+
 /* libjpeg's read_restart_marker and its resync, on the segments: the
    expected RSTn taken; a marker before it skipped, its segment with it;
    one of the next two RSTs (or any other marker) left unread (true), the
@@ -870,8 +1114,6 @@ typedef struct jsblk {
   int32_t       *pred;
   uint32_t       dx, dy, nh, nv; /* the block in its MCU; the MCU in blocks */
 } jsblk_t;
-
-enum { J_MCU_BLOCKS = 64 };
 
 /* the scan's MCU, its blocks in order, predicted from `x`'s DCs */
 static uint32_t
@@ -1742,6 +1984,18 @@ jpg_scan_huff(jpg_t *j, im_pool_t *pool) {
   if (!ctx_init(&x, j, margin)) return false;
   if (!j->multiscan && j->process == J_SEQUENTIAL && !j->flow) {
     scan_seq(&x, w, h);
+    j->last_good = x.last_good;
+    free(x.tail);
+    return true;
+  }
+  if (j->process == J_PROGRESSIVE) {
+    uint32_t per = j->restart ? j->restart : total;
+
+    rd_start(&x, 0u);
+    for (n = 0; n < total; n += per) {
+      if (n) restart(&x, &next_rst, &cur, &at_marker);
+      prog_range(&x, w, n, total - n > per ? n + per : total);
+    }
     j->last_good = x.last_good;
     free(x.tail);
     return true;
