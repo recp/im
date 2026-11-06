@@ -91,7 +91,7 @@ enum {
 /* everything a decode (or a tile) parses lives as long as it does, every
    byte charged to its budget */
 
-enum { BLOCK_BYTES = 64 * 1024 };
+enum { BLOCK_MIN = 4 * 1024, BLOCK_MAX = 1024 * 1024 }; /* a block's bytes: the first, the most */
 
 typedef struct arena_block arena_block_t;
 
@@ -107,6 +107,8 @@ typedef struct arena {
   arena_block_t *head;
   uint64_t       used;  /* charged, blocks included */
   uint64_t       limit;
+  size_t         grow;  /* the next block's bytes (0: BLOCK_MIN), twice each
+                           block's to BLOCK_MAX */
   bool           big;   /* blocks of X_MAP_MIN or more mapped (given back
                            the moment they're let go) */
 } arena_t;
@@ -122,9 +124,10 @@ arena_alloc(arena_t *arena, uint64_t want) {
   b    = arena->head;
 
   if (!b || b->cap - b->used < size) {
-    bool map;
+    size_t step = arena->grow ? arena->grow : BLOCK_MIN;
+    bool   map;
 
-    cap = size > BLOCK_BYTES / 4 ? size : BLOCK_BYTES;
+    cap = size > step / 4 ? size : step;
     map = arena->big && cap >= X_MAP_MIN;
     if (size > SIZE_MAX - sizeof(*b) - 16u || arena->used + cap + sizeof(*b) > arena->limit
         || !(b = im_big_alloc(sizeof(*b) + 16u + cap, false, map))) {
@@ -134,9 +137,10 @@ arena_alloc(arena_t *arena, uint64_t want) {
     b->cap       = cap;
     b->used      = 0u;
     arena->used += cap + sizeof(*b);
+    if (cap == step) arena->grow = step < BLOCK_MAX ? step * 2u : BLOCK_MAX;
 
     /* a large request gets a block of its own behind the current one */
-    if (cap > BLOCK_BYTES && arena->head) {
+    if (cap > step && arena->head) {
       b->next           = arena->head->next;
       arena->head->next = b;
     } else {
@@ -339,6 +343,10 @@ typedef struct jpx {
   size_t    pmask[X_COMPS], psize[X_COMPS];
   bool      pmap;
   struct xstream *stream; /* the one tile, by bands (NULL: tiles whole) */
+  bool      rows;          /* tiles a row at a time, each row composed as it's
+                              done (tiles_run); the planes rings */
+  uint32_t  ox0, oy0, ox1, oy1; /* the grid as SIZ has it (x0 … y1 made
+                                   smaller for compose) */
   xscratch_t scratch[X_THREADS];
   xpool_t    pool;
   xworker_t  worker[X_THREADS - 1];
@@ -780,7 +788,7 @@ typedef struct xres {
 typedef struct xtc {
   int32_t      x0, y0, x1, y1;
   uint32_t     nres, nuse; /* its resolutions; those decoded (the rest left out) */
-  xres_t       res[X_LEVELS + 1];
+  xres_t      *res;        /* nres, in the tile's arena */
   void        *data; /* int32, or float for 9/7 */
   size_t       mapped; /* data's bytes where mapped (a big image's big
                           tile), given back as its rows are placed; 0:
@@ -792,7 +800,8 @@ typedef struct xtile {
   arena_t        arena;
   int64_t        x0, y0, x1, y1;
   xcod_t         cod;
-  xtc_t          tc[X_COMPS];
+  xtc_t         *tc;    /* ncomp, in its arena */
+  uint32_t       ncomp;
   const uint8_t *body;
   size_t         body_pos, body_len;
   const uint8_t *hdr; /* PPM's or PPT's headers; NULL in the body */
@@ -849,6 +858,7 @@ tc_build(jpx_t *j, xtile_t *t, uint32_t c) {
   uint32_t     r, nres = cc->levels + 1u;
 
   if (cc->levels < j->reduce) return false; /* fewer than the image was made smaller by */
+  if (!(tc->res = zget(&t->arena, (uint64_t)nres * sizeof(*tc->res)))) return false;
   tc->cc   = cc;
   tc->nuse = nres - j->reduce;
   tc->x0   = (int32_t)ceil_div_u(t->x0, j->dx[c]);
@@ -1190,8 +1200,10 @@ progression(jpx_t *j, xtile_t *t, uint32_t order, uint32_t rs, uint32_t re, uint
 
 #if defined(_MSC_VER)
 #define JPX_INLINE __forceinline
+#define JPX_NOINLINE __declspec(noinline)
 #else
 #define JPX_INLINE inline __attribute__((always_inline))
+#define JPX_NOINLINE __attribute__((noinline))
 #endif
 
 /* a context's state and its MPS as one: Qe, the MPS, where each exchange
@@ -1812,9 +1824,8 @@ ht_tables(jpx_t *j) {
     for (k = 0; k < n; k++) {
       uint32_t e = tab[k], c = e & 7u, w = (e >> 16) & 0x7Fu, lw = e >> 23;
 
-      for (v = 0; v < 128u; v++) {
-        if ((v & ((1u << lw) - 1u)) == w) j->htv[t][c][v] = (uint16_t)(lw | ((e >> 3) & 0x1FFFu) << 3);
-      }
+      /* the 7 bits whose low lw are its codeword: w, w + 2^lw, … */
+      for (v = w; v < 128u; v += 1u << lw) j->htv[t][c][v] = (uint16_t)(lw | ((e >> 3) & 0x1FFFu) << 3);
     }
   }
 }
@@ -2047,6 +2058,232 @@ bitlen64(uint64_t v) {
 #endif
 }
 
+/* a quad's VLC (decodeSigEMB, 7.3.5): context c's codeword, or none (an
+   all-zero context's quad the MEL says is so) */
+static JPX_INLINE uint32_t
+ht_vlc_quad(htbw_t *vlc, htmel_t *mel, const uint16_t (*tab)[128], uint32_t c) {
+  uint32_t e;
+
+  if (!c && (mel->run > 0 ? (mel->run--, 1) : !mel_sym(mel))) return 0u;
+  e = tab[c][vlc->buf & 0x7Fu];
+  bw_skip(vlc, e & 7u);
+  return e >> 3;
+}
+
+/* a pair's residuals (7.3.6), its bits known there: by tables, no branch;
+   a prefix 1, 2, 3 or 5 from three bits, its suffix's bits (1 for 3, 5 for
+   5), four more past 27; none for a quad with no residual */
+static JPX_INLINE void
+ht_uvlc_pair(htbw_t *vlc, uint32_t i0, uint32_t i1, uint32_t *u0, uint32_t *u1) {
+  static const uint8_t upf[8] = { 5, 1, 2, 1, 3, 1, 2, 1 }, ulen[8] = { 3, 1, 2, 1, 3, 1, 2, 1 };
+  static const uint8_t usl[6] = { 0, 0, 0, 1, 0, 5 };
+  uint32_t             on0 = 0u - ((i0 >> 4) & 1u), on1 = 0u - ((i1 >> 4) & 1u), b, p0, p1, s0, s1, x0, x1, l;
+
+  b  = (uint32_t)vlc->buf & 7u;
+  p0 = upf[b] & on0;
+  bw_skip(vlc, ulen[b] & on0);
+  b  = (uint32_t)vlc->buf & 7u;
+  p1 = upf[b] & on1;
+  bw_skip(vlc, ulen[b] & on1);
+  l  = usl[p0];
+  s0 = (uint32_t)vlc->buf & ((1u << l) - 1u);
+  bw_skip(vlc, l);
+  l  = usl[p1];
+  s1 = (uint32_t)vlc->buf & ((1u << l) - 1u);
+  bw_skip(vlc, l);
+  l  = (uint32_t)(s0 >= 28u) << 2;
+  x0 = (uint32_t)vlc->buf & ((1u << l) - 1u);
+  bw_skip(vlc, l);
+  l  = (uint32_t)(s1 >= 28u) << 2;
+  x1 = (uint32_t)vlc->buf & ((1u << l) - 1u);
+  bw_skip(vlc, l);
+  *u0 = p0 + s0 + 4u * x0;
+  *u1 = p1 + s1 + 4u * x1;
+}
+
+/* the first row's pair whose quads both have residuals: the MEL says
+   whether both are past 2 (7.3.6) */
+static JPX_NOINLINE void
+ht_uvlc_first(htbw_t *vlc, htmel_t *mel, uint32_t *u0, uint32_t *u1) {
+  uint32_t pfx[2] = { 0, 0 }, sfx[2] = { 0, 0 }, ext[2] = { 0, 0 }, k;
+
+  if (mel->run > 0 ? (mel->run--, 0) : mel_sym(mel)) {
+    for (k = 0; k < 2u; k++) pfx[k] = u_prefix(vlc);
+    for (k = 0; k < 2u; k++) sfx[k] = u_suffix(vlc, pfx[k]);
+    for (k = 0; k < 2u; k++) ext[k] = u_ext(vlc, sfx[k]);
+    *u0 = 2u + pfx[0] + sfx[0] + 4u * ext[0];
+    *u1 = 2u + pfx[1] + sfx[1] + 4u * ext[1];
+  } else {
+    uint32_t ubit = 0;
+
+    pfx[0] = u_prefix(vlc);
+    if (pfx[0] > 2u) {
+      ubit = bw_peek(vlc) & 1u;
+      bw_skip(vlc, 1u);
+      pfx[1] = ubit + 1u;
+    } else {
+      pfx[1] = u_prefix(vlc);
+    }
+    for (k = 0; k < 2u; k++) sfx[k] = u_suffix(vlc, pfx[k]);
+    for (k = 0; k < 2u; k++) ext[k] = u_ext(vlc, sfx[k]);
+    *u0 = pfx[0] + sfx[0] + 4u * ext[0];
+    *u1 = pfx[0] > 2u ? ubit + 1u : pfx[1] + sfx[1] + 4u * ext[1];
+  }
+}
+
+/* a quad's MagSgn values (7.3.7, 7.3.8) and its exponents e[0..1]: ma the
+   most of the row above's exponents over it (first: the first row, U 1).
+   Every sample written, zeros too, at o0[0..1], o1[0..1]: the cleanup's
+   values (mode 0), or where they end, halved (1, 5/3) or by the step (2,
+   9/7). False: past the band's bound */
+static JPX_INLINE bool
+ht_magsgn(htfw_t *ms, uint32_t qf, uint32_t uq, uint32_t ma, bool first, uint32_t bound, uint32_t p, uint8_t *e, int32_t *o0,
+          int32_t *o1, uint32_t mode, float step) {
+  uint32_t rho = qf & 15u, ek = (qf >> 5) & 15u, e1 = (qf >> 9) & 15u, sh = p - 1u, U, m, v;
+  int32_t  q0 = 0, q1 = 0, q2 = 0, q3 = 0;
+
+  if (!rho) {
+    e[0] = e[1] = 0u;
+  } else {
+    U  = first ? 1u : (rho & (rho - 1u)) && ma > 2u ? ma - 1u : 1u; /* gamma: more than one significant */
+    U += uq;
+    if (U > bound || U + p > 31u) return false;
+#if X_NEON
+    /* the four samples in the lanes (the scalar way's arithmetic, below):
+       each field's length, the sums before it, the window at each, its
+       bits, then mu and the sign; the reader moved on by the lengths' sum,
+       U a significant sample less one for each EMB bit, in the scalar unit
+       (the next quad's start on it alone) */
+    if (U <= 14u) {
+      static const int32_t lane[4] = { 0, -1, -2, -3 };
+      static const uint8_t pc4[16] = { 0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4 };
+      int32x4_t            at = vld1q_s32(lane);
+      uint32x4_t           one = vdupq_n_u32(1u), zero = vdupq_n_u32(0u), mv, av, vv, mag, neg, q, lo, hi;
+      uint32x4_t           sgm = vsubq_u32(zero, vandq_u32(vshlq_u32(vdupq_n_u32(rho), at), one));
+      uint32x4_t           ekv = vandq_u32(vshlq_u32(vdupq_n_u32(ek), at), one);
+      uint32x4_t           e1v = vandq_u32(vshlq_u32(vdupq_n_u32(e1), at), one);
+      uint32_t             tot = U * pc4[rho] - pc4[rho & ek];
+      uint64x2_t           bf;
+
+      if (ms->n < 4u * U) fw_refill(ms);
+      bf = vdupq_n_u64(ms->buf);
+      ms->buf >>= tot;
+      ms->n -= tot;
+      mv = vandq_u32(vsubq_u32(vdupq_n_u32(U), ekv), sgm);
+      av = vextq_u32(zero, mv, 3);
+      av = vaddq_u32(av, vextq_u32(zero, av, 3));
+      av = vaddq_u32(av, vextq_u32(zero, av, 2));
+      vv = vcombine_u32(vmovn_u64(vshlq_u64(bf, vnegq_s64(vreinterpretq_s64_u64(vmovl_u32(vget_low_u32(av)))))),
+                        vmovn_u64(vshlq_u64(bf, vnegq_s64(vreinterpretq_s64_u64(vmovl_u32(vget_high_u32(av)))))));
+      vv  = vandq_u32(vv, vsubq_u32(vshlq_u32(one, vreinterpretq_s32_u32(mv)), one));
+      vv  = vorrq_u32(vv, vshlq_u32(e1v, vreinterpretq_s32_u32(mv)));
+      mag = vandq_u32(vshlq_u32(vaddq_u32(vbicq_u32(vv, one), vdupq_n_u32(3u)), vdupq_n_s32((int32_t)sh)), sgm);
+      neg = vsubq_u32(zero, vandq_u32(vv, one));
+      q   = vsubq_u32(veorq_u32(mag, neg), neg);
+      /* E: the bits of 2 mu - 1, the quad's bottom row's two */
+      {
+        uint32x4_t E = vandq_u32(vsubq_u32(vdupq_n_u32(32u), vclzq_u32(vorrq_u32(vv, one))), sgm);
+
+        e[0] = (uint8_t)vgetq_lane_u32(E, 1);
+        e[1] = (uint8_t)vgetq_lane_u32(E, 3);
+      }
+      /* halved toward zero (C's / 2): the sign's bit added first */
+      if (mode == 1u) q = vreinterpretq_u32_s32(vshrq_n_s32(vreinterpretq_s32_u32(vaddq_u32(q, vshrq_n_u32(q, 31))), 1));
+      if (mode == 2u) q = vreinterpretq_u32_f32(vmulq_f32(vcvtq_f32_s32(vreinterpretq_s32_u32(q)), vdupq_n_f32(step)));
+      /* lanes 0 and 2 the top row's, 1 and 3 the bottom's */
+      lo = vuzp1q_u32(q, q);
+      hi = vuzp2q_u32(q, q);
+      vst1_u32((uint32_t *)(void *)o0, vget_low_u32(lo));
+      vst1_u32((uint32_t *)(void *)o1, vget_low_u32(hi));
+      return true;
+    }
+#endif
+      /* mu = v / 2 + 1, the sign v's lowest bit; (2 mu + 1) = 2 (v >> 1) + 3.
+         No branch on a sample's significance: an insignificant one's bits
+         none, its magnitude masked to 0. The quad's bits (4 U at most) at
+         one refill where they fit */
+#define HT_SAMPLE(i, dst, GET)                                                 \
+      {                                                                      \
+        uint32_t sg = (rho >> (i)) & 1u, mag, neg;                           \
+                                                                             \
+        m   = (U - ((ek >> (i)) & 1u)) & (0u - sg);                          \
+        v   = GET(ms, m) | ((e1 >> (i)) & 1u) << m;                         \
+        mag = (((v >> 1) * 2u + 3u) << sh) & (0u - sg);                      \
+        neg = v & 1u;                                                        \
+        dst = (int32_t)((mag ^ (0u - neg)) + neg);                           \
+      }
+#define HT_QUAD(GET)                                                           \
+      HT_SAMPLE(0, q0, GET)                                                  \
+      HT_SAMPLE(1, q1, GET)                                                  \
+      e[0] = (uint8_t)(bitlen64(v | 1u) & (0u - ((rho >> 1) & 1u))); /* E: the bits of 2 mu - 1 */ \
+      HT_SAMPLE(2, q2, GET)                                                  \
+      HT_SAMPLE(3, q3, GET)                                                  \
+      e[1] = (uint8_t)(bitlen64(v | 1u) & (0u - ((rho >> 3) & 1u)));
+      if (U <= 14u) {
+        /* the four fields at once from the window: each at the sum of
+           those before it (their arithmetic HT_SAMPLE's) */
+        uint32_t m0, m1, m2, m3, a1, a2, a3, v0, v1, v2, v3, sg;
+        uint64_t bf;
+
+        if (ms->n < 4u * U) fw_refill(ms);
+        bf = ms->buf;
+        m0 = (U - (ek & 1u)) & (0u - (rho & 1u));
+        m1 = (U - ((ek >> 1) & 1u)) & (0u - ((rho >> 1) & 1u));
+        m2 = (U - ((ek >> 2) & 1u)) & (0u - ((rho >> 2) & 1u));
+        m3 = (U - ((ek >> 3) & 1u)) & (0u - ((rho >> 3) & 1u));
+        a1 = m0;
+        a2 = a1 + m1;
+        a3 = a2 + m2;
+        v0 = ((uint32_t)bf & ((1u << m0) - 1u)) | (e1 & 1u) << m0;
+        v1 = ((uint32_t)(bf >> a1) & ((1u << m1) - 1u)) | ((e1 >> 1) & 1u) << m1;
+        v2 = ((uint32_t)(bf >> a2) & ((1u << m2) - 1u)) | ((e1 >> 2) & 1u) << m2;
+        v3 = ((uint32_t)(bf >> a3) & ((1u << m3) - 1u)) | ((e1 >> 3) & 1u) << m3;
+        ms->buf = bf >> (a3 + m3);
+        ms->n  -= a3 + m3;
+#define HT_VAL(i, vi, dst)                                                     \
+        {                                                                    \
+          uint32_t mag, neg;                                                 \
+                                                                             \
+          sg  = (rho >> (i)) & 1u;                                           \
+          mag = ((((vi) >> 1) * 2u + 3u) << sh) & (0u - sg);                 \
+          neg = (vi) & 1u;                                                   \
+          dst = (int32_t)((mag ^ (0u - neg)) + neg);                         \
+        }
+        HT_VAL(0, v0, q0)
+        HT_VAL(1, v1, q1)
+        HT_VAL(2, v2, q2)
+        HT_VAL(3, v3, q3)
+#undef HT_VAL
+        e[0]     = (uint8_t)(bitlen64(v1 | 1u) & (0u - ((rho >> 1) & 1u))); /* E: the bits of 2 mu - 1 */
+        e[1] = (uint8_t)(bitlen64(v3 | 1u) & (0u - ((rho >> 3) & 1u)));
+      } else {
+        HT_QUAD(fw_bits)
+      }
+#undef HT_QUAD
+#undef HT_SAMPLE
+  }
+  if (!mode) {
+    o0[0] = q0;
+    o1[0] = q1;
+    o0[1] = q2;
+    o1[1] = q3;
+  } else if (mode == 1u) {
+    o0[0] = q0 / 2;
+    o1[0] = q1 / 2;
+    o0[1] = q2 / 2;
+    o1[1] = q3 / 2;
+  } else {
+    float *f0 = (float *)(void *)o0, *f1 = (float *)(void *)o1;
+
+    f0[0] = (float)q0 * step;
+    f1[0] = (float)q1 * step;
+    f0[1] = (float)q2 * step;
+    f1[1] = (float)q3 * step;
+  }
+  return true;
+}
+
+
 /* an HT code-block's padded size (whole quads): its width W, height H;
    the state ht_block keeps: a byte a sample with two zero columns each
    side and a zero row above (bit 0 the cleanup's significance, 1
@@ -2067,9 +2304,10 @@ ht_state(uint32_t W, uint32_t H) {
    z the passes (1 to 3), `bound` the largest exponent a quad may have (the
    zero bit-planes and one). False: a stream that doesn't conform (or whose
    magnitudes 31 bits don't hold); `out` then to be cleared */
-static bool
+static JPX_NOINLINE bool
 ht_block(const uint16_t (*htv)[8][128], uint8_t *st, const uint8_t *cup, uint32_t lcup, const uint8_t *ref,
-         uint32_t lref, uint32_t w, uint32_t h, uint32_t p, uint32_t z, uint32_t bound, bool causal, int32_t *out) {
+         uint32_t lref, uint32_t w, uint32_t h, uint32_t p, uint32_t z, uint32_t bound, bool causal, int32_t *out,
+         void *dst, size_t dstride, uint32_t mode, float step) {
   htfw_t   ms;
   htbw_t   vlc;
   htmel_t  mel;
@@ -2080,7 +2318,6 @@ ht_block(const uint16_t (*htv)[8][128], uint8_t *st, const uint8_t *cup, uint32_
   /* the quads' significance (rho) of the row above and this one, a zero
      past each end */
   uint8_t  *rprev = qu + qw + 1u, *rcur = rprev + qw + 2u;
-  uint32_t  sh = p - 1u;
 
   if (lcup < 2u) return false;
   scup = 16u * cup[lcup - 1u] + (cup[lcup - 2u] & 0x0Fu);
@@ -2111,80 +2348,64 @@ ht_block(const uint16_t (*htv)[8][128], uint8_t *st, const uint8_t *cup, uint32_
      MagSgn values */
   for (qy = 0; qy < qh; qy++) {
     const uint16_t (*tab)[128] = htv[qy ? 1u : 0u];
-    int32_t        *o0 = out + (size_t)(2u * qy) * W, *o1 = o0 + W;
+    size_t          os = mode ? dstride : W;
+    uint8_t         above[512], emax[512]; /* a quad's context from the row above, its E bound */
+    int32_t        *o0 = (mode ? (int32_t *)dst : out) + (size_t)(2u * qy) * os, *o1 = o0 + os;
     uint32_t        L = 0u; /* the quad on the left's rho */
 
+    /* the row above's part of each quad's context (its three neighbours
+       there: top left's, top's, top right's bits), and the most of the
+       exponents over it (7.3.7): a loop each, no chain */
+    if (qy) {
+      for (x = 0; x < qw; x++) {
+        above[x] = (uint8_t)(((rprev[(ptrdiff_t)x - 1] >> 3 | rprev[x] >> 1) & 1u) | ((rprev[x] >> 3 | rprev[x + 1u] >> 1) & 1u) << 2);
+      }
+      for (x = 0; x < qw; x++) {
+        const uint8_t *e = eprev + 2 * (ptrdiff_t)x; /* e[-1] past the left end: a guard */
+        uint32_t       a = e[-1] > e[0] ? e[-1] : e[0], b = e[1] > e[2] ? e[1] : e[2];
+
+        emax[x] = (uint8_t)(a > b ? a : b);
+      }
+    }
+
     for (qx = 0; qx < qw; qx += 2u) {
-      uint32_t inf[2] = { 0, 0 }, u[2] = { 0, 0 }, n = qx + 1u < qw ? 2u : 1u, k;
+      uint32_t c, i0, i1 = 0u, u0 = 0u, u1 = 0u;
+      bool     two = qx + 1u < qw;
 
-      for (k = 0; k < n; k++) {
-        uint32_t x = qx + k, c, e;
-
-        /* the context (7.3.5) from the neighbours' rho (bit 0 a quad's top
-           left, 1 its bottom left, 2 top right, 3 bottom right), zero past
-           the block: the left quad's, the row above's three */
-        if (!qy) {
-          c = ((L & 3u) != 0u) | ((L >> 1) & 6u);
-        } else {
-          c = ((rprev[(ptrdiff_t)x - 1] >> 3 | rprev[x] >> 1) & 1u) | (((L >> 2 | L >> 3) & 1u) << 1)
-            | ((rprev[x] >> 3 | rprev[x + 1u] >> 1) & 1u) << 2;
-        }
-        /* decodeSigEMB: an all-zero context's quad by the MEL first */
-        if (!c && (mel.run > 0 ? (mel.run--, 1) : !mel_sym(&mel))) {
-          L       = 0u;
-          rcur[x] = 0u;
-          continue;
-        }
-        e = tab[c][bw_peek(&vlc) & 0x7Fu];
-        bw_skip(&vlc, e & 7u);
-        inf[k]  = e >> 3;
-        L       = inf[k] & 15u;
-        rcur[x] = (uint8_t)L;
+      /* the pair's VLC and U-VLC bits there (38 at most); each quad's
+         context (7.3.5) from its neighbours' rho (bit 0 a quad's top
+         left, 1 its bottom left, 2 top right, 3 bottom right), zero past
+         the block: the left quad's, the row above's three */
+      if (vlc.n < 38u) bw_refill(&vlc);
+      c        = qy ? above[qx] | ((L >> 2 | L >> 3) & 1u) << 1 : ((L & 3u) != 0u) | ((L >> 1) & 6u);
+      i0       = ht_vlc_quad(&vlc, &mel, tab, c);
+      L        = i0 & 15u;
+      rcur[qx] = (uint8_t)L;
+      if (two) {
+        c             = qy ? above[qx + 1u] | ((L >> 2 | L >> 3) & 1u) << 1 : ((L & 3u) != 0u) | ((L >> 1) & 6u);
+        i1            = ht_vlc_quad(&vlc, &mel, tab, c);
+        L             = i1 & 15u;
+        rcur[qx + 1u] = (uint8_t)L;
       }
-      /* the unsigned residuals, the pair's steps interleaved (7.3.4) */
-      if ((inf[0] | inf[1]) & 16u) {
-        uint32_t pfx[2] = { 0, 0 }, sfx[2] = { 0, 0 }, ext[2] = { 0, 0 };
+      /* the unsigned residuals, the pair's steps interleaved (7.3.4): the
+         first row's pair with both by the MEL too (rare: apart, on a copy
+         of the reader, so the reader stays in registers) */
+      if ((i0 | i1) & 16u) {
+        if (!qy && two && (i0 & i1 & 16u)) {
+          htbw_t t = vlc;
 
-        if (!qy && n == 2u && (inf[0] & inf[1] & 16u)) {
-          if (mel.run > 0 ? (mel.run--, 0) : mel_sym(&mel)) {
-            for (k = 0; k < 2u; k++) pfx[k] = u_prefix(&vlc);
-            for (k = 0; k < 2u; k++) sfx[k] = u_suffix(&vlc, pfx[k]);
-            for (k = 0; k < 2u; k++) ext[k] = u_ext(&vlc, sfx[k]);
-            for (k = 0; k < 2u; k++) u[k] = 2u + pfx[k] + sfx[k] + 4u * ext[k];
-          } else {
-            uint32_t ubit = 0;
-
-            pfx[0] = u_prefix(&vlc);
-            if (pfx[0] > 2u) {
-              ubit = bw_peek(&vlc) & 1u;
-              bw_skip(&vlc, 1u);
-              pfx[1] = ubit + 1u;
-            } else {
-              pfx[1] = u_prefix(&vlc);
-            }
-            for (k = 0; k < 2u; k++) sfx[k] = u_suffix(&vlc, pfx[k]);
-            for (k = 0; k < 2u; k++) ext[k] = u_ext(&vlc, sfx[k]);
-            u[0] = pfx[0] + sfx[0] + 4u * ext[0];
-            u[1] = pfx[0] > 2u ? ubit + 1u : pfx[1] + sfx[1] + 4u * ext[1];
-          }
+          ht_uvlc_first(&t, &mel, &u0, &u1);
+          vlc = t;
         } else {
-          for (k = 0; k < n; k++) {
-            if (inf[k] & 16u) pfx[k] = u_prefix(&vlc);
-          }
-          for (k = 0; k < n; k++) {
-            if (inf[k] & 16u) sfx[k] = u_suffix(&vlc, pfx[k]);
-          }
-          for (k = 0; k < n; k++) {
-            if (inf[k] & 16u) ext[k] = u_ext(&vlc, sfx[k]);
-          }
-          for (k = 0; k < n; k++) {
-            if (inf[k] & 16u) u[k] = pfx[k] + sfx[k] + 4u * ext[k];
-          }
+          ht_uvlc_pair(&vlc, i0, i1, &u0, &u1);
         }
       }
-      for (k = 0; k < n; k++) {
-        qi[qx + k] = (uint16_t)inf[k];
-        qu[qx + k] = (uint8_t)u[k];
+      /* the pair's MagSgn values (7.3.7, 7.3.8) at once: their stream
+         apart from the VLC's, so the two run side by side */
+      if (!ht_magsgn(&ms, i0, u0, qy ? emax[qx] : 0u, !qy, bound, p, ecur + 2u * qx, o0 + 2u * qx, o1 + 2u * qx, mode, step)
+          || (two && !ht_magsgn(&ms, i1, u1, qy ? emax[qx + 1u] : 0u, !qy, bound, p, ecur + 2u * qx + 2u, o0 + 2u * qx + 2u,
+                                o1 + 2u * qx + 2u, mode, step))) {
+        return false;
       }
     }
     /* the significance map for SigProp and MagRef */
@@ -2201,48 +2422,6 @@ ht_block(const uint16_t (*htv)[8][128], uint8_t *st, const uint8_t *cup, uint32_
       }
     }
 
-    /* the exponent bounds (7.3.7), then the MagSgn values (7.3.8): every
-       sample of the row's quads written, zeros too */
-    for (qx = 0; qx < qw; qx++) {
-      ptrdiff_t x0 = 2 * (ptrdiff_t)qx;
-      uint32_t  inf = qi[qx], rho = inf & 15u, ek = (inf >> 5) & 15u, e1 = (inf >> 9) & 15u, U, m, v;
-
-      if (!rho) {
-        o0[x0] = o0[x0 + 1] = o1[x0] = o1[x0 + 1] = 0;
-        ecur[x0] = ecur[x0 + 1] = 0u;
-        continue;
-      }
-      U = 1u;
-      if (qy) {
-        uint32_t ma = eprev[x0 - 1] > eprev[x0] ? eprev[x0 - 1] : eprev[x0];
-        uint32_t mb = eprev[x0 + 1] > eprev[x0 + 2] ? eprev[x0 + 1] : eprev[x0 + 2];
-
-        ma = ma > mb ? ma : mb;
-        U  = (rho & (rho - 1u)) && ma > 2u ? ma - 1u : 1u; /* gamma: more than one significant */
-      }
-      U += qu[qx];
-      if (U > bound || U + p > 31u) return false;
-      /* mu = v / 2 + 1, the sign v's lowest bit; (2 mu + 1) = 2 (v >> 1) + 3.
-         No branch on a sample's significance: an insignificant one's bits
-         none, its magnitude masked to 0 */
-#define HT_SAMPLE(i, dst)                                                      \
-      {                                                                        \
-        uint32_t sg = (rho >> (i)) & 1u, mag, neg;                             \
-                                                                               \
-        m   = (U - ((ek >> (i)) & 1u)) & (0u - sg);                            \
-        v   = fw_bits(&ms, m) | ((e1 >> (i)) & 1u) << m;                       \
-        mag = (((v >> 1) * 2u + 3u) << sh) & (0u - sg);                        \
-        neg = v & 1u;                                                          \
-        dst = (int32_t)((mag ^ (0u - neg)) + neg);                             \
-      }
-      HT_SAMPLE(0, o0[x0])
-      HT_SAMPLE(1, o1[x0])
-      ecur[x0] = (uint8_t)(bitlen64(v | 1u) & (0u - ((rho >> 1) & 1u))); /* E: the bits of 2 mu - 1 */
-      HT_SAMPLE(2, o0[x0 + 1])
-      HT_SAMPLE(3, o1[x0 + 1])
-      ecur[x0 + 1] = (uint8_t)(bitlen64(v | 1u) & (0u - ((rho >> 3) & 1u)));
-#undef HT_SAMPLE
-    }
     {
       uint8_t *t = eprev;
 
@@ -2332,27 +2511,34 @@ t1_block(const jpx_t *j, xscratch_t *sc, xcblk_t *b, const xband_t *band, const 
   uint32_t w = (uint32_t)(b->x1 - b->x0), h = (uint32_t)(b->y1 - b->y0), x, y, s, passtype = 2u;
   int32_t  bp = (int32_t)cc->roi + b->numbps, *dat;
   size_t   total = 0, at = 0, ds = w; /* dat: the samples, ds apart */
+  const uint8_t *src;
 
   if (!b->nsegs || b->numbps <= 0 || bp >= 31 || !w || !h) {
     for (y = 0; fill && y < h; y++) memset(out + (size_t)y * stride, 0, (size_t)w * 4u);
     return true;
   }
-  if (!sc->flags && (!(sc->flags = malloc((1026u * 4u + 2048u) * sizeof(*sc->flags)))
-                     || !(sc->cdata = malloc(4096u * sizeof(*sc->cdata))))) {
+  if (!(cc->style & CB_HT) && !sc->flags
+      && (!(sc->flags = malloc((1026u * 4u + 2048u) * sizeof(*sc->flags))) || !(sc->cdata = malloc(4096u * sizeof(*sc->cdata))))) {
     return false;
   }
-  /* the bytes in one place, room for the 0xFF 0xFF after each segment */
+  /* the bytes in one place, room for the 0xFF 0xFF after each segment (an
+     HT block's one piece read where it lies: nothing written there) */
   for (s = 0; s < b->npieces; s++) total += b->pieces[s].len;
-  if (total + 2u > sc->bytes_cap) {
-    uint8_t *grown = realloc(sc->bytes, total + 2u);
+  if ((cc->style & CB_HT) && b->npieces == 1u) {
+    src = b->pieces[0].p;
+  } else {
+    if (total + 2u > sc->bytes_cap) {
+      uint8_t *grown = realloc(sc->bytes, total + 2u);
 
-    if (!grown) return false;
-    sc->bytes     = grown;
-    sc->bytes_cap = total + 2u;
-  }
-  for (s = 0; s < b->npieces; s++) {
-    memcpy(sc->bytes + at, b->pieces[s].p, b->pieces[s].len);
-    at += b->pieces[s].len;
+      if (!grown) return false;
+      sc->bytes     = grown;
+      sc->bytes_cap = total + 2u;
+    }
+    for (s = 0; s < b->npieces; s++) {
+      memcpy(sc->bytes + at, b->pieces[s].p, b->pieces[s].len);
+      at += b->pieces[s].len;
+    }
+    src = sc->bytes;
   }
 
   memset(&t, 0, sizeof(t));
@@ -2382,9 +2568,21 @@ t1_block(const jpx_t *j, xscratch_t *sc, xcblk_t *b, const xband_t *band, const 
     if (!sc->ht && !(sc->ht = malloc(HT_SCRATCH))) return false;
     ds  = (w + 1u) & ~1u;
     dat = (int32_t *)(void *)(sc->ht + ht_state((uint32_t)ds, (h + 1u) & ~1u));
-    if (!ht_block(j->htv, sc->ht, sc->bytes, lcup, sc->bytes + lcup, lref, w, h, (uint32_t)bp, z,
-                  (uint32_t)(band->mb + 1 - b->numbps) + 1u + cc->roi, (cc->style & CB_CAUSAL) != 0, dat)) {
-      memset(dat, 0, ds * ((h + 1u) & ~1u) * sizeof(*dat));
+    /* the cleanup alone, no ROI, whole quads: its samples straight where
+       they end (as the copy below has them) */
+    {
+      uint32_t mode = z == 1u && !cc->roi && !(w & 1u) && !(h & 1u) ? (cc->reversible ? 1u : 2u) : 0u;
+
+      if (!ht_block(j->htv, sc->ht, src, lcup, src + lcup, lref, w, h, (uint32_t)bp, z,
+                    (uint32_t)(band->mb + 1 - b->numbps) + 1u + cc->roi, (cc->style & CB_CAUSAL) != 0, dat, out, stride, mode,
+                    0.5f * band->step)) {
+        if (mode) {
+          for (y = 0; y < h; y++) memset(out + (size_t)y * stride, 0, (size_t)w * 4u);
+          return true;
+        }
+        memset(dat, 0, ds * ((h + 1u) & ~1u) * sizeof(*dat));
+      }
+      if (mode) return true;
     }
   }
 
@@ -3141,6 +3339,7 @@ span_job(jpx_t *j, xscratch_t *s, void *ctx, uint32_t item) {
 }
 
 static bool stream_run(jpx_t *j, xbands_t *b);
+static bool tiles_run(jpx_t *j, xbands_t *b);
 
 /* `fn` for items [0, pieces × h) (a row's pieces in turn): by bands where
    the image is big; where its tile is made by bands, each band of the
@@ -3156,6 +3355,7 @@ compose_run(jpx_t *j, xjob_fn fn, void *ctx, uint32_t pieces, uint32_t h) {
   b.Y0     = 0u;
   b.Y1     = h;
   if (j->stream) return stream_run(j, &b);
+  if (j->rows) return tiles_run(j, &b);
   if (!j->big) return pool_run(j, fn, ctx, pieces * h);
   return pool_run(j, band_job, &b, (h + X_BAND - 1u) / X_BAND);
 }
@@ -3414,7 +3614,7 @@ tile_close(xtile_t *t) {
   uint32_t c;
 
   if (!t) return;
-  for (c = 0; c < X_COMPS; c++) {
+  for (c = 0; t->tc && c < t->ncomp; c++) {
     if (t->tc[c].mapped) im_big_free(t->tc[c].data, t->tc[c].mapped, true);
   }
   arena_free_all(&t->arena);
@@ -3499,10 +3699,12 @@ tile_open(jpx_t *j, uint32_t tile, xtile_t **out) {
   t->y0 = (int64_t)j->ty0 + (int64_t)q * j->th;
   t->x1 = t->x0 + j->tw;
   t->y1 = t->y0 + j->th;
-  if (t->x0 < j->x0) t->x0 = j->x0;
-  if (t->y0 < j->y0) t->y0 = j->y0;
-  if (t->x1 > j->x1) t->x1 = j->x1;
-  if (t->y1 > j->y1) t->y1 = j->y1;
+  if (t->x0 < j->ox0) t->x0 = j->ox0;
+  if (t->y0 < j->oy0) t->y0 = j->oy0;
+  if (t->x1 > j->ox1) t->x1 = j->ox1;
+  if (t->y1 > j->oy1) t->y1 = j->oy1;
+  if (!(t->tc = zget(&t->arena, (uint64_t)j->ncomp * sizeof(*t->tc)))) goto fail;
+  t->ncomp = j->ncomp;
   for (c = 0; c < j->ncomp; c++) {
     if (!tc_build(j, t, c)) goto fail;
   }
@@ -3637,6 +3839,74 @@ tile_decode(jpx_t *j, uint32_t tile) {
   ok = !t || tile_whole(j, t);
   tile_close(t);
   return ok;
+}
+
+/* tile `tile`'s place in component c's plane: rows [*Y0, *Y1), columns
+   [*X0, *X1) */
+static void
+tile_rect(const jpx_t *j, uint32_t tile, uint32_t c, int64_t *X0, int64_t *Y0, int64_t *X1, int64_t *Y1) {
+  int64_t p = tile % j->ntx, q = tile / j->ntx;
+  int64_t x0 = (int64_t)j->tx0 + p * j->tw, y0 = (int64_t)j->ty0 + q * j->th, x1 = x0 + j->tw, y1 = y0 + j->th;
+
+  x0  = x0 > j->ox0 ? x0 : j->ox0;
+  y0  = y0 > j->oy0 ? y0 : j->oy0;
+  x1  = x1 < j->ox1 ? x1 : j->ox1;
+  y1  = y1 < j->oy1 ? y1 : j->oy1;
+  *X0 = ceil_pow2(ceil_div_u(x0, j->dx[c]), j->reduce) - j->px0[c];
+  *Y0 = ceil_pow2(ceil_div_u(y0, j->dy[c]), j->reduce) - j->py0[c];
+  *X1 = ceil_pow2(ceil_div_u(x1, j->dx[c]), j->reduce) - j->px0[c];
+  *Y1 = ceil_pow2(ceil_div_u(y1, j->dy[c]), j->reduce) - j->py0[c];
+}
+
+/* compose's rows as the tiles are made, a row of tiles at a time: after
+   each, the image's rows all of whose components' plane rows are there
+   (the rest with the next row's); a tile with no data its place zeroed
+   (the planes' rings hold an earlier row's) */
+static bool
+tiles_run(jpx_t *j, xbands_t *b) {
+  uint32_t q, p, c, Y = 0, Y1;
+
+  for (q = 0; q < j->nty; q++) {
+    int64_t done[X_COMPS], X0, Y0, X1;
+
+    for (p = 0; p < j->ntx; p++) {
+      uint32_t tile = q * j->ntx + p;
+      xtile_t *t;
+      bool     ok;
+
+      if (!tile_open(j, tile, &t)) return false;
+      if (!t) {
+        for (c = 0; c < j->ncomp; c++) {
+          int64_t Y1r, y;
+
+          tile_rect(j, tile, c, &X0, &Y0, &X1, &Y1r);
+          for (y = Y0; y < Y1r && X1 > X0; y++) memset(plane_row(j, c, (size_t)y) + X0, 0, (size_t)(X1 - X0) * sizeof(uint16_t));
+        }
+        continue;
+      }
+      ok = tile_whole(j, t);
+      tile_close(t);
+      if (!ok) return false;
+    }
+    for (c = 0; c < j->ncomp; c++) tile_rect(j, q * j->ntx, c, &X0, &Y0, &X1, &done[c]);
+    for (Y1 = Y; Y1 < b->h; Y1++) {
+      for (c = 0; c < j->ncomp; c++) {
+        int64_t sy = (int64_t)(j->y0 + Y1) / j->dy[c] - (int64_t)j->py0[c];
+
+        sy = sy < 0 ? 0 : sy >= (int64_t)j->ph[c] ? (int64_t)j->ph[c] - 1 : sy;
+        if (sy >= done[c]) break;
+      }
+      if (c < j->ncomp) break;
+    }
+    if (q + 1u == j->nty) Y1 = b->h;
+    if (Y1 > Y) {
+      b->Y0 = Y;
+      b->Y1 = Y1;
+      if (!pool_run(j, span_job, b, (Y1 - Y) * b->pieces)) return false;
+      Y = Y1;
+    }
+  }
+  return true;
 }
 
 /* -- the one tile by bands ------------------------------------------------------- */
@@ -5157,6 +5427,11 @@ jpx_decode(const uint8_t *data, size_t len, ImImage *im, const jxopts_t *o) {
     im->fileFormatType = IM_FILEFORMATTYPE_J2K;
   }
   if (!read_codestream(j, cs, cs_len)) goto done;
+  /* the grid as SIZ has it: the tiles' (compose's made smaller below) */
+  j->ox0 = j->x0;
+  j->oy0 = j->y0;
+  j->ox1 = j->x1;
+  j->oy1 = j->y1;
 
   /* made smaller: a level left out for each halving asked, no more than
      every component has (a tile's own fewer: refused, as OpenJPEG); none
@@ -5178,16 +5453,27 @@ jpx_decode(const uint8_t *data, size_t len, ImImage *im, const jxopts_t *o) {
       all      += (uint64_t)j->pw[c] * j->ph[c] * sizeof(uint16_t);
       tile     += ((uint64_t)j->tw / j->dx[c] + 1u) * ((uint64_t)j->th / j->dy[c] + 1u) * 4u;
     }
-    /* the planes and a tile's samples: past X_BIG, the image a big one;
-       one of one tile made by bands, its planes rings (stream_open) */
+    /* the planes and a tile's samples: past X_BIG, the image a big one:
+       one of one tile made by bands, its planes rings (stream_open); one of
+       rows of tiles a row of tiles at a time, its planes rings a row of
+       tiles tall; else its planes mapped, given back as composed */
     j->big  = all + tile >= X_BIG;
     bands   = j->big && j->ntx == 1u && j->nty == 1u;
-    j->pmap = j->big && !bands;
+    j->rows = j->big && !bands && j->nty > 1u;
+    j->pmap = j->big && !bands && !j->rows;
     for (c = 0; c < j->ncomp; c++) {
       j->pmask[c] = SIZE_MAX;
       if (!j->pw[c] || !j->ph[c]) goto done;
       if (bands) continue;
       j->psize[c] = plane_bytes(j, c);
+      if (j->rows) {
+        uint32_t cap = pow2_at_least((uint64_t)((j->th + j->dy[c] - 1u) / j->dy[c] >> j->reduce) + 3u + 8u);
+
+        if (cap < j->ph[c]) {
+          j->pmask[c] = cap - 1u;
+          j->psize[c] = (size_t)cap * j->pw[c] * sizeof(uint16_t);
+        }
+      }
       if (!(j->plane[c] = im_big_alloc(j->psize[c], true, j->pmap))) goto done;
     }
   }
@@ -5208,7 +5494,7 @@ jpx_decode(const uint8_t *data, size_t len, ImImage *im, const jxopts_t *o) {
   pool_start(j);
   if (bands) {
     if (!stream_open(j)) goto done;
-  } else {
+  } else if (!j->rows) {
     for (tile = 0; tile < j->ntx * j->nty; tile++) {
       if (!tile_decode(j, tile)) goto done;
     }
