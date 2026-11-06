@@ -1829,8 +1829,47 @@ fw_init(htfw_t *r, const uint8_t *p, size_t len, uint32_t fill) {
   r->fill = fill;
 }
 
+IM_INLINE uint64_t
+ht_bswap64(uint64_t w) {
+#if defined(_MSC_VER) && !defined(__clang__)
+  return _byteswap_uint64(w);
+#else
+  return __builtin_bswap64(w);
+#endif
+}
+
+/* eight bytes from p, the first the lowest */
+IM_INLINE uint64_t
+ht_le64(const uint8_t *p) {
+  uint64_t w;
+
+  memcpy(&w, p, 8u);
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+  w = ht_bswap64(w);
+#endif
+  return w;
+}
+
+#define HT_ONES  0x0101010101010101ull
+#define HT_HIGHS 0x8080808080808080ull
+
+/* the bytes that fit added together, where none of them is stuffed (no
+   0xFF before one: rare); else a byte at a time */
 IM_INLINE void
 fw_refill(htfw_t *r) {
+  if (r->last != 0xFFu && r->end - r->p >= 8) {
+    uint64_t w = ht_le64(r->p);
+
+    if (!((~w - HT_ONES) & w & HT_HIGHS)) {
+      uint32_t k = (64u - r->n) >> 3, to = r->n + 8u * k;
+
+      r->buf |= (w << r->n) & (to == 64u ? ~0ull : (1ull << to) - 1u);
+      r->p += k;
+      r->n  = to;
+      r->last = (uint32_t)(w >> (8u * (k - 1u))) & 0xFFu;
+      return;
+    }
+  }
   while (r->n <= 56u) {
     uint32_t b;
 
@@ -1858,8 +1897,23 @@ fw_bits(htfw_t *r, uint32_t m) {
   return v;
 }
 
+/* backwards the same: none of the bytes that fit with its low seven bits
+   all ones (a stuffed one's; rare), all of them at once */
 IM_INLINE void
 bw_refill(htbw_t *r) {
+  if (r->p - r->start >= 8) {
+    uint64_t w = ht_bswap64(ht_le64(r->p - 8)), t = (w & ~HT_HIGHS) ^ ~HT_HIGHS;
+
+    if (!((t - HT_ONES) & ~t & HT_HIGHS)) {
+      uint32_t k = (64u - r->n) >> 3, to = r->n + 8u * k;
+
+      r->buf |= (w << r->n) & (to == 64u ? ~0ull : (1ull << to) - 1u);
+      r->p -= k;
+      r->n  = to;
+      r->last = (uint32_t)(w >> (8u * (k - 1u))) & 0xFFu;
+      return;
+    }
+  }
   while (r->n <= 56u) {
     uint32_t b = r->p > r->start ? *--r->p : 0u, k = 8u;
 
@@ -1972,7 +2026,10 @@ bitlen64(uint64_t v) {
    SigProp's), two rows of exponents, the samples (W apart) */
 IM_INLINE size_t
 ht_state(uint32_t W, uint32_t H) {
-  return ((size_t)(W + 4u) * (H + 1u) + 2u * (W + 4u) + (size_t)W * 3u + 7u) & ~(size_t)7u;
+  /* the map and the exponents' rows; then the quads' VLC results (W),
+     residuals (W / 2), two rows of rho with a zero each end (W + 4), one
+     for qi's alignment: 3 W + 5 at most */
+  return ((size_t)(W + 4u) * (H + 3u) + (size_t)W * 3u + 8u + 7u) & ~(size_t)7u;
 }
 
 /* An HT code-block's samples into `out` (W × H, the padded block's, W
@@ -1993,13 +2050,20 @@ ht_block(const uint16_t (*htv)[8][128], uint8_t *st, const uint8_t *cup, uint32_
   uint8_t *sig = st + SW + 2u, *eprev = st + (size_t)SW * (H + 1u) + 2u, *ecur = eprev + SW;
   uint16_t *qi = (uint16_t *)(void *)(st + (((size_t)SW * (H + 3u) + 1u) & ~(size_t)1u));
   uint8_t  *qu = (uint8_t *)(qi + qw);
+  /* the quads' significance (rho) of the row above and this one, a zero
+     past each end */
+  uint8_t  *rprev = qu + qw + 1u, *rcur = rprev + qw + 2u;
   uint32_t  sh = p - 1u;
 
   if (lcup < 2u) return false;
   scup = 16u * cup[lcup - 1u] + (cup[lcup - 2u] & 0x0Fu);
   if (scup < 2u || scup > lcup || scup > 4079u) return false;
   pcup = lcup - scup;
-  memset(st, 0, (size_t)SW * (H + 1u) + 2u * SW);
+  /* the significance map only where SigProp reads it; the exponents'
+     rows' guards, the rows of rho */
+  if (z >= 2u) memset(st, 0, (size_t)SW * (H + 1u));
+  memset(st + (size_t)SW * (H + 1u), 0, 2u * SW);
+  memset(rprev - 1, 0, 2u * (qw + 2u));
 
   fw_init(&ms, cup, pcup, 0xFFu);
   memset(&mel, 0, sizeof(mel));
@@ -2020,29 +2084,35 @@ ht_block(const uint16_t (*htv)[8][128], uint8_t *st, const uint8_t *cup, uint32_
      MagSgn values */
   for (qy = 0; qy < qh; qy++) {
     const uint16_t (*tab)[128] = htv[qy ? 1u : 0u];
-    uint8_t        *s0 = sig + (size_t)(2u * qy) * SW, *s1 = s0 + SW, *sa = s0 - SW;
     int32_t        *o0 = out + (size_t)(2u * qy) * W, *o1 = o0 + W;
+    uint32_t        L = 0u; /* the quad on the left's rho */
 
     for (qx = 0; qx < qw; qx += 2u) {
       uint32_t inf[2] = { 0, 0 }, u[2] = { 0, 0 }, n = qx + 1u < qw ? 2u : 1u, k;
 
       for (k = 0; k < n; k++) {
-        ptrdiff_t x0 = 2 * (ptrdiff_t)(qx + k);
-        uint32_t  c, e;
+        uint32_t x = qx + k, c, e;
 
-        /* the context (7.3.5): the neighbours' significance, zero past the
-           block (the guard columns and row) */
-        if (!qy) c = (s0[x0 - 2] | s1[x0 - 2]) + 2u * s0[x0 - 1] + 4u * s1[x0 - 1];
-        else c = (sa[x0 - 1] | sa[x0]) + 2u * (s0[x0 - 1] | s1[x0 - 1]) + 4u * (sa[x0 + 1] | sa[x0 + 2]);
+        /* the context (7.3.5) from the neighbours' rho (bit 0 a quad's top
+           left, 1 its bottom left, 2 top right, 3 bottom right), zero past
+           the block: the left quad's, the row above's three */
+        if (!qy) {
+          c = ((L & 3u) != 0u) | ((L >> 1) & 6u);
+        } else {
+          c = ((rprev[(ptrdiff_t)x - 1] >> 3 | rprev[x] >> 1) & 1u) | (((L >> 2 | L >> 3) & 1u) << 1)
+            | ((rprev[x] >> 3 | rprev[x + 1u] >> 1) & 1u) << 2;
+        }
         /* decodeSigEMB: an all-zero context's quad by the MEL first */
-        if (!c && (mel.run > 0 ? (mel.run--, 1) : !mel_sym(&mel))) continue;
+        if (!c && (mel.run > 0 ? (mel.run--, 1) : !mel_sym(&mel))) {
+          L       = 0u;
+          rcur[x] = 0u;
+          continue;
+        }
         e = tab[c][bw_peek(&vlc) & 0x7Fu];
         bw_skip(&vlc, e & 7u);
-        inf[k] = e >> 3;
-        s0[x0]     = (uint8_t)(inf[k] & 1u);
-        s1[x0]     = (uint8_t)((inf[k] >> 1) & 1u);
-        s0[x0 + 1] = (uint8_t)((inf[k] >> 2) & 1u);
-        s1[x0 + 1] = (uint8_t)((inf[k] >> 3) & 1u);
+        inf[k]  = e >> 3;
+        L       = inf[k] & 15u;
+        rcur[x] = (uint8_t)L;
       }
       /* the unsigned residuals, the pair's steps interleaved (7.3.4) */
       if ((inf[0] | inf[1]) & 16u) {
@@ -2088,6 +2158,19 @@ ht_block(const uint16_t (*htv)[8][128], uint8_t *st, const uint8_t *cup, uint32_
       for (k = 0; k < n; k++) {
         qi[qx + k] = (uint16_t)inf[k];
         qu[qx + k] = (uint8_t)u[k];
+      }
+    }
+    /* the significance map for SigProp and MagRef */
+    if (z >= 2u) {
+      uint8_t *s0 = sig + (size_t)(2u * qy) * SW, *s1 = s0 + SW;
+
+      for (qx = 0; qx < qw; qx++) {
+        uint32_t r = rcur[qx];
+
+        s0[2u * qx]      = (uint8_t)(r & 1u);
+        s1[2u * qx]      = (uint8_t)((r >> 1) & 1u);
+        s0[2u * qx + 1u] = (uint8_t)((r >> 2) & 1u);
+        s1[2u * qx + 1u] = (uint8_t)((r >> 3) & 1u);
       }
     }
 
@@ -2138,6 +2221,9 @@ ht_block(const uint16_t (*htv)[8][128], uint8_t *st, const uint8_t *cup, uint32_
 
       eprev = ecur;
       ecur  = t;
+      t     = rprev;
+      rprev = rcur;
+      rcur  = t;
     }
   }
 
