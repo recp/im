@@ -284,6 +284,7 @@ typedef struct xworker {
 typedef struct jpx {
   arena_t   arena;
   uint32_t  x1, y1, x0, y0, tw, th, tx0, ty0, ntx, nty, ncomp;
+  uint32_t  reduce;        /* the finest levels left out: the image that many halvings smaller */
   uint8_t   prec[X_COMPS], sgnd[X_COMPS], dx[X_COMPS], dy[X_COMPS];
   bool      skip[X_COMPS]; /* not wanted: its code-blocks, wavelet and samples left out */
   xcod_t    cod;
@@ -732,7 +733,7 @@ typedef struct xres {
 
 typedef struct xtc {
   int32_t      x0, y0, x1, y1;
-  uint32_t     nres;
+  uint32_t     nres, nuse; /* its resolutions; those decoded (the rest left out) */
   xres_t       res[X_LEVELS + 1];
   void        *data; /* int32, or float for 9/7 */
   const xcc_t *cc;
@@ -797,7 +798,9 @@ tc_build(jpx_t *j, xtile_t *t, uint32_t c) {
   const xcc_t *cc = &t->cod.cc[c];
   uint32_t     r, nres = cc->levels + 1u;
 
+  if (cc->levels < j->reduce) return false; /* fewer than the image was made smaller by */
   tc->cc   = cc;
+  tc->nuse = nres - j->reduce;
   tc->x0   = (int32_t)ceil_div_u(t->x0, j->dx[c]);
   tc->y0   = (int32_t)ceil_div_u(t->y0, j->dy[c]);
   tc->x1   = (int32_t)ceil_div_u(t->x1, j->dx[c]);
@@ -2161,6 +2164,13 @@ place_samples(const jpx_t *j, uint32_t c, bool reversible, const void *src, uint
   }
 }
 
+/* a tile-component's resolution decoded last: its samples' region (made
+   smaller, a coarser level's; the rows still the whole one's apart) */
+static const xres_t*
+top(const xtc_t *tc) {
+  return &tc->res[tc->nuse - 1u];
+}
+
 /* row `item` of every component: the colour transform first where the
    tile has one (its three rows at once) */
 static bool
@@ -2169,17 +2179,18 @@ place_row(jpx_t *j, xscratch_t *s, void *ctx, uint32_t item) {
   xtile_t        *t  = pl->t;
   uint32_t        c  = 0;
 
-  if (pl->mct && item < (uint32_t)(t->tc[0].y1 - t->tc[0].y0)) {
-    const xtc_t *tc = &t->tc[0];
-    uint32_t     w  = (uint32_t)(tc->x1 - tc->x0), x;
-    size_t       at = (size_t)item * w;
-    uint16_t    *out[3];
-    void        *row = lanes(s, (size_t)w * 3u);
+  if (pl->mct && item < (uint32_t)(top(&t->tc[0])->y1 - top(&t->tc[0])->y0)) {
+    const xtc_t  *tc = &t->tc[0];
+    const xres_t *rs = top(tc);
+    uint32_t      w  = (uint32_t)(rs->x1 - rs->x0), x;
+    size_t        at = (size_t)item * (size_t)(tc->x1 - tc->x0);
+    uint16_t     *out[3];
+    void         *row = lanes(s, (size_t)w * 3u);
 
     if (!row) return false;
     for (c = 0; c < 3u; c++) {
-      out[c] = j->plane[c] + ((size_t)(t->tc[c].y0 - (int64_t)j->py0[c]) + item) * j->pw[c]
-             + (size_t)(t->tc[c].x0 - (int64_t)j->px0[c]);
+      out[c] = j->plane[c] + ((size_t)(top(&t->tc[c])->y0 - (int64_t)j->py0[c]) + item) * j->pw[c]
+             + (size_t)(top(&t->tc[c])->x0 - (int64_t)j->px0[c]);
     }
     if (tc->cc->reversible) {
       const int32_t *c0 = (int32_t *)t->tc[0].data + at, *c1 = (int32_t *)t->tc[1].data + at, *c2 = (int32_t *)t->tc[2].data + at;
@@ -2208,12 +2219,13 @@ place_row(jpx_t *j, xscratch_t *s, void *ctx, uint32_t item) {
     for (c = 0; c < 3u; c++) place_samples(j, c, tc->cc->reversible, (uint32_t *)row + (size_t)c * w, out[c], w);
   }
   for (; c < j->ncomp; c++) {
-    const xtc_t *tc = &t->tc[c];
-    uint32_t     w = (uint32_t)(tc->x1 - tc->x0);
+    const xtc_t  *tc = &t->tc[c];
+    const xres_t *rs = top(tc);
+    uint32_t      w = (uint32_t)(rs->x1 - rs->x0);
 
-    if (item >= (uint32_t)(tc->y1 - tc->y0) || j->skip[c]) continue;
-    place_samples(j, c, tc->cc->reversible, (uint32_t *)tc->data + (size_t)item * w,
-                  j->plane[c] + ((size_t)(tc->y0 - (int64_t)j->py0[c]) + item) * j->pw[c] + (size_t)(tc->x0 - (int64_t)j->px0[c]), w);
+    if (item >= (uint32_t)(rs->y1 - rs->y0) || j->skip[c]) continue;
+    place_samples(j, c, tc->cc->reversible, (uint32_t *)tc->data + (size_t)item * (size_t)(tc->x1 - tc->x0),
+                  j->plane[c] + ((size_t)(rs->y0 - (int64_t)j->py0[c]) + item) * j->pw[c] + (size_t)(rs->x0 - (int64_t)j->px0[c]), w);
   }
   return true;
 }
@@ -2319,7 +2331,7 @@ tile_decode(jpx_t *j, uint32_t tile) {
       xtc_t *tc = &t->tc[c];
 
       if (j->skip[c]) continue;
-      for (r = 0; r < tc->nres; r++) {
+      for (r = 0; r < tc->nuse; r++) {
         xres_t  *res = &tc->res[r];
         uint32_t k, b, m;
 
@@ -2343,7 +2355,7 @@ tile_decode(jpx_t *j, uint32_t tile) {
       xtc_t *tc = &t->tc[c];
 
       if (j->skip[c]) continue;
-      for (r = 1; r < tc->nres; r++) {
+      for (r = 1; r < tc->nuse; r++) {
         xlevel_t lv;
         uint32_t w = (uint32_t)(tc->res[r].x1 - tc->res[r].x0), h = (uint32_t)(tc->res[r].y1 - tc->res[r].y0);
 
@@ -2366,7 +2378,9 @@ tile_decode(jpx_t *j, uint32_t tile) {
           && t->tc[2].cc->reversible == t->tc[0].cc->reversible;
     pl.rows = 0;
     for (c = 0; c < j->ncomp; c++) {
-      if ((uint32_t)(t->tc[c].y1 - t->tc[c].y0) > pl.rows) pl.rows = (uint32_t)(t->tc[c].y1 - t->tc[c].y0);
+      if ((uint32_t)(top(&t->tc[c])->y1 - top(&t->tc[c])->y0) > pl.rows) {
+        pl.rows = (uint32_t)(top(&t->tc[c])->y1 - top(&t->tc[c])->y0);
+      }
     }
     if (!pool_run(j, place_row, &pl, pl.rows)) goto done;
   }
@@ -2561,6 +2575,7 @@ typedef struct jxopts {
   im_runner_t runner;  /* the caller's threads */
   uint8_t    *dest;    /* the caller's memory, `dest_stride` a row; NULL: im's */
   size_t      dest_stride, dest_size;
+  uint32_t    scale;   /* 1 (or 0), 2, 4, 8: levels left out, as many as halve it */
 } jxopts_t;
 
 /* which channel is which: through a palette where the JP2 maps one; the
@@ -3157,11 +3172,17 @@ jpx_decode(const uint8_t *data, size_t len, ImImage *im, const jxopts_t *o) {
   }
   if (!read_codestream(j, cs, cs_len)) goto done;
 
+  /* made smaller: a level left out for each halving asked, no more than
+     every component has (a tile's own fewer: refused, as OpenJPEG) */
+  j->reduce = o->scale == 8u ? 3u : o->scale == 4u ? 2u : o->scale == 2u ? 1u : 0u;
   for (c = 0; c < j->ncomp; c++) {
-    j->px0[c] = (uint32_t)ceil_div_u(j->x0, j->dx[c]);
-    j->py0[c] = (uint32_t)ceil_div_u(j->y0, j->dy[c]);
-    j->pw[c]  = (uint32_t)ceil_div_u(j->x1, j->dx[c]) - j->px0[c];
-    j->ph[c]  = (uint32_t)ceil_div_u(j->y1, j->dy[c]) - j->py0[c];
+    if (j->cod.cc[c].levels < j->reduce) j->reduce = j->cod.cc[c].levels;
+  }
+  for (c = 0; c < j->ncomp; c++) {
+    j->px0[c] = (uint32_t)ceil_pow2(ceil_div_u(j->x0, j->dx[c]), j->reduce);
+    j->py0[c] = (uint32_t)ceil_pow2(ceil_div_u(j->y0, j->dy[c]), j->reduce);
+    j->pw[c]  = (uint32_t)ceil_pow2(ceil_div_u(j->x1, j->dx[c]), j->reduce) - j->px0[c];
+    j->ph[c]  = (uint32_t)ceil_pow2(ceil_div_u(j->y1, j->dy[c]), j->reduce) - j->py0[c];
     if (!j->pw[c] || !j->ph[c] || !(j->plane[c] = calloc((size_t)j->pw[c] * j->ph[c], sizeof(uint16_t)))) goto done;
   }
   /* no opacity wanted: its component (no colour's, past the colour
@@ -3182,6 +3203,11 @@ jpx_decode(const uint8_t *data, size_t len, ImImage *im, const jxopts_t *o) {
   for (tile = 0; tile < j->ntx * j->nty; tile++) {
     if (!tile_decode(j, tile)) goto done;
   }
+  /* the image's grid made smaller with it, for compose */
+  j->x0 = (uint32_t)ceil_pow2(j->x0, j->reduce);
+  j->y0 = (uint32_t)ceil_pow2(j->y0, j->reduce);
+  j->x1 = (uint32_t)ceil_pow2(j->x1, j->reduce);
+  j->y1 = (uint32_t)ceil_pow2(j->y1, j->reduce);
   ok = compose(j, &x, im, o);
 
 done:
@@ -3268,6 +3294,7 @@ opts_of(const im_open_config_t *c) {
   o.dest        = c->dest;
   o.dest_stride = c->destStride;
   o.dest_size   = c->destSize;
+  o.scale       = c->scale;
   return o;
 }
 
