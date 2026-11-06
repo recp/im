@@ -334,6 +334,11 @@ typedef struct jpx {
   /* a big image's (X_BIG bytes or more of planes and a tile's samples):
      both mapped, given back as they're done with (mm/mmap.h) */
   bool      big;
+  /* a plane's row y in row y & pmask (a ring's: a big tile by bands; else
+     all ones); its bytes, and whether mapped */
+  size_t    pmask[X_COMPS], psize[X_COMPS];
+  bool      pmap;
+  struct xstream *stream; /* the one tile, by bands (NULL: tiles whole) */
   xscratch_t scratch[X_THREADS];
   xpool_t    pool;
   xworker_t  worker[X_THREADS - 1];
@@ -2319,14 +2324,19 @@ ht_block(const uint16_t (*htv)[8][128], uint8_t *st, const uint8_t *cup, uint32_
 enum { HT_SCRATCH = 10336u + 2u * 1028u + 5200u * 4u };
 
 /* a code-block decoded into the tile-component's buffer, dequantized */
+/* a code-block's samples to `out`, `stride` apart (where it has none,
+   zeros if `fill`: its place not cleared) */
 static bool
-t1_block(const jpx_t *j, xscratch_t *sc, xcblk_t *b, const xband_t *band, const xcc_t *cc, xtc_t *tc) {
+t1_block(const jpx_t *j, xscratch_t *sc, xcblk_t *b, const xband_t *band, const xcc_t *cc, uint32_t *out, size_t stride, bool fill) {
   t1_t     t;
   uint32_t w = (uint32_t)(b->x1 - b->x0), h = (uint32_t)(b->y1 - b->y0), x, y, s, passtype = 2u;
   int32_t  bp = (int32_t)cc->roi + b->numbps, *dat;
-  size_t   total = 0, at = 0, stride = (size_t)(tc->x1 - tc->x0), ds = w; /* dat: the samples, ds apart */
+  size_t   total = 0, at = 0, ds = w; /* dat: the samples, ds apart */
 
-  if (!b->nsegs || b->numbps <= 0 || bp >= 31 || !w || !h) return true;
+  if (!b->nsegs || b->numbps <= 0 || bp >= 31 || !w || !h) {
+    for (y = 0; fill && y < h; y++) memset(out + (size_t)y * stride, 0, (size_t)w * 4u);
+    return true;
+  }
   if (!sc->flags && (!(sc->flags = malloc((1026u * 4u + 2048u) * sizeof(*sc->flags)))
                      || !(sc->cdata = malloc(4096u * sizeof(*sc->cdata))))) {
     return false;
@@ -2418,22 +2428,18 @@ t1_block(const jpx_t *j, xscratch_t *sc, xcblk_t *b, const xband_t *band, const 
     }
   }
 
-  {
-    size_t ox = band->offx + (size_t)(b->x0 - band->x0), oy = band->offy + (size_t)(b->y0 - band->y0);
+  if (cc->reversible) {
+    int32_t *o = (int32_t *)(void *)out;
 
-    if (cc->reversible) {
-      int32_t *out = (int32_t *)tc->data + oy * stride + ox;
+    for (y = 0; y < h; y++) {
+      for (x = 0; x < w; x++) o[(size_t)y * stride + x] = dat[(size_t)y * ds + x] / 2;
+    }
+  } else {
+    float *o    = (float *)(void *)out;
+    float  step = 0.5f * band->step;
 
-      for (y = 0; y < h; y++) {
-        for (x = 0; x < w; x++) out[(size_t)y * stride + x] = dat[(size_t)y * ds + x] / 2;
-      }
-    } else {
-      float *out  = (float *)tc->data + oy * stride + ox;
-      float  step = 0.5f * band->step;
-
-      for (y = 0; y < h; y++) {
-        for (x = 0; x < w; x++) out[(size_t)y * stride + x] = (float)dat[(size_t)y * ds + x] * step;
-      }
+    for (y = 0; y < h; y++) {
+      for (x = 0; x < w; x++) o[(size_t)y * stride + x] = (float)dat[(size_t)y * ds + x] * step;
     }
   }
   return true;
@@ -2600,8 +2606,36 @@ typedef struct xlevel {
   uint32_t r;
 } xlevel_t;
 
-/* level r's rows from `item` × V: each lifted where its halves lie, then
-   interleaved through the scratch */
+/* a row of `w`, its `sw` lows then its highs: lifted where its halves lie,
+   then interleaved through `tmp` (w samples) */
+static void
+idwt_row(uint8_t *row, uint8_t *tmp, uint32_t w, uint32_t sw, uint32_t cx, bool reversible) {
+  const uint32_t *l = (const uint32_t *)(void *)row, *hh = l + sw;
+  uint32_t       *t = (uint32_t *)(void *)tmp;
+  uint32_t        done = 0, i;
+
+  lift_apart(row, row + (size_t)sw * 4u, sw, w - sw, cx, 1u, 1u, reversible);
+  /* lows to cx, cx + 2, …; highs between (32 bits either way): pairs of
+     them (a high then a low where the row starts with a high) together */
+#if X_NEON
+  {
+    uint32_t np = sw < w - sw ? sw : w - sw; /* whole pairs */
+
+    for (; done + 4u <= np; done += 4u) {
+      uint32x4x2_t v;
+
+      v.val[cx]      = vld1q_u32(l + done);
+      v.val[1u - cx] = vld1q_u32(hh + done);
+      vst2q_u32(t + 2u * done, v);
+    }
+  }
+#endif
+  for (i = done; i < sw; i++) t[cx + 2u * i] = l[i];
+  for (i = done; i < w - sw; i++) t[1u - cx + 2u * i] = hh[i];
+  memcpy(row, tmp, (size_t)w * 4u);
+}
+
+/* level r's rows from `item` × V */
 static bool
 idwt_rows(jpx_t *j, xscratch_t *s, void *ctx, uint32_t item) {
   const xlevel_t *lv = ctx;
@@ -2609,37 +2643,13 @@ idwt_rows(jpx_t *j, xscratch_t *s, void *ctx, uint32_t item) {
   const xres_t   *res = &tc->res[lv->r], *low = &tc->res[lv->r - 1u];
   size_t          stride = (size_t)(tc->x1 - tc->x0);
   uint32_t        w = (uint32_t)(res->x1 - res->x0), h = (uint32_t)(res->y1 - res->y0);
-  uint32_t        sw = (uint32_t)(low->x1 - low->x0), cx = (uint32_t)res->x0 & 1u, y, i;
+  uint32_t        sw = (uint32_t)(low->x1 - low->x0), cx = (uint32_t)res->x0 & 1u, y;
   uint8_t        *tmp = lanes(s, w);
 
   (void)j;
   if (!tmp) return false;
   for (y = item * V; y < h && y < item * V + V; y++) {
-    uint8_t *row = (uint8_t *)tc->data + (size_t)y * stride * 4u;
-
-    lift_apart(row, row + (size_t)sw * 4u, sw, w - sw, cx, 1u, 1u, tc->cc->reversible);
-    /* lows to cx, cx + 2, …; highs between (32 bits either way): pairs of
-       them (a high then a low where the row starts with a high) together */
-    {
-      const uint32_t *l = (const uint32_t *)row, *hh = l + sw;
-      uint32_t       *t = (uint32_t *)tmp;
-      uint32_t        done = 0;
-
-#if X_NEON
-      uint32_t        np = sw < w - sw ? sw : w - sw; /* whole pairs */
-
-      for (; done + 4u <= np; done += 4u) {
-        uint32x4x2_t v;
-
-        v.val[cx]      = vld1q_u32(l + done);
-        v.val[1u - cx] = vld1q_u32(hh + done);
-        vst2q_u32(t + 2u * done, v);
-      }
-#endif
-      for (i = done; i < sw; i++) t[cx + 2u * i] = l[i];
-      for (i = done; i < w - sw; i++) t[1u - cx + 2u * i] = hh[i];
-    }
-    memcpy(row, tmp, (size_t)w * 4u);
+    idwt_row((uint8_t *)tc->data + (size_t)y * stride * 4u, tmp, w, sw, cx, tc->cc->reversible);
   }
   return true;
 }
@@ -2750,6 +2760,118 @@ cols53(int32_t *L, int32_t *H, uint32_t sn, uint32_t dn, uint32_t cas, size_t st
       ya = L + (size_t)a * stride;
       yb = L + (size_t)b * stride;
       for (k = 0; k < n; k++) o[k] = (int32_t)((uint32_t)x[k] + (uint32_t)((int32_t)((uint32_t)ya[k] + (uint32_t)yb[k]) >> 1));
+    }
+  }
+}
+
+/* rows in a ring: row i in slot (y0 + i) & mask */
+typedef struct xring {
+  uint8_t *p;
+  size_t   row;  /* bytes a row */
+  uint32_t mask; /* its rows - 1 */
+  uint32_t y0;
+} xring_t;
+
+static inline uint8_t*
+ring_row(const xring_t *r, uint32_t i) {
+  return r->p + (size_t)((r->y0 + i) & r->mask) * r->row;
+}
+
+/* cols97's steps [t0, t1) on rings: the lows' rows in L, the highs' in H,
+   the level's rows out to D, columns [x, x + n) */
+static void
+ring97(const xring_t *Lr, const xring_t *Hr, const xring_t *Dr, uint32_t sn, uint32_t dn, uint32_t cas, size_t x, size_t n,
+       uint32_t t0, uint32_t t1) {
+  int64_t t;
+  size_t  k;
+
+  for (t = t0; t < (int64_t)t1; t++) {
+    int64_t i = t, jj = t + (int64_t)cas - 1, a, b;
+
+    if (i < (int64_t)sn) {
+      float       *xr = (float *)(void *)ring_row(Lr, (uint32_t)i) + x;
+      const float *ya, *yb;
+
+      a = i + (int64_t)cas - 1;
+      b = a + 1;
+      MIRROR(a, b, dn);
+      ya = (const float *)(void *)ring_row(Hr, (uint32_t)a) + x;
+      yb = (const float *)(void *)ring_row(Hr, (uint32_t)b) + x;
+      for (k = 0; k < n; k++) xr[k] = xr[k] * KL + (ya[k] * KH + yb[k] * KH) * -0.443506852f;
+    }
+    if (jj >= 0 && jj < (int64_t)dn) {
+      float       *xr = (float *)(void *)ring_row(Hr, (uint32_t)jj) + x;
+      const float *ya, *yb;
+
+      a = jj - (int64_t)cas;
+      b = a + 1;
+      MIRROR(a, b, sn);
+      ya = (const float *)(void *)ring_row(Lr, (uint32_t)a) + x;
+      yb = (const float *)(void *)ring_row(Lr, (uint32_t)b) + x;
+      for (k = 0; k < n; k++) xr[k] = xr[k] * KH + (ya[k] + yb[k]) * -0.882911075f;
+    }
+    i = t - 1;
+    if (i >= 0 && i < (int64_t)sn) {
+      float       *xr = (float *)(void *)ring_row(Lr, (uint32_t)i) + x;
+      float       *o  = (float *)(void *)ring_row(Dr, cas + 2u * (uint32_t)i) + x;
+      const float *ya, *yb;
+
+      a = i + (int64_t)cas - 1;
+      b = a + 1;
+      MIRROR(a, b, dn);
+      ya = (const float *)(void *)ring_row(Hr, (uint32_t)a) + x;
+      yb = (const float *)(void *)ring_row(Hr, (uint32_t)b) + x;
+      for (k = 0; k < n; k++) o[k] = xr[k] = xr[k] + (ya[k] + yb[k]) * 0.052980118f;
+    }
+    jj = t + (int64_t)cas - 2;
+    if (jj >= 0 && jj < (int64_t)dn) {
+      const float *xr = (const float *)(void *)ring_row(Hr, (uint32_t)jj) + x, *ya, *yb;
+      float       *o  = (float *)(void *)ring_row(Dr, 1u - cas + 2u * (uint32_t)jj) + x;
+
+      a = jj - (int64_t)cas;
+      b = a + 1;
+      MIRROR(a, b, sn);
+      ya = (const float *)(void *)ring_row(Lr, (uint32_t)a) + x;
+      yb = (const float *)(void *)ring_row(Lr, (uint32_t)b) + x;
+      for (k = 0; k < n; k++) o[k] = xr[k] + (ya[k] + yb[k]) * 1.586134342f;
+    }
+  }
+}
+
+/* cols53's the same way */
+static void
+ring53(const xring_t *Lr, const xring_t *Hr, const xring_t *Dr, uint32_t sn, uint32_t dn, uint32_t cas, size_t x, size_t n,
+       uint32_t t0, uint32_t t1) {
+  int64_t t;
+  size_t  k;
+
+  for (t = t0; t < (int64_t)t1; t++) {
+    int64_t i = t, jj = t + (int64_t)cas - 1, a, b;
+
+    if (i < (int64_t)sn) {
+      int32_t       *xr = (int32_t *)(void *)ring_row(Lr, (uint32_t)i) + x;
+      int32_t       *o  = (int32_t *)(void *)ring_row(Dr, cas + 2u * (uint32_t)i) + x;
+      const int32_t *ya, *yb;
+
+      a = i + (int64_t)cas - 1;
+      b = a + 1;
+      MIRROR(a, b, dn);
+      ya = (const int32_t *)(void *)ring_row(Hr, (uint32_t)a) + x;
+      yb = (const int32_t *)(void *)ring_row(Hr, (uint32_t)b) + x;
+      for (k = 0; k < n; k++) {
+        o[k] = xr[k] = (int32_t)((uint32_t)xr[k] - (uint32_t)((int32_t)((uint32_t)ya[k] + (uint32_t)yb[k] + 2u) >> 2));
+      }
+    }
+    if (jj >= 0 && jj < (int64_t)dn) {
+      const int32_t *xr = (const int32_t *)(void *)ring_row(Hr, (uint32_t)jj) + x, *ya, *yb;
+      int32_t       *o  = (int32_t *)(void *)ring_row(Dr, 1u - cas + 2u * (uint32_t)jj) + x;
+
+      a = jj - (int64_t)cas;
+      b = a + 1;
+      MIRROR(a, b, sn);
+      ya = (const int32_t *)(void *)ring_row(Lr, (uint32_t)a) + x;
+      yb = (const int32_t *)(void *)ring_row(Lr, (uint32_t)b) + x;
+      for (k = 0; k < n; k++) o[k] = (int32_t)((uint32_t)xr[k] + (uint32_t)((int32_t)((uint32_t)ya[k] + (uint32_t)yb[k]) >> 1));
     }
   }
 }
@@ -2946,17 +3068,26 @@ pool_run(jpx_t *j, xjob_fn fn, void *ctx, uint32_t n) {
 typedef struct xjob {
   xcblk_t       *b;
   const xband_t *band;
-  xtc_t         *tc;
+  const xcc_t   *cc;
+  uint32_t      *out;    /* its samples' place */
+  size_t         stride;
+  bool           fill;
 } xjob_t;
 
 static bool
 t1_job(jpx_t *j, xscratch_t *s, void *ctx, uint32_t item) {
   const xjob_t *job = (const xjob_t *)ctx + item;
 
-  return t1_block(j, s, job->b, job->band, job->tc->cc, job->tc);
+  return t1_block(j, s, job->b, job->band, job->cc, job->out, job->stride, job->fill);
 }
 
 /* -- into the planes --------------------------------------------------------------- */
+
+/* component c's plane's row y */
+static inline uint16_t*
+plane_row(const jpx_t *j, uint32_t c, size_t y) {
+  return j->plane[c] + (y & j->pmask[c]) * j->pw[c];
+}
 
 /* component c's plane's bytes */
 static size_t
@@ -2971,7 +3102,7 @@ static void
 plane_release(const jpx_t *j, uint32_t c, uint32_t Y0, uint32_t Y1, uint32_t h) {
   int64_t lo, hi;
 
-  if (!j->big || !j->plane[c]) return;
+  if (!j->pmap || !j->plane[c]) return;
   lo = Y0 ? (int64_t)(j->y0 + Y0) / j->dy[c] - (int64_t)j->py0[c] + 1 : 0;
   hi = Y1 >= h ? (int64_t)j->ph[c] : (int64_t)(j->y0 + Y1 - 1u) / j->dy[c] - (int64_t)j->py0[c];
   lo = lo < 0 ? 0 : lo;
@@ -2987,12 +3118,13 @@ typedef struct xbands {
   xjob_fn  fn;
   void    *ctx;
   uint32_t pieces, h;
+  uint32_t Y0, Y1; /* the rows run */
 } xbands_t;
 
 static bool
 band_job(jpx_t *j, xscratch_t *s, void *ctx, uint32_t item) {
   const xbands_t *b  = ctx;
-  uint32_t        Y0 = item * X_BAND, Y1 = Y0 + X_BAND < b->h ? Y0 + X_BAND : b->h, k, c;
+  uint32_t        Y0 = b->Y0 + item * X_BAND, Y1 = b->Y1 - Y0 > X_BAND ? Y0 + X_BAND : b->Y1, k, c;
   bool            ok = true;
 
   for (k = Y0 * b->pieces; k < Y1 * b->pieces; k++) ok = b->fn(j, s, b->ctx, k) && ok;
@@ -3000,25 +3132,115 @@ band_job(jpx_t *j, xscratch_t *s, void *ctx, uint32_t item) {
   return ok;
 }
 
+/* the pieces of rows [Y0, Y1), an item each */
+static bool
+span_job(jpx_t *j, xscratch_t *s, void *ctx, uint32_t item) {
+  const xbands_t *b = ctx;
+
+  return b->fn(j, s, b->ctx, b->Y0 * b->pieces + item);
+}
+
+static bool stream_run(jpx_t *j, xbands_t *b);
+
 /* `fn` for items [0, pieces × h) (a row's pieces in turn): by bands where
-   the image is big */
+   the image is big; where its tile is made by bands, each band of the
+   image's rows as soon as the tile's rows under it are */
 static bool
 compose_run(jpx_t *j, xjob_fn fn, void *ctx, uint32_t pieces, uint32_t h) {
   xbands_t b;
 
-  if (!j->big) return pool_run(j, fn, ctx, pieces * h);
   b.fn     = fn;
   b.ctx    = ctx;
   b.pieces = pieces;
   b.h      = h;
+  b.Y0     = 0u;
+  b.Y1     = h;
+  if (j->stream) return stream_run(j, &b);
+  if (!j->big) return pool_run(j, fn, ctx, pieces * h);
   return pool_run(j, band_job, &b, (h + X_BAND - 1u) / X_BAND);
 }
+
+/* A big image of one tile is made by bands of rows, its samples never all
+   there at once: each component's code-block rows decoded as the rows
+   above them need them, into rings a few code-block rows tall; each
+   level's rows made whole across, then its lifting run down the columns
+   step by step, into the level above's ring (the top level's into its
+   own); those placed into the planes' rings, and the image's rows composed
+   from them. Each sample's arithmetic is the whole tile's */
+#ifndef X_STRIPE
+#  define X_STRIPE 64u /* the image's rows a band (a test build can lower it) */
+#endif
+enum { X_ROUND = 1u << 18 }; /* a level's samples a round at least */
+
+typedef struct xsband { /* a band's code-block rows, decoded in turn */
+  const xres_t *res;
+  xring_t      *ring;
+  uint32_t      b;     /* the band in res */
+  uint32_t      col;   /* its first column in the ring's rows */
+  uint32_t      py, v; /* the next: its precinct row, its code-block row there */
+  uint32_t      have;  /* rows decoded */
+} xsband_t;
+
+typedef struct xslv { /* a level, r ≥ 1 */
+  xring_t  L, H;       /* its lows' rows (LL then HL) and its highs' (LH, HH) */
+  xring_t *D;          /* its rows: the level above's L, or the top's ring */
+  uint32_t w, h, sw, sn, dn, cx, cy, steps;
+  uint32_t lsyn, hsyn; /* rows made whole across */
+  uint32_t t, done;    /* steps run, rows made */
+  uint32_t t1, lto, hto; /* a band's: steps to, rows needed */
+  uint32_t gran;       /* rows out a round at least (a narrow level's
+                          rounds fewer: each of more rows) */
+  xsband_t band[3];    /* HL into L; LH and HH into H */
+} xslv_t;
+
+typedef struct xscomp {
+  bool     on;
+  uint32_t top;        /* its levels */
+  xsband_t ll;         /* the coarsest band: into level 1's L (none: the top's ring) */
+  xring_t  out;        /* the top level's rows */
+  uint32_t placed, done;
+  xslv_t   lv[X_LEVELS + 1];
+} xscomp_t;
+
+typedef struct xsrow {
+  xring_t *ring;
+  uint32_t i, w, sw, cx;
+  bool     rev;
+} xsrow_t;
+
+typedef struct xsstrip {
+  xslv_t  *lv;
+  uint32_t x, n;
+  bool     rev;
+} xsstrip_t;
+
+typedef struct xstream {
+  xtile_t   *t;       /* NULL: a tile with no data */
+  xscomp_t  *c;
+  const struct xbands *also; /* compose's rows run with the code-blocks */
+  xjob_t    *jobs;
+  xsrow_t   *rows;
+  xsstrip_t *strips;
+  uint32_t   njobs, jcap, nrows, rcap, nstrips, scap, maxtop;
+  bool       mct, failed;
+} xstream_t;
 
 typedef struct xplace {
   xtile_t *t;
   bool     mct;
-  uint32_t rows;
+  uint32_t rows;                    /* items: rows base, base + 1, … */
+  uint32_t base;
+  uint32_t lo[X_COMPS], hi[X_COMPS]; /* each component's rows: [lo, hi) */
 } xplace_t;
+
+/* tile-component c's samples' row y, as decoded (its top level's) */
+static const void*
+tc_row(const jpx_t *j, const xtile_t *t, uint32_t c, uint32_t y) {
+  const xtc_t *tc = &t->tc[c];
+
+  if (j->stream) return ring_row(&j->stream->c[c].out, y);
+  return (const uint32_t *)tc->data + (size_t)y * (size_t)(tc->x1 - tc->x0);
+}
 
 /* a component's samples to its plane's: the DC level shift, clamped to its
    depth, made unsigned. 5/3's clamped before the shift (the same values, in
@@ -3109,49 +3331,47 @@ top(const xtc_t *tc) {
   return &tc->res[tc->nuse - 1u];
 }
 
-/* row `item` of every component: the colour transform first where the
-   tile has one (its three rows at once) */
+/* row base + `item` of every component that has it: the colour transform
+   first where the tile has one (its three rows at once) */
 static bool
 place_row(jpx_t *j, xscratch_t *s, void *ctx, uint32_t item) {
   const xplace_t *pl = ctx;
   xtile_t        *t  = pl->t;
-  uint32_t        c  = 0;
+  uint32_t        y  = pl->base + item, c = 0;
 
-  if (pl->mct && item < (uint32_t)(top(&t->tc[0])->y1 - top(&t->tc[0])->y0)) {
+  if (pl->mct && y >= pl->lo[0] && y < pl->hi[0]) {
     const xtc_t  *tc = &t->tc[0];
     const xres_t *rs = top(tc);
     uint32_t      w  = (uint32_t)(rs->x1 - rs->x0), x;
-    size_t        at = (size_t)item * (size_t)(tc->x1 - tc->x0);
     uint16_t     *out[3];
     void         *row = lanes(s, (size_t)w * 3u);
 
     if (!row) return false;
     for (c = 0; c < 3u; c++) {
-      out[c] = j->plane[c] + ((size_t)(top(&t->tc[c])->y0 - (int64_t)j->py0[c]) + item) * j->pw[c]
-             + (size_t)(top(&t->tc[c])->x0 - (int64_t)j->px0[c]);
+      out[c] = plane_row(j, c, (size_t)(top(&t->tc[c])->y0 - (int64_t)j->py0[c]) + y) + (size_t)(top(&t->tc[c])->x0 - (int64_t)j->px0[c]);
     }
     if (tc->cc->reversible) {
-      const int32_t *c0 = (int32_t *)t->tc[0].data + at, *c1 = (int32_t *)t->tc[1].data + at, *c2 = (int32_t *)t->tc[2].data + at;
+      const int32_t *c0 = tc_row(j, t, 0u, y), *c1 = tc_row(j, t, 1u, y), *c2 = tc_row(j, t, 2u, y);
       int32_t       *r = row, *g = r + w, *b = g + w;
 
       for (x = 0; x < w; x++) {
-        int32_t y = c0[x], u = c1[x], v = c2[x];
-        int32_t gg = (int32_t)((uint32_t)y - (uint32_t)((int32_t)((uint32_t)u + (uint32_t)v) >> 2));
+        int32_t yy = c0[x], u = c1[x], v = c2[x];
+        int32_t gg = (int32_t)((uint32_t)yy - (uint32_t)((int32_t)((uint32_t)u + (uint32_t)v) >> 2));
 
         r[x] = (int32_t)((uint32_t)v + (uint32_t)gg);
         g[x] = gg;
         b[x] = (int32_t)((uint32_t)u + (uint32_t)gg);
       }
     } else {
-      const float *c0 = (float *)t->tc[0].data + at, *c1 = (float *)t->tc[1].data + at, *c2 = (float *)t->tc[2].data + at;
+      const float *c0 = tc_row(j, t, 0u, y), *c1 = tc_row(j, t, 1u, y), *c2 = tc_row(j, t, 2u, y);
       float       *r = row, *g = r + w, *b = g + w;
 
       for (x = 0; x < w; x++) {
-        float y = c0[x], u = c1[x], v = c2[x];
+        float yy = c0[x], u = c1[x], v = c2[x];
 
-        r[x] = y + v * 1.402f;
-        g[x] = y - u * 0.34413f - v * 0.71414f;
-        b[x] = y + u * 1.772f;
+        r[x] = yy + v * 1.402f;
+        g[x] = yy - u * 0.34413f - v * 0.71414f;
+        b[x] = yy + u * 1.772f;
       }
     }
     for (c = 0; c < 3u; c++) place_samples(j, c, tc->cc->reversible, (uint32_t *)row + (size_t)c * w, out[c], w);
@@ -3159,11 +3379,11 @@ place_row(jpx_t *j, xscratch_t *s, void *ctx, uint32_t item) {
   for (; c < j->ncomp; c++) {
     const xtc_t  *tc = &t->tc[c];
     const xres_t *rs = top(tc);
-    uint32_t      w = (uint32_t)(rs->x1 - rs->x0);
 
-    if (item >= (uint32_t)(rs->y1 - rs->y0) || j->skip[c]) continue;
-    place_samples(j, c, tc->cc->reversible, (uint32_t *)tc->data + (size_t)item * (size_t)(tc->x1 - tc->x0),
-                  j->plane[c] + ((size_t)(rs->y0 - (int64_t)j->py0[c]) + item) * j->pw[c] + (size_t)(rs->x0 - (int64_t)j->px0[c]), w);
+    if (y < pl->lo[c] || y >= pl->hi[c] || j->skip[c]) continue;
+    place_samples(j, c, tc->cc->reversible, tc_row(j, t, c, y),
+                  plane_row(j, c, (size_t)(rs->y0 - (int64_t)j->py0[c]) + y) + (size_t)(rs->x0 - (int64_t)j->px0[c]),
+                  (uint32_t)(rs->x1 - rs->x0));
   }
   return true;
 }
@@ -3189,15 +3409,30 @@ place_band(jpx_t *j, xscratch_t *s, void *ctx, uint32_t item) {
 
 /* -- a tile ----------------------------------------------------------------------- */
 
+static void
+tile_close(xtile_t *t) {
+  uint32_t c;
+
+  if (!t) return;
+  for (c = 0; c < X_COMPS; c++) {
+    if (t->tc[c].mapped) im_big_free(t->tc[c].data, t->tc[c].mapped, true);
+  }
+  arena_free_all(&t->arena);
+  free(t);
+}
+
+/* a tile's headers, its data (where it's one part with its headers inline,
+   read where it lies), its components' structures and its packets; *out
+   NULL where it has no parts */
 static bool
-tile_decode(jpx_t *j, uint32_t tile) {
-  uint64_t  bytes;
+tile_open(jpx_t *j, uint32_t tile, xtile_t **out) {
   xtile_t  *t;
-  bool      coc[X_COMPS] = { false }, qcc[X_COMPS] = { false }, poc_seen = false, ok = false;
-  uint32_t  i, c, nparts = 0, p, q;
+  bool      coc[X_COMPS] = { false }, qcc[X_COMPS] = { false }, poc_seen = false;
+  uint32_t  i, c, nparts = 0, one = 0, p, q;
   size_t    body = 0, ppt = 0, ppm = 0;
   uint8_t  *buf;
 
+  *out = NULL;
   if (!(t = calloc(1, sizeof(*t)))) return false;
   t->arena.limit = X_ARENA;
   t->arena.big   = j->big;
@@ -3210,44 +3445,50 @@ tile_decode(jpx_t *j, uint32_t tile) {
 
     if (part->tile != tile) continue;
     nparts++;
+    one   = i;
     body += part->len;
-    ppm += part->ppm_len;
+    ppm  += part->ppm_len;
     while (pos + 4u <= part->head_len) {
       uint32_t m = be16(part->head + pos), l = be16(part->head + pos + 2u);
 
       if (l < 2u || pos + 2u + l > part->head_len) break;
       if (m == 0xFF61u && l >= 3u) ppt += l - 3u;
-      else if (!coding_marker(j, &t->cod, coc, qcc, &poc_seen, m, part->head + pos + 4u, l - 2u)) goto done;
+      else if (!coding_marker(j, &t->cod, coc, qcc, &poc_seen, m, part->head + pos + 4u, l - 2u)) goto fail;
       pos += 2u + l;
     }
   }
   if (!nparts) {
-    ok = true;
-    goto done;
+    free(t);
+    return true;
   }
-  if (!(buf = arena_alloc(&t->arena, body + ppt + ppm + 1u))) goto done;
-  t->body = buf;
-  t->hdr  = j->ppm ? buf + body : ppt ? buf + body + ppm : NULL;
-  for (i = 0; i < j->nparts; i++) {
-    const xpart_t *part = &j->parts[i];
-    size_t         pos  = 0;
+  if (nparts == 1u && !ppt && !j->ppm) {
+    t->body     = j->parts[one].data;
+    t->body_len = j->parts[one].len;
+  } else {
+    if (!(buf = arena_alloc(&t->arena, body + ppt + ppm + 1u))) goto fail;
+    t->body = buf;
+    t->hdr  = j->ppm ? buf + body : ppt ? buf + body + ppm : NULL;
+    for (i = 0; i < j->nparts; i++) {
+      const xpart_t *part = &j->parts[i];
+      size_t         pos  = 0;
 
-    if (part->tile != tile) continue;
-    memcpy(buf + t->body_len, part->data, part->len);
-    t->body_len += part->len;
-    if (j->ppm) {
-      memcpy(buf + body + t->hdr_len, part->ppm, part->ppm_len);
-      t->hdr_len += part->ppm_len;
-    }
-    while (!j->ppm && pos + 4u <= part->head_len) {
-      uint32_t m = be16(part->head + pos), l = be16(part->head + pos + 2u);
-
-      if (l < 2u || pos + 2u + l > part->head_len) break;
-      if (m == 0xFF61u && l >= 3u) {
-        memcpy(buf + body + ppm + t->hdr_len, part->head + pos + 5u, l - 3u);
-        t->hdr_len += l - 3u;
+      if (part->tile != tile) continue;
+      memcpy(buf + t->body_len, part->data, part->len);
+      t->body_len += part->len;
+      if (j->ppm) {
+        memcpy(buf + body + t->hdr_len, part->ppm, part->ppm_len);
+        t->hdr_len += part->ppm_len;
       }
-      pos += 2u + l;
+      while (!j->ppm && pos + 4u <= part->head_len) {
+        uint32_t m = be16(part->head + pos), l = be16(part->head + pos + 2u);
+
+        if (l < 2u || pos + 2u + l > part->head_len) break;
+        if (m == 0xFF61u && l >= 3u) {
+          memcpy(buf + body + ppm + t->hdr_len, part->head + pos + 5u, l - 3u);
+          t->hdr_len += l - 3u;
+        }
+        pos += 2u + l;
+      }
     }
   }
 
@@ -3263,16 +3504,7 @@ tile_decode(jpx_t *j, uint32_t tile) {
   if (t->x1 > j->x1) t->x1 = j->x1;
   if (t->y1 > j->y1) t->y1 = j->y1;
   for (c = 0; c < j->ncomp; c++) {
-    xtc_t *tc = &t->tc[c];
-
-    if (!tc_build(j, t, c)) goto done;
-    bytes = (uint64_t)(tc->x1 - tc->x0) * (uint64_t)(tc->y1 - tc->y0) * 4u;
-    if (j->big && bytes >= X_MAP_MIN && bytes <= SIZE_MAX) {
-      if (!(tc->data = im_big_alloc((size_t)bytes, true, true))) goto done;
-      tc->mapped = (size_t)bytes;
-    } else if (!(tc->data = zget(&t->arena, bytes))) {
-      goto done;
-    }
+    if (!tc_build(j, t, c)) goto fail;
   }
 
   /* the packets */
@@ -3285,13 +3517,49 @@ tile_decode(jpx_t *j, uint32_t tile) {
   } else {
     progression(j, t, t->cod.order, 0u, X_LEVELS + 1u, 0u, j->ncomp, t->cod.layers);
   }
+  *out = t;
+  return true;
+
+fail:
+  tile_close(t);
+  return false;
+}
+
+/* whether the tile's three first components go through its colour
+   transform (one size, one wavelet) */
+static bool
+tile_mct(const jpx_t *j, const xtile_t *t) {
+  return t->cod.mct && j->ncomp >= 3u && t->tc[0].x1 - t->tc[0].x0 == t->tc[1].x1 - t->tc[1].x0
+      && t->tc[0].x1 - t->tc[0].x0 == t->tc[2].x1 - t->tc[2].x0 && t->tc[0].y1 - t->tc[0].y0 == t->tc[1].y1 - t->tc[1].y0
+      && t->tc[0].y1 - t->tc[0].y0 == t->tc[2].y1 - t->tc[2].y0 && t->tc[1].cc->reversible == t->tc[0].cc->reversible
+      && t->tc[2].cc->reversible == t->tc[0].cc->reversible;
+}
+
+/* the tile whole: every component's samples, its code-blocks, each level's
+   rows and columns, into the planes */
+static bool
+tile_whole(jpx_t *j, xtile_t *t) {
+  uint64_t bytes;
+  uint32_t c;
+
+  for (c = 0; c < j->ncomp; c++) {
+    xtc_t *tc = &t->tc[c];
+
+    bytes = (uint64_t)(tc->x1 - tc->x0) * (uint64_t)(tc->y1 - tc->y0) * 4u;
+    if (j->big && bytes >= X_MAP_MIN && bytes <= SIZE_MAX) {
+      if (!(tc->data = im_big_alloc((size_t)bytes, true, true))) return false;
+      tc->mapped = (size_t)bytes;
+    } else if (!(tc->data = zget(&t->arena, bytes))) {
+      return false;
+    }
+  }
 
   /* the code-blocks, then each level's rows and columns */
   {
     xjob_t  *jobs;
     uint32_t n = 0, r;
 
-    if (!(jobs = arena_alloc(&t->arena, (uint64_t)(t->blocks ? t->blocks : 1u) * sizeof(*jobs)))) goto done;
+    if (!(jobs = arena_alloc(&t->arena, (uint64_t)(t->blocks ? t->blocks : 1u) * sizeof(*jobs)))) return false;
     for (c = 0; c < j->ncomp; c++) {
       xtc_t *tc = &t->tc[c];
 
@@ -3305,17 +3573,25 @@ tile_decode(jpx_t *j, uint32_t tile) {
             xpband_t *pb = &res->prec[k * res->nbands + b];
 
             for (m = 0; m < pb->cw * pb->ch; m++) {
-              if (!pb->blk[m].nsegs || n >= t->blocks) continue;
-              jobs[n].b    = &pb->blk[m];
-              jobs[n].band = &res->band[b];
-              jobs[n].tc   = tc;
+              const xband_t *band = &res->band[b];
+              const xcblk_t *kb   = &pb->blk[m];
+              size_t         st   = (size_t)(tc->x1 - tc->x0);
+
+              if (!kb->nsegs || n >= t->blocks) continue;
+              jobs[n].b      = &pb->blk[m];
+              jobs[n].band   = band;
+              jobs[n].cc     = tc->cc;
+              jobs[n].stride = st;
+              jobs[n].fill   = false;
+              jobs[n].out    = (uint32_t *)tc->data + (band->offy + (size_t)(kb->y0 - band->y0)) * st
+                             + band->offx + (size_t)(kb->x0 - band->x0);
               n++;
             }
           }
         }
       }
     }
-    if (!pool_run(j, t1_job, jobs, n)) goto done;
+    if (!pool_run(j, t1_job, jobs, n)) return false;
     for (c = 0; c < j->ncomp; c++) {
       xtc_t *tc = &t->tc[c];
 
@@ -3327,7 +3603,7 @@ tile_decode(jpx_t *j, uint32_t tile) {
         lv.tc = tc;
         lv.r  = r;
         if (!w || !h) continue;
-        if (!pool_run(j, idwt_rows, &lv, (h + V - 1u) / V) || !pool_run(j, idwt_cols, &lv, (w + STRIP - 1u) / STRIP)) goto done;
+        if (!pool_run(j, idwt_rows, &lv, (h + V - 1u) / V) || !pool_run(j, idwt_cols, &lv, (w + STRIP - 1u) / STRIP)) return false;
       }
     }
   }
@@ -3336,32 +3612,489 @@ tile_decode(jpx_t *j, uint32_t tile) {
   {
     xplace_t pl;
 
+    memset(&pl, 0, sizeof(pl));
     pl.t   = t;
-    pl.mct = t->cod.mct && j->ncomp >= 3u && t->tc[0].x1 - t->tc[0].x0 == t->tc[1].x1 - t->tc[1].x0
-          && t->tc[0].x1 - t->tc[0].x0 == t->tc[2].x1 - t->tc[2].x0 && t->tc[0].y1 - t->tc[0].y0 == t->tc[1].y1 - t->tc[1].y0
-          && t->tc[0].y1 - t->tc[0].y0 == t->tc[2].y1 - t->tc[2].y0 && t->tc[1].cc->reversible == t->tc[0].cc->reversible
-          && t->tc[2].cc->reversible == t->tc[0].cc->reversible;
-    pl.rows = 0;
+    pl.mct = tile_mct(j, t);
     for (c = 0; c < j->ncomp; c++) {
-      if ((uint32_t)(top(&t->tc[c])->y1 - top(&t->tc[c])->y0) > pl.rows) {
-        pl.rows = (uint32_t)(top(&t->tc[c])->y1 - top(&t->tc[c])->y0);
-      }
+      pl.hi[c] = (uint32_t)(top(&t->tc[c])->y1 - top(&t->tc[c])->y0);
+      if (pl.hi[c] > pl.rows) pl.rows = pl.hi[c];
     }
     /* a mapped tile-component's by bands, its rows given back as they go */
     for (c = 0; c < j->ncomp && !t->tc[c].mapped; c++) {}
     if (c < j->ncomp ? !pool_run(j, place_band, &pl, (pl.rows + X_BAND - 1u) / X_BAND) : !pool_run(j, place_row, &pl, pl.rows)) {
-      goto done;
+      return false;
     }
   }
-  ok = true;
+  return true;
+}
 
-done:
-  for (c = 0; c < X_COMPS; c++) {
-    if (t->tc[c].mapped) im_big_free(t->tc[c].data, t->tc[c].mapped, true);
-  }
-  arena_free_all(&t->arena);
-  free(t);
+static bool
+tile_decode(jpx_t *j, uint32_t tile) {
+  xtile_t *t;
+  bool     ok;
+
+  if (!tile_open(j, tile, &t)) return false;
+  ok = !t || tile_whole(j, t);
+  tile_close(t);
   return ok;
+}
+
+/* -- the one tile by bands ------------------------------------------------------- */
+
+static bool
+grow(void **p, uint32_t *cap, uint64_t want, size_t each) {
+  uint64_t n = *cap ? *cap : 64u;
+  void    *q;
+
+  if (want <= *cap) return true;
+  while (n < want) n *= 2u;
+  if (n > UINT32_MAX || n > SIZE_MAX / each || !(q = realloc(*p, (size_t)n * each))) return false;
+  *p   = q;
+  *cap = (uint32_t)n;
+  return true;
+}
+
+/* the band's next code-block row, its blocks' jobs; false past its last */
+static bool
+sband_next(xstream_t *st, xsband_t *sb, const xcc_t *cc) {
+  const xres_t  *res  = sb->res;
+  const xband_t *band = &res->band[sb->b];
+
+  while (sb->py < res->ph) {
+    const xpband_t *any = NULL;
+    uint32_t        px, u, ch = 0;
+
+    for (px = 0; px < res->pw; px++) {
+      const xpband_t *pb = &res->prec[((size_t)sb->py * res->pw + px) * res->nbands + sb->b];
+
+      if (pb->cw && pb->ch > ch) {
+        ch  = pb->ch;
+        any = pb;
+      }
+    }
+    if (sb->v >= ch) {
+      sb->py++;
+      sb->v = 0u;
+      continue;
+    }
+    for (px = 0; px < res->pw; px++) {
+      const xpband_t *pb = &res->prec[((size_t)sb->py * res->pw + px) * res->nbands + sb->b];
+
+      if (!pb->cw || sb->v >= pb->ch) continue;
+      if (!grow((void **)&st->jobs, &st->jcap, (uint64_t)st->njobs + pb->cw, sizeof(*st->jobs))) {
+        st->failed = true;
+        return false;
+      }
+      for (u = 0; u < pb->cw; u++) {
+        xcblk_t *k  = &pb->blk[(size_t)sb->v * pb->cw + u];
+        xjob_t  *jb = &st->jobs[st->njobs++];
+
+        jb->b      = k;
+        jb->band   = band;
+        jb->cc     = cc;
+        jb->fill   = true;
+        jb->stride = sb->ring->row / 4u;
+        jb->out    = (uint32_t *)(void *)ring_row(sb->ring, (uint32_t)(k->y0 - band->y0)) + sb->col + (uint32_t)(k->x0 - band->x0);
+      }
+    }
+    sb->have = (uint32_t)(any->blk[(size_t)sb->v * any->cw].y1 - band->y0);
+    sb->v++;
+    return true;
+  }
+  return false;
+}
+
+/* the steps a level runs to for `need` rows out, and the rows out after
+   `t1` steps (ring97's and ring53's: a low and a high final a step, the
+   9/7's a step later) */
+static uint32_t
+lv_steps(const xslv_t *lv, uint32_t need, bool rev) {
+  uint32_t t1;
+
+  if (need <= lv->done) return lv->t;
+  if (need >= lv->h) return lv->steps;
+  t1 = rev ? (need + 2u - lv->cy) / 2u : (need + 4u - lv->cy) / 2u;
+  t1 = t1 < lv->steps ? t1 : lv->steps;
+  return t1 > lv->t ? t1 : lv->t;
+}
+
+static uint32_t
+lv_done(const xslv_t *lv, uint32_t t1, bool rev) {
+  int64_t d;
+
+  if (t1 >= lv->steps) return lv->h;
+  d = 2 * (int64_t)t1 - (rev ? 1 : 3) + (int64_t)lv->cy;
+  return d <= 0 ? 0u : d >= (int64_t)lv->h ? lv->h : (uint32_t)d;
+}
+
+static bool
+srow_job(jpx_t *j, xscratch_t *s, void *ctx, uint32_t item) {
+  const xsrow_t *r   = &((const xstream_t *)ctx)->rows[item];
+  uint8_t       *tmp = lanes(s, r->w);
+
+  (void)j;
+  if (!tmp) return false;
+  idwt_row(ring_row(r->ring, r->i), tmp, r->w, r->sw, r->cx, r->rev);
+  return true;
+}
+
+static bool
+strip_job(jpx_t *j, xscratch_t *s, void *ctx, uint32_t item) {
+  const xsstrip_t *sp = &((const xstream_t *)ctx)->strips[item];
+  const xslv_t    *lv = sp->lv;
+
+  (void)j;
+  (void)s;
+  if (lv->h == 1u) {
+    /* a row alone: a low as it is, a high halved where reversible (as
+       lift_apart has them) */
+    const int32_t *src = (const int32_t *)(void *)ring_row(lv->cy ? &lv->H : &lv->L, 0u) + sp->x;
+    int32_t       *o   = (int32_t *)(void *)ring_row(lv->D, 0u) + sp->x;
+    uint32_t       k;
+
+    if (lv->cy && sp->rev) {
+      for (k = 0; k < sp->n; k++) o[k] = src[k] / 2;
+    } else {
+      memcpy(o, src, (size_t)sp->n * 4u);
+    }
+    return true;
+  }
+  if (sp->rev) ring53(&lv->L, &lv->H, lv->D, lv->sn, lv->dn, lv->cy, sp->x, sp->n, lv->t, lv->t1);
+  else ring97(&lv->L, &lv->H, lv->D, lv->sn, lv->dn, lv->cy, sp->x, sp->n, lv->t, lv->t1);
+  return true;
+}
+
+/* a code-block, or (past them) a piece of the rows composed alongside */
+static bool
+mix_job(jpx_t *j, xscratch_t *s, void *ctx, uint32_t item) {
+  const xstream_t *st = ctx;
+
+  if (item < st->njobs) return t1_job(j, s, st->jobs, item);
+  return span_job(j, s, (void *)st->also, item - st->njobs);
+}
+
+/* each component's top rows made to need[c] (at least), and placed; the
+   rows `also` has composed with the code-blocks */
+static bool
+stream_to(jpx_t *j, const uint32_t *need) {
+  xstream_t *st = j->stream;
+  xtile_t   *t  = st->t;
+  uint32_t   c, r, i;
+
+  /* what each level needs, from the top down, and the code-block rows
+     under it */
+  st->njobs = 0;
+  for (c = 0; c < j->ncomp; c++) {
+    xscomp_t    *sc   = &st->c[c];
+    const xtc_t *tc   = &t->tc[c];
+    bool         rev  = tc->cc->reversible;
+    uint32_t     want = need[c];
+
+    if (!sc->on || want <= sc->done) continue;
+    for (r = sc->top; r >= 1u; r--) {
+      xslv_t *lv = &sc->lv[r];
+
+      if (want > lv->done && want - lv->done < lv->gran) want = lv->h - lv->done > lv->gran ? lv->done + lv->gran : lv->h;
+      lv->t1  = lv_steps(lv, want, rev);
+      lv->lto = lv->t1 < lv->sn ? lv->t1 : lv->sn;
+      lv->hto = lv->t1 + lv->cy < lv->dn ? lv->t1 + lv->cy : lv->dn;
+      while (lv->band[0].have < lv->lto && sband_next(st, &lv->band[0], tc->cc)) {}
+      while (lv->band[1].have < lv->hto && sband_next(st, &lv->band[1], tc->cc)) {}
+      while (lv->band[2].have < lv->hto && sband_next(st, &lv->band[2], tc->cc)) {}
+      want = lv->lto;
+    }
+    while (sc->ll.have < want && sband_next(st, &sc->ll, tc->cc)) {}
+  }
+  if (st->failed || !pool_run(j, mix_job, st, st->njobs + (st->also ? (st->also->Y1 - st->also->Y0) * st->also->pieces : 0u))) {
+    return false;
+  }
+  st->also = NULL;
+
+  /* each level up: its new rows made whole across, then its steps */
+  for (r = 1; r <= st->maxtop; r++) {
+    st->nrows = 0;
+    for (c = 0; c < j->ncomp; c++) {
+      xscomp_t *sc = &st->c[c];
+      xslv_t   *lv = &sc->lv[r];
+      bool      rev;
+
+      if (!sc->on || sc->top < r) continue;
+      rev = t->tc[c].cc->reversible;
+      if (lv->w) {
+        if (!grow((void **)&st->rows, &st->rcap, (uint64_t)st->nrows + (lv->lto - lv->lsyn) + (lv->hto - lv->hsyn), sizeof(*st->rows))) {
+          return false;
+        }
+        for (i = lv->lsyn; i < lv->lto; i++) {
+          xsrow_t *w = &st->rows[st->nrows++];
+
+          w->ring = &lv->L;
+          w->i    = i;
+          w->w    = lv->w;
+          w->sw   = lv->sw;
+          w->cx   = lv->cx;
+          w->rev  = rev;
+        }
+        for (i = lv->hsyn; i < lv->hto; i++) {
+          xsrow_t *w = &st->rows[st->nrows++];
+
+          w->ring = &lv->H;
+          w->i    = i;
+          w->w    = lv->w;
+          w->sw   = lv->sw;
+          w->cx   = lv->cx;
+          w->rev  = rev;
+        }
+      }
+      lv->lsyn = lv->lto;
+      lv->hsyn = lv->hto;
+    }
+    if (!pool_run(j, srow_job, st, st->nrows)) return false;
+
+    st->nstrips = 0;
+    for (c = 0; c < j->ncomp; c++) {
+      xscomp_t *sc = &st->c[c];
+      xslv_t   *lv = &sc->lv[r];
+      uint32_t  x;
+
+      if (!sc->on || sc->top < r || lv->t1 <= lv->t || !lv->w) continue;
+      if (!grow((void **)&st->strips, &st->scap, (uint64_t)st->nstrips + (lv->w + STRIP - 1u) / STRIP, sizeof(*st->strips))) return false;
+      for (x = 0; x < lv->w; x += STRIP) {
+        xsstrip_t *sp = &st->strips[st->nstrips++];
+
+        sp->lv  = lv;
+        sp->x   = x;
+        sp->n   = lv->w - x < STRIP ? lv->w - x : STRIP;
+        sp->rev = t->tc[c].cc->reversible;
+      }
+    }
+    if (!pool_run(j, strip_job, st, st->nstrips)) return false;
+    for (c = 0; c < j->ncomp; c++) {
+      xscomp_t *sc = &st->c[c];
+      xslv_t   *lv = &sc->lv[r];
+
+      if (!sc->on || sc->top < r) continue;
+      lv->t    = lv->t1;
+      lv->done = lv_done(lv, lv->t, t->tc[c].cc->reversible);
+    }
+  }
+
+  /* the rows made, placed (the colour transform's three as far as all
+     three are) */
+  {
+    xplace_t pl;
+    uint32_t lo = UINT32_MAX, hi = 0;
+
+    memset(&pl, 0, sizeof(pl));
+    pl.t   = t;
+    pl.mct = st->mct;
+    for (c = 0; c < j->ncomp; c++) {
+      xscomp_t *sc = &st->c[c];
+
+      if (!sc->on) continue;
+      sc->done = sc->top ? sc->lv[sc->top].done : sc->ll.have;
+      pl.lo[c] = sc->placed;
+      pl.hi[c] = sc->done;
+    }
+    if (pl.mct) {
+      uint32_t m = pl.hi[0] < pl.hi[1] ? pl.hi[0] : pl.hi[1];
+
+      m        = m < pl.hi[2] ? m : pl.hi[2];
+      pl.hi[0] = pl.hi[1] = pl.hi[2] = m > pl.lo[0] ? m : pl.lo[0];
+    }
+    for (c = 0; c < j->ncomp; c++) {
+      if (!st->c[c].on || pl.hi[c] <= pl.lo[c]) continue;
+      lo = pl.lo[c] < lo ? pl.lo[c] : lo;
+      hi = pl.hi[c] > hi ? pl.hi[c] : hi;
+    }
+    if (hi > lo) {
+      pl.base = lo;
+      pl.rows = hi - lo;
+      if (!pool_run(j, place_row, &pl, pl.rows)) return false;
+    }
+    for (c = 0; c < j->ncomp; c++) {
+      if (st->c[c].on && pl.hi[c] > st->c[c].placed) st->c[c].placed = pl.hi[c];
+    }
+  }
+  return true;
+}
+
+/* compose's bands, each as soon as the planes' rows under it are made:
+   with the next band's code-blocks (the output's fresh pages are the
+   kernel's to give, one at a time), the last alone */
+static bool
+stream_run(jpx_t *j, xbands_t *b) {
+  xstream_t *st = j->stream;
+  xbands_t   prev = *b;
+  uint32_t   need[X_COMPS], c, h = b->h, Y0, Y1;
+
+  for (Y0 = 0; Y0 < h; Y0 = Y1) {
+    Y1 = h - Y0 > X_STRIPE ? Y0 + X_STRIPE : h;
+    if (st->t) {
+      for (c = 0; c < j->ncomp; c++) {
+        int64_t sy = (int64_t)(j->y0 + Y1 - 1u) / j->dy[c] - (int64_t)j->py0[c];
+
+        sy      = sy < 0 ? 0 : sy >= (int64_t)j->ph[c] ? (int64_t)j->ph[c] - 1 : sy;
+        need[c] = (uint32_t)sy + 1u;
+      }
+      st->also = Y0 ? &prev : NULL;
+      if (!stream_to(j, need)) return false;
+    } else if (Y0 && !pool_run(j, span_job, &prev, (prev.Y1 - prev.Y0) * prev.pieces)) {
+      return false;
+    }
+    prev.Y0 = Y0;
+    prev.Y1 = Y1;
+  }
+  return h ? pool_run(j, span_job, &prev, (prev.Y1 - prev.Y0) * prev.pieces) : true;
+}
+
+/* the smallest power of two at least n */
+static uint32_t
+pow2_at_least(uint64_t n) {
+  uint32_t p = 1u;
+
+  while (p < n && p < (1u << 31)) p <<= 1;
+  return p;
+}
+
+static bool
+ring_new(xring_t *r, uint32_t cap, uint32_t w, uint32_t y0) {
+  r->row  = (size_t)w * 4u;
+  r->mask = cap - 1u;
+  r->y0   = y0;
+  return (r->p = malloc((size_t)cap * r->row ? (size_t)cap * r->row : 1u)) != NULL;
+}
+
+static void
+stream_close(jpx_t *j) {
+  xstream_t *st = j->stream;
+  uint32_t   c, r;
+
+  if (!st) return;
+  for (c = 0; st->c && c < j->ncomp; c++) {
+    for (r = 1; r <= X_LEVELS; r++) {
+      free(st->c[c].lv[r].L.p);
+      free(st->c[c].lv[r].H.p);
+    }
+    free(st->c[c].out.p);
+  }
+  free(st->jobs);
+  free(st->rows);
+  free(st->strips);
+  tile_close(st->t);
+  free(st->c);
+  free(st);
+  j->stream = NULL;
+}
+
+/* the one tile opened, each component's rings and the planes' (a band's
+   rows and a few) */
+static bool
+stream_open(jpx_t *j) {
+  xstream_t *st;
+  xtile_t   *t;
+  uint32_t   c, r, made[X_LEVELS + 1]; /* a level's rows a round at most */
+
+  if (!(st = calloc(1, sizeof(*st)))) return false;
+  j->stream = st;
+  if (!(st->c = calloc(j->ncomp, sizeof(*st->c))) || !tile_open(j, 0u, &st->t)) return false;
+  t = st->t;
+  for (c = 0; c < j->ncomp; c++) {
+    xscomp_t *sc   = &st->c[c];
+    uint32_t  rows = X_STRIPE / j->dy[c] + 4u, lead = 0u, cap; /* rows: the top's a band */
+    size_t    bytes;
+
+    if (t && !j->skip[c]) {
+      xtc_t        *tc = &t->tc[c];
+      const xres_t *tr = top(tc);
+      bool          rev = tc->cc->reversible;
+
+      /* the planes' rows are the top level's (the image one tile) */
+      if (tr->y0 != (int64_t)j->py0[c] || tr->x0 != (int64_t)j->px0[c] || (uint32_t)(tr->x1 - tr->x0) != j->pw[c]
+          || (uint32_t)(tr->y1 - tr->y0) != j->ph[c]) {
+        return false;
+      }
+      sc->on  = true;
+      sc->top = tc->nuse - 1u;
+      st->maxtop = sc->top > st->maxtop ? sc->top : st->maxtop;
+      /* each level's rows out a round at most: the top's a band's, a lower
+         one's what the one above reads a round, or (a narrow one) more */
+      {
+        uint32_t want = rows;
+
+        for (r = sc->top; r >= 1u; r--) {
+          xslv_t  *lv = &sc->lv[r];
+          uint32_t w = (uint32_t)(tc->res[r].x1 - tc->res[r].x0), h = (uint32_t)(tc->res[r].y1 - tc->res[r].y0);
+
+          lv->gran = r < sc->top ? (X_ROUND / (w ? w : 1u) < h ? X_ROUND / (w ? w : 1u) : h) : 0u;
+          want     = (want > lv->gran ? want : lv->gran) + 2u;
+          made[r]  = want;
+          want     = want / 2u + 4u;
+        }
+      }
+      for (r = 1; r <= sc->top; r++) {
+        xslv_t       *lv  = &sc->lv[r];
+        const xres_t *res = &tc->res[r], *low = &tc->res[r - 1u];
+        uint32_t      ahead = 1u << res->ycb, full, b;
+
+        /* its rows decoded ahead (a code-block row's), or the level below's
+           made ahead */
+        if (r == 1u && (1u << low->ycb) > ahead) ahead = 1u << low->ycb;
+        if (r > 1u && made[r - 1u] > ahead) ahead = made[r - 1u];
+        lv->w  = (uint32_t)(res->x1 - res->x0);
+        lv->h  = (uint32_t)(res->y1 - res->y0);
+        lv->sw = (uint32_t)(low->x1 - low->x0);
+        lv->sn = (uint32_t)(low->y1 - low->y0);
+        lv->dn = lv->h - lv->sn;
+        lv->cx = (uint32_t)res->x0 & 1u;
+        lv->cy = (uint32_t)res->y0 & 1u;
+        if (lv->h >= 2u) {
+          int64_t a = rev ? (int64_t)lv->sn - 1 : (int64_t)lv->sn, d = rev ? (int64_t)lv->dn - lv->cy : (int64_t)lv->dn + 1 - lv->cy;
+
+          lv->steps = (uint32_t)(a > d ? a : d) + 1u;
+        } else {
+          lv->steps = lv->h;
+        }
+        /* a band's rows here at most, the code-block rows decoded ahead of
+           them, those its steps still read */
+        cap  = pow2_at_least((uint64_t)made[r] / 2u + ahead + 12u);
+        full = pow2_at_least(lv->sn > lv->dn ? lv->sn : lv->dn);
+        full = full > (1u << res->ycb) ? full : 1u << res->ycb;
+        full = r == 1u && full < (1u << low->ycb) ? 1u << low->ycb : full;
+        cap  = cap < full ? cap : full;
+        if (!ring_new(&lv->L, cap, lv->w, (uint32_t)res->band[0].y0) || !ring_new(&lv->H, cap, lv->w, (uint32_t)res->band[1].y0)) {
+          return false;
+        }
+        for (b = 0; b < 3u; b++) {
+          lv->band[b].res  = res;
+          lv->band[b].b    = b;
+          lv->band[b].ring = b ? &lv->H : &lv->L;
+          lv->band[b].col  = b == 1u ? 0u : lv->sw;
+        }
+      }
+      for (r = 1; r < sc->top; r++) sc->lv[r].D = &sc->lv[r + 1u].L;
+      if (!sc->top) lead = 1u << tc->res[0].ycb; /* no level: its code-block rows ahead */
+      cap = pow2_at_least((uint64_t)rows + lead + 8u);
+      if (!ring_new(&sc->out, cap, (uint32_t)(tr->x1 - tr->x0), sc->top ? 0u : (uint32_t)tc->res[0].band[0].y0)) return false;
+      if (sc->top) sc->lv[sc->top].D = &sc->out;
+      sc->ll.res  = &tc->res[0];
+      sc->ll.b    = 0u;
+      sc->ll.ring = sc->top ? &sc->lv[1].L : &sc->out;
+      sc->ll.col  = 0u;
+    }
+    /* the plane: a ring past a band's rows and those decoded ahead */
+    cap = pow2_at_least((uint64_t)rows + (t && !j->skip[c] && !st->c[c].top ? 1u << t->tc[c].res[0].ycb : 0u) + 8u);
+    if (cap >= j->ph[c]) {
+      cap          = j->ph[c];
+      j->pmask[c] = SIZE_MAX;
+    } else {
+      j->pmask[c] = cap - 1u;
+    }
+    bytes = (size_t)cap * j->pw[c] * sizeof(uint16_t);
+    if (!(j->plane[c] = im_big_alloc(bytes, true, false))) return false;
+    j->psize[c] = bytes;
+  }
+  st->mct = t && tile_mct(j, t) && st->c[0].on && st->c[1].on && st->c[2].on;
+  return true;
 }
 
 /* -- JP2's boxes ------------------------------------------------------------------- */
@@ -3692,7 +4425,7 @@ lay_piece(jpx_t *j, xscratch_t *s, void *ctx, uint32_t item) {
       int64_t  sy = (int64_t)(j->y0 + Y) / j->dy[cp] - (int64_t)j->py0[cp];
 
       sy     = sy < 0 ? 0 : sy >= j->ph[cp] ? (int64_t)j->ph[cp] - 1 : sy;
-      src[u] = j->plane[cp] + (size_t)sy * j->pw[cp];
+      src[u] = plane_row(j, cp, (size_t)sy);
     }
     X = X0;
     if (l->nuse == 1u) {
@@ -3747,7 +4480,7 @@ lay_piece(jpx_t *j, xscratch_t *s, void *ctx, uint32_t item) {
       int64_t  sy = (int64_t)(j->y0 + Y) / j->dy[cp] - (int64_t)j->py0[cp];
 
       sy     = sy < 0 ? 0 : sy >= j->ph[cp] ? (int64_t)j->ph[cp] - 1 : sy;
-      src[u] = j->plane[cp] + (size_t)sy * j->pw[cp];
+      src[u] = plane_row(j, cp, (size_t)sy);
       cl[u]  = l->cols[u];
     }
     X = X0;
@@ -3817,7 +4550,7 @@ lay_piece(jpx_t *j, xscratch_t *s, void *ctx, uint32_t item) {
     const uint16_t *src;
 
     sy  = sy < 0 ? 0 : sy >= j->ph[cp] ? (int64_t)j->ph[cp] - 1 : sy;
-    src = j->plane[cp] + (size_t)sy * j->pw[cp];
+    src = plane_row(j, cp, (size_t)sy);
     if (l->step == 4u) {
       for (X = X0; X < X1; X++, o += 4) memcpy(o, l->whole + (size_t)src[X] * 4u, 4);
     } else {
@@ -3834,7 +4567,7 @@ lay_piece(jpx_t *j, xscratch_t *s, void *ctx, uint32_t item) {
     size_t          st  = l->step;
 
     sy  = sy < 0 ? 0 : sy >= j->ph[cp] ? (int64_t)j->ph[cp] - 1 : sy;
-    src = j->plane[cp] + (size_t)sy * j->pw[cp];
+    src = plane_row(j, cp, (size_t)sy);
     q   = o + u;
     if (l->apart && u == l->ncol) {
       q  = l->alpha + (size_t)Y * l->w + X0;
@@ -4109,7 +4842,7 @@ gen_piece(jpx_t *j, xscratch_t *s, void *ctx, uint32_t item) {
     int64_t  sy = (int64_t)(j->y0 + Y) / j->dy[cp] - (int64_t)j->py0[cp];
 
     sy     = sy < 0 ? 0 : sy >= j->ph[cp] ? (int64_t)j->ph[cp] - 1 : sy;
-    row[u] = j->plane[cp] + (size_t)sy * j->pw[cp];
+    row[u] = plane_row(j, cp, (size_t)sy);
   }
   if (g->lut[0] && !g->apart) {
     gen_lut(g, row, X0, X1, g->px + (size_t)Y * g->pitch + (size_t)X0 * g->fstep * es);
@@ -4406,7 +5139,7 @@ jpx_decode(const uint8_t *data, size_t len, ImImage *im, const jxopts_t *o) {
   const uint8_t *cs     = NULL;
   size_t         cs_len = 0;
   uint32_t       c, tile;
-  bool           ok = false;
+  bool           ok = false, bands;
 
   if (!data || len < 12u) return false;
   memset(&x, 0, sizeof(x));
@@ -4445,10 +5178,17 @@ jpx_decode(const uint8_t *data, size_t len, ImImage *im, const jxopts_t *o) {
       all      += (uint64_t)j->pw[c] * j->ph[c] * sizeof(uint16_t);
       tile     += ((uint64_t)j->tw / j->dx[c] + 1u) * ((uint64_t)j->th / j->dy[c] + 1u) * 4u;
     }
-    /* the planes and a tile's samples: past X_BIG, the image a big one */
-    j->big = all + tile >= X_BIG;
+    /* the planes and a tile's samples: past X_BIG, the image a big one;
+       one of one tile made by bands, its planes rings (stream_open) */
+    j->big  = all + tile >= X_BIG;
+    bands   = j->big && j->ntx == 1u && j->nty == 1u;
+    j->pmap = j->big && !bands;
     for (c = 0; c < j->ncomp; c++) {
-      if (!j->pw[c] || !j->ph[c] || !(j->plane[c] = im_big_alloc(plane_bytes(j, c), true, j->big))) goto done;
+      j->pmask[c] = SIZE_MAX;
+      if (!j->pw[c] || !j->ph[c]) goto done;
+      if (bands) continue;
+      j->psize[c] = plane_bytes(j, c);
+      if (!(j->plane[c] = im_big_alloc(j->psize[c], true, j->pmap))) goto done;
     }
   }
   /* no opacity wanted: its component (no colour's, past the colour
@@ -4466,8 +5206,12 @@ jpx_decode(const uint8_t *data, size_t len, ImImage *im, const jxopts_t *o) {
   }
   t1_tables(j);
   pool_start(j);
-  for (tile = 0; tile < j->ntx * j->nty; tile++) {
-    if (!tile_decode(j, tile)) goto done;
+  if (bands) {
+    if (!stream_open(j)) goto done;
+  } else {
+    for (tile = 0; tile < j->ntx * j->nty; tile++) {
+      if (!tile_decode(j, tile)) goto done;
+    }
   }
   /* the image's grid made smaller with it, for compose */
   j->x0 = (uint32_t)ceil_pow2(j->x0, j->reduce);
@@ -4477,8 +5221,9 @@ jpx_decode(const uint8_t *data, size_t len, ImImage *im, const jxopts_t *o) {
   ok = compose(j, &x, im, o);
 
 done:
+  stream_close(j);
   pool_stop(j);
-  for (c = 0; c < X_COMPS; c++) im_big_free(j->plane[c], plane_bytes(j, c), j->big);
+  for (c = 0; c < X_COMPS; c++) im_big_free(j->plane[c], j->psize[c], j->pmap);
   for (c = 0; c < X_THREADS; c++) {
     free(j->scratch[c].flags);
     free(j->scratch[c].cdata);
