@@ -1225,6 +1225,15 @@ typedef struct jchunk {
   jsync_t  cross;          /* the first boundary at or past `end` */
   bool     crossed;
   jsync_t  s;              /* (2): its true start, absolute */
+  /* (1): its blocks as its decoder made them, 64 coefficients each, from
+     its first byte (all but the last chunk's); from where the true path
+     met its decoder (m, (2)) to its cross (xs, (2): the true state there)
+     they are the true ones, their DCs off by the same amount a component */
+  int16_t *coef;          /* block_keep's records, one after another */
+  size_t   ncoef, coefcap; /* int16s used, room */
+  uint32_t nkept;          /* records */
+  jsync_t  m, xs;
+  bool     kept;
 } jchunk_t;
 
 typedef struct jspec {
@@ -1235,6 +1244,71 @@ typedef struct jspec {
   uint32_t  nblk;          /* blocks an MCU */
   uint8_t   slot_ci[64], slot_h[64], slot_v[64];
 } jspec_t;
+
+/* a sequential block decoded into a compact record at `out`: its count n
+   of coefficients past the DC, its DC (as predicted), then n pairs of a
+   natural position and a value, in decode order (a damaged run's past the
+   end at 63, as jpg_natural has it; a later one over an earlier); the
+   int16s it took */
+IM_INLINE uint32_t
+block_keep(jbits_t *b, const jhuff_t *dct, const jhuff_t *act, int32_t *dc, int16_t *out) {
+  uint32_t e, k, n = 0;
+  int32_t  diff;
+
+  if (b->n < 32) refill(b);
+  e = dct->fast[PEEK(b, J_HBITS)];
+  if (likely(e & J_FUSED)) {
+    DROP(b, e & 63u);
+    diff = (int32_t)e >> 16;
+  } else {
+    uint32_t s;
+
+    if (e) {
+      DROP(b, e & 63u);
+      s = (e >> 8) & 15u;
+    } else {
+      s = huff_slow(b, dct) & 15u;
+    }
+
+    diff = extend(get_bits(b, s), s);
+  }
+  *dc    = (int32_t)((uint32_t)*dc + (uint32_t)diff);
+  out[1] = (int16_t)*dc;
+
+  for (k = 1; k < 64u; k++) {
+    uint32_t rs, s;
+
+    if (b->n < 32) refill(b);
+    e = act->fast[PEEK(b, J_HBITS)];
+    if (likely(e & J_FUSED)) {
+      DROP(b, e & 63u);
+      rs = (e >> 8) & 0xFFu;
+      if (rs & 15u) {
+        k += rs >> 4;
+        out[2u + 2u * n]  = (int16_t)jpg_natural[k];
+        out[3u + 2u * n++] = (int16_t)((int32_t)e >> 16);
+        continue;
+      }
+    } else {
+      if (e) {
+        DROP(b, e & 63u);
+        rs = (e >> 8) & 0xFFu;
+      } else {
+        rs = huff_slow(b, act);
+      }
+      if ((s = rs & 15u)) {
+        k += rs >> 4;
+        out[2u + 2u * n]  = (int16_t)jpg_natural[k];
+        out[3u + 2u * n++] = (int16_t)extend(get_bits(b, s), s);
+        continue;
+      }
+    }
+    if (rs != 0xF0u) break;
+    k += 15u;
+  }
+  out[0] = (int16_t)n;
+  return 2u + 2u * n;
+}
 
 /* a sequential block decoded and dropped: its DC difference */
 IM_INLINE int32_t
@@ -1344,7 +1418,29 @@ spec_pass1(void *arg, uint32_t worker, uint32_t item) {
       return true;
     }
     if (st.blk >= sp->total) return true; /* ran off the end */
-    st.dc[ci] = (int32_t)((uint32_t)st.dc[ci] + (uint32_t)block_drop(&bs, j->dc[j->comp[ci].td], j->ac[j->comp[ci].ta]));
+    if (!last && ch->coef) {
+      /* room for the longest record (a DC and 63 pairs), else dropped as they
+         come, decoded again in (3) */
+      if (ch->ncoef + 128u > ch->coefcap) {
+        size_t   cap  = ch->coefcap * 2u;
+        int16_t *next = realloc(ch->coef, cap * sizeof(*next));
+
+        if (!next) {
+          free(ch->coef);
+          ch->coef = NULL;
+          st.dc[ci] = (int32_t)((uint32_t)st.dc[ci] + (uint32_t)block_drop(&bs, j->dc[j->comp[ci].td], j->ac[j->comp[ci].ta]));
+          st.blk++;
+          st.slot = st.slot + 1u == sp->nblk ? 0u : st.slot + 1u;
+          continue;
+        }
+        ch->coef    = next;
+        ch->coefcap = cap;
+      }
+      ch->ncoef += block_keep(&bs, j->dc[j->comp[ci].td], j->ac[j->comp[ci].ta], &st.dc[ci], ch->coef + ch->ncoef);
+      ch->nkept++;
+    } else {
+      st.dc[ci] = (int32_t)((uint32_t)st.dc[ci] + (uint32_t)block_drop(&bs, j->dc[j->comp[ci].td], j->ac[j->comp[ci].ta]));
+    }
     st.blk++;
     st.slot = st.slot + 1u == sp->nblk ? 0u : st.slot + 1u;
   }
@@ -1359,10 +1455,52 @@ spec_pass3(void *arg, uint32_t worker, uint32_t item) {
   uint32_t  end = item + 1u < sp->n ? sp->ch[item + 1u].s.blk : sp->total, i;
   jsblk_t   list[J_MCU_BLOCKS];
 
-  for (i = 0; i < J_COMPS; i++) x->dc[i] = ch->s.dc[i];
+  uint32_t  nb = seq_list(x, list);
+  jsync_t   from = ch->s;
+
+  /* kept: as many as the true path takes from where it met them (else, the
+     chunk decoded again) */
+  if (ch->kept && (ch->xs.blk < from.blk || ch->nkept < ch->m.blk || ch->nkept - ch->m.blk < ch->xs.blk - from.blk)) ch->kept = false;
+  if (ch->kept) {
+    /* the kept blocks to the cross: their DCs moved to the true ones, to
+       the planes */
+    IM_ALIGN(16) int16_t blk[64];
+    jpg_t         *j  = sp->j;
+    uint32_t       b, k, upto = ch->xs.blk < end ? ch->xs.blk : end;
+    uint32_t       slot = from.blk % nb, m = from.blk / nb, mx = m % sp->w, my = m / sp->w;
+    size_t         es = j->prec <= 8u ? 1u : 2u;
+    const int16_t *rec = ch->coef;
+    uint16_t       off[J_COMPS];
+
+    for (i = 0; i < J_COMPS; i++) off[i] = (uint16_t)((uint32_t)ch->s.dc[i] - (uint32_t)ch->m.dc[i]);
+    for (k = 0; k < ch->m.blk; k++) rec += 2u + 2u * (uint16_t)rec[0]; /* to where the paths met */
+    for (b = from.blk; b < upto; b++) {
+      const jsblk_t *e  = &list[slot];
+      jcomp_t       *c  = e->c;
+      uint32_t       bx = mx * e->nh + e->dx, by = my * e->nv + e->dy, n = (uint16_t)rec[0], q;
+
+      if (bx < c->sw && by < c->sh) {
+        memset(blk, 0, sizeof(blk));
+        blk[0] = (int16_t)(uint16_t)((uint16_t)rec[1] + off[sp->slot_ci[slot]]);
+        for (q = 0; q < n; q++) blk[(uint16_t)rec[2u + 2u * q]] = rec[3u + 2u * q];
+        c->idct(blk, c->q, (uint8_t *)c->plane + ((size_t)by * c->stride + bx) * c->ss * es, c->stride);
+      }
+      rec += 2u + 2u * n;
+      if (++slot == nb) {
+        slot = 0u;
+        if (++mx == sp->w) {
+          mx = 0u;
+          my++;
+        }
+      }
+    }
+    from = ch->xs;
+    if (from.blk >= end) return true;
+  }
+  for (i = 0; i < J_COMPS; i++) x->dc[i] = from.dc[i];
   x->lacking = false;
-  rd_seek(x, ch->s.bit);
-  seq_range(x, list, seq_list(x, list), sp->w, ch->s.blk, end);
+  rd_seek(x, from.bit);
+  seq_range(x, list, nb, sp->w, from.blk, end);
   return true;
 }
 
@@ -1375,6 +1513,10 @@ spec_pass2(jspec_t *sp, jctx_t *x) {
 
   memset(&sp->ch[0].s, 0, sizeof(sp->ch[0].s));
   if (!sp->ch[0].crossed) return false;
+  /* the first chunk's decoder on the true path from the start */
+  memset(&sp->ch[0].m, 0, sizeof(sp->ch[0].m));
+  sp->ch[0].xs   = t;
+  sp->ch[0].kept = sp->ch[0].coef != NULL;
   for (i = 1; i < sp->n; i++) {
     jchunk_t *ch = &sp->ch[i];
     uint32_t  r  = 0, k;
@@ -1399,7 +1541,8 @@ spec_pass2(jspec_t *sp, jctx_t *x) {
     }
     if (r == UINT32_MAX) {
       /* through the chunk in order, to the next one's start */
-      ch->s = t;
+      ch->s    = t;
+      ch->kept = false;
       if (i + 1u < sp->n) {
         uint64_t end = (uint64_t)ch->end * 8u;
 
@@ -1420,10 +1563,13 @@ spec_pass2(jspec_t *sp, jctx_t *x) {
       const jsync_t *a = &ch->rec[r], *e = &ch->cross;
 
       if (!ch->crossed) return false;
+      ch->m = *a;
       t.blk += e->blk - a->blk;
       for (k = 0; k < J_COMPS; k++) t.dc[k] = (int32_t)((uint32_t)t.dc[k] + (uint32_t)e->dc[k] - (uint32_t)a->dc[k]);
-      t.bit  = e->bit;
-      t.slot = e->slot;
+      t.bit    = e->bit;
+      t.slot   = e->slot;
+      ch->xs   = t;
+      ch->kept = ch->coef != NULL;
     }
   }
   /* starts in order, none past the end */
@@ -1433,16 +1579,26 @@ spec_pass2(jspec_t *sp, jctx_t *x) {
   return true;
 }
 
+/* whether a chunk's blocks are kept from (1) (a test build can say 0) */
+#ifndef J_KEEP
+#  define J_KEEP 1
+#endif
+
+/* chunks a thread at most (each at least 64K) */
+#ifndef J_CHUNKS
+#  define J_CHUNKS 1u
+#endif
+
 /* the one-pass sequential scan's single segment on `pool`; false with
    nothing written: decode it in order */
 static bool
 scan_spec(jpg_t *j, im_pool_t *pool, uint32_t w, uint32_t h, size_t margin, bool *done) {
   jspec_t  sp;
   jctx_t   ctx[IM_POOL_MAX];
-  jchunk_t ch[IM_POOL_MAX];
+  jchunk_t ch[J_CHUNKS * IM_POOL_MAX];
   size_t   len = j->sd.seg[0].end - j->sd.seg[0].start, part;
   uint32_t nw = im_pool_size(pool), i, s = 0;
-  bool     ok = false;
+  bool     ok = false, keep;
 
   *done = false;
   memset(&sp, 0, sizeof(sp));
@@ -1466,14 +1622,28 @@ scan_spec(jpg_t *j, im_pool_t *pool, uint32_t w, uint32_t h, size_t margin, bool
   }
   sp.nblk  = s;
   sp.total = w * h * s;
-  sp.n     = nw;
+  /* more chunks than threads, taken in turn: a slower core takes fewer */
+  sp.n     = J_CHUNKS * nw;
   if (len / sp.n < (64u << 10)) sp.n = (uint32_t)(len / (64u << 10));
   if (sp.n < 3u) return false;
   part = len / sp.n;
+  /* blocks kept where decoding them again would cost most: their data 4
+     bytes a block or more (less: the pages they'd take cost more than the
+     decoding they'd save, most on many threads) */
+  keep = J_KEEP && len >= (size_t)sp.total * 4u;
   for (i = 0; i < sp.n; i++) {
     ch[i].start  = part * i;
     ch[i].end    = i + 1u < sp.n ? part * (i + 1u) : len;
     ch[i].window = ((uint64_t)ch[i].start + (part / 2u < (16u << 10) ? part / 2u : (16u << 10))) * 8u;
+    /* room to start with: three times its share of the blocks, and of
+       its bytes (each a coefficient at most: 4 bytes a pair), whichever's
+       less (pages never touched cost nothing) */
+    if (keep && i + 1u < sp.n) {
+      uint64_t nblk = (uint64_t)sp.total * 3u / sp.n, a = nblk * 2u + ((uint64_t)part * 3u) * 2u, b = nblk * 128u;
+
+      ch[i].coefcap = (size_t)(a < b ? a : b) + 1024u;
+      ch[i].coef    = malloc(ch[i].coefcap * sizeof(int16_t));
+    }
   }
   for (i = 0; i < nw; i++) {
     if (!ctx_init(&ctx[i], j, margin)) {
@@ -1488,7 +1658,10 @@ scan_spec(jpg_t *j, im_pool_t *pool, uint32_t w, uint32_t h, size_t margin, bool
     *done = true;
   }
   for (i = 0; i < nw; i++) free(ctx[i].tail);
-  for (i = 0; i < sp.n; i++) free(ch[i].rec);
+  for (i = 0; i < sp.n; i++) {
+    free(ch[i].rec);
+    free(ch[i].coef);
+  }
   return ok;
 }
 
