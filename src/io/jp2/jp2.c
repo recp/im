@@ -1247,7 +1247,9 @@ enum { CX_RUN = 17, CX_UNI = 18, CX_COUNT = 19 };
    segment's bytes end in two 0xFF, a marker: ones from there, as OpenJPEG
    has it), the samples' states and values */
 typedef struct t1 {
-  uint32_t       a, c, ct;
+  uint32_t       a, ct;
+  uint64_t       c;     /* Annex C's C at bits 32–63 (C.3's Chigh at 48–63),
+                           ct bits of the stream under it */
   const uint8_t *bp;
   uint8_t        cx[CX_COUNT];
   uint32_t      *flags; /* a word a column of a stripe, a border round */
@@ -1265,22 +1267,38 @@ mq_reset(t1_t *t) {
   t->cx[0]      = 4u << 1;
 }
 
-/* the coder on locals a, c, ct, bp and cxs */
-#define MQ_BYTEIN()                                                                                                    \
+/* the coder on locals a, c, ct, bp and cxs. C is Annex C's moved up to
+   bits 32–63 (Chigh at 48–63), the stream's next ct bits under it, up to
+   48: bytes go in while fewer than 33 are, four at a time where none of
+   them follows a 0xFF. A byte after 0xFF goes in a bit higher (its top bit
+   a carry, C.3.4); one with that bit set only once ct is 0, as the
+   bit-at-a-time decoder has it (in a conforming stream there is none: a
+   damaged one decodes the same). A marker's 0xFF 0xFF: ones, the pointer
+   kept. Each segment ends in one (t1_block's), so the bytes read stop
+   there */
+#define MQ_FILL()                                                                                                      \
   do {                                                                                                                 \
-    if (*bp == 0xFFu) {                                                                                                \
-      if (bp[1] > 0x8Fu) {                                                                                             \
-        c += 0xFF00u;                                                                                                  \
-        ct = 8u;                                                                                                       \
+    while (ct < 33u) {                                                                                                 \
+      if (ct <= 16u && bp[0] != 0xFFu && bp[1] != 0xFFu && bp[2] != 0xFFu && bp[3] != 0xFFu) {                         \
+        c  += (uint64_t)be32(bp + 1) << (16u - ct);                                                                    \
+        ct += 32u;                                                                                                     \
+        bp += 4;                                                                                                       \
+      } else if (*bp == 0xFFu) {                                                                                       \
+        if (bp[1] > 0x8Fu) {                                                                                           \
+          c  += (uint64_t)0xFFu << (40u - ct);                                                                         \
+          ct += 8u;                                                                                                    \
+        } else if (bp[1] < 0x80u || !ct) {                                                                             \
+          bp++;                                                                                                        \
+          c  += (uint64_t)*bp << (41u - ct);                                                                           \
+          ct += 7u;                                                                                                    \
+        } else {                                                                                                       \
+          break;                                                                                                       \
+        }                                                                                                              \
       } else {                                                                                                         \
         bp++;                                                                                                          \
-        c += (uint32_t)*bp << 9;                                                                                       \
-        ct = 7u;                                                                                                       \
+        c  += (uint64_t)*bp << (40u - ct);                                                                             \
+        ct += 8u;                                                                                                      \
       }                                                                                                                \
-    } else {                                                                                                           \
-      bp++;                                                                                                            \
-      c += (uint32_t)*bp << 8;                                                                                         \
-      ct = 8u;                                                                                                         \
     }                                                                                                                  \
   } while (0)
 
@@ -1297,8 +1315,7 @@ mq_clz(uint32_t v) {
 #endif
 }
 
-/* a back to 0x8000 and up: the bits it needs at once, as many as the byte
-   holds (a byte in where it's done) — the bit-at-a-time loop's steps */
+/* A back to 0x8000 and up: the bits it needs, refilled as they run out */
 #define MQ_RENORM()                                                                                                    \
   do {                                                                                                                 \
     uint32_t n_ = mq_clz(a) - 16u;                                                                                     \
@@ -1306,7 +1323,7 @@ mq_clz(uint32_t v) {
     while (n_) {                                                                                                       \
       uint32_t s_;                                                                                                     \
                                                                                                                        \
-      if (!ct) MQ_BYTEIN();                                                                                            \
+      if (ct < n_) MQ_FILL();                                                                                          \
       s_ = n_ < ct ? n_ : ct;                                                                                          \
       a <<= s_;                                                                                                        \
       c <<= s_;                                                                                                        \
@@ -1322,7 +1339,7 @@ mq_clz(uint32_t v) {
     uint32_t     q_  = s_->qe;                                                                                         \
                                                                                                                        \
     a -= q_;                                                                                                           \
-    if ((c >> 16) < q_) {                                                                                              \
+    if ((c >> 48) < q_) {                                                                                              \
       if (a < q_) {                                                                                                    \
         (d)  = s_->mps;                                                                                                \
         *cx_ = s_->nmps;                                                                                               \
@@ -1333,7 +1350,7 @@ mq_clz(uint32_t v) {
       a = q_;                                                                                                          \
       MQ_RENORM();                                                                                                     \
     } else {                                                                                                           \
-      c -= q_ << 16;                                                                                                   \
+      c -= (uint64_t)q_ << 48;                                                                                                   \
       if (!(a & 0x8000u)) {                                                                                            \
         if (a < q_) {                                                                                                  \
           (d)  = s_->mps ^ 1u;                                                                                         \
@@ -1346,6 +1363,36 @@ mq_clz(uint32_t v) {
       } else {                                                                                                         \
         (d) = s_->mps;                                                                                                 \
       }                                                                                                                \
+    }                                                                                                                  \
+  } while (0)
+
+/* the same decision without a branch on it, for the passes whose
+   decisions are near even (significance propagation, refinement: a branch
+   there mispredicted often): an LPS where the exchange's test and A < Qe
+   disagree (C.3.2: the conditional exchange, MPS and LPS paths in one), A
+   and C by selects; the context's next state stored whenever A
+   renormalises (always past an LPS or an exchange). The shift at once
+   where C holds the bits, else MQ_RENORM's bytes in */
+#define MQ_DECODE_EVEN(d, ctx)                                                                                         \
+  do {                                                                                                                 \
+    uint8_t     *cx_ = &cxs[ctx];                                                                                      \
+    const mqs_t *s_  = &mq_states[*cx_];                                                                               \
+    uint32_t     q_  = s_->qe, lt_, lps_, n_;                                                                          \
+                                                                                                                       \
+    a   -= q_;                                                                                                         \
+    lt_  = (c >> 48) < q_;                                                                                             \
+    lps_ = lt_ ^ (uint32_t)(a < q_);                                                                                   \
+    (d)  = s_->mps ^ lps_;                                                                                             \
+    c    = lt_ ? c : c - ((uint64_t)q_ << 48);                                                                                   \
+    a    = lt_ ? q_ : a;                                                                                               \
+    n_   = mq_clz(a) - 16u;                                                                                            \
+    *cx_ = n_ ? (lps_ ? s_->nlps : s_->nmps) : *cx_;                                                                   \
+    if (n_ <= ct) {                                                                                                    \
+      a <<= n_;                                                                                                        \
+      c <<= n_;                                                                                                        \
+      ct -= n_;                                                                                                        \
+    } else {                                                                                                           \
+      MQ_RENORM();                                                                                                     \
     }                                                                                                                  \
   } while (0)
 
@@ -1370,7 +1417,8 @@ mq_clz(uint32_t v) {
   } while (0)
 
 #define T1_LOAD()                                                                                                      \
-  uint32_t       a = t->a, c = t->c, ct = t->ct;                                                                       \
+  uint32_t       a = t->a, ct = t->ct;                                                                                 \
+  uint64_t       c   = t->c;                                                                                           \
   const uint8_t *bp  = t->bp;                                                                                          \
   uint8_t       *cxs = t->cx
 
@@ -1388,9 +1436,9 @@ mq_start(t1_t *t, const uint8_t *s) {
 
   (void)cxs;
   bp = s;
-  c  = (uint32_t)*bp << 16;
+  c  = (uint64_t)*bp << 48;
   ct = 0;
-  MQ_BYTEIN();
+  MQ_FILL();
   c <<= 7;
   ct -= 7u;
   a = 0x8000u;
@@ -1510,15 +1558,17 @@ t1_tables(jpx_t *j) {
   } while (0)
 
 /* a sample's sign and value, made significant at row i */
-#define T1_SIGNIFY(i)                                                                                                  \
+#define T1_SIGNIFY_BY(i, DEC)                                                                                          \
   do {                                                                                                                 \
     uint32_t neg_, s_ = T1_SC(i);                                                                                      \
                                                                                                                        \
-    MQ_DECODE(neg_, s_ >> 1);                                                                                          \
+    DEC(neg_, s_ >> 1);                                                                                          \
     neg_ ^= s_ & 1u;                                                                                                   \
     d[(size_t)(i) * w] = neg_ ? -oph : oph;                                                                            \
     T1_MARK(i, neg_);                                                                                                  \
   } while (0)
+#define T1_SIGNIFY(i)      T1_SIGNIFY_BY(i, MQ_DECODE)
+#define T1_SIGNIFY_EVEN(i) T1_SIGNIFY_BY(i, MQ_DECODE_EVEN)
 
 #define SIG_ROW(i, raw)                                                                                                \
   do {                                                                                                                 \
@@ -1535,8 +1585,8 @@ t1_tables(jpx_t *j) {
           T1_MARK(i, neg_);                                                                                            \
         }                                                                                                              \
       } else {                                                                                                         \
-        MQ_DECODE(v_, zc[fi_ & 0x1FFu]);                                                                               \
-        if (v_) T1_SIGNIFY(i);                                                                                         \
+        MQ_DECODE_EVEN(v_, zc[fi_ & 0x1FFu]);                                                                          \
+        if (v_) T1_SIGNIFY_EVEN(i);                                                                                    \
       }                                                                                                                \
       f |= T_PI << (3u * (i));                                                                                         \
     }                                                                                                                  \
@@ -1549,7 +1599,7 @@ t1_tables(jpx_t *j) {
                                                                                                                        \
     if ((fi_ & (T_SIG | T_PI)) == T_SIG) {                                                                             \
       if (raw) RAW_DECODE(v_);                                                                                         \
-      else MQ_DECODE(v_, fi_ & T_MU ? 16u : fi_ & T_NEIGH ? 15u : 14u);                                                \
+      else MQ_DECODE_EVEN(v_, fi_ & T_MU ? 16u : fi_ & T_NEIGH ? 15u : 14u);                                                \
       *dv_ += (v_ ^ (uint32_t)(*dv_ < 0)) ? half : -half;                                                              \
       f |= T_MU << (3u * (i));                                                                                         \
     }                                                                                                                  \
