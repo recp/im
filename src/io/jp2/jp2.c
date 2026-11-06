@@ -274,6 +274,12 @@ typedef struct xscratch {
 
 enum { X_THREADS = 16 }; /* a decode's, the caller's among them */
 
+/* pixels a thread at least: none below twice this (a test build can lower
+   it); JPEG 2000's a pixel cost about five of JPEG's */
+#ifndef X_POOL_MIN
+#  define X_POOL_MIN (1u << 17)
+#endif
+
 struct jpx;
 typedef bool (*xjob_fn)(struct jpx *j, xscratch_t *s, void *ctx, uint32_t item);
 
@@ -2723,13 +2729,21 @@ pool_start(jpx_t *j) {
   if (j->threads && n > j->threads - 1u) n = j->threads - 1u;
   /* the caller's runner: its workers, no thread of ours */
   if (j->runner.run) {
-    if (j->runner.workers >= 2u && j->runner.workers <= X_THREADS && (uint64_t)(j->x1 - j->x0) * (j->y1 - j->y0) >= (1u << 18)) {
+    if (j->runner.workers >= 2u && j->runner.workers <= X_THREADS && (uint64_t)(j->x1 - j->x0) * (j->y1 - j->y0) >= X_POOL_MIN) {
       j->workers = j->runner.workers - 1u;
     }
     return;
   }
 
-  if (!n || (uint64_t)(j->x1 - j->x0) * (j->y1 - j->y0) < (1u << 18)) return;
+  /* a thread for each X_POOL_MIN pixels at most, the caller's among them
+     (below that a thread costs more than it saves) */
+  {
+    uint64_t each = (uint64_t)(j->x1 - j->x0) * (j->y1 - j->y0) / X_POOL_MIN;
+
+    if (each < 2u) return;
+    if (n > each - 1u) n = (uint32_t)(each - 1u);
+  }
+  if (!n) return;
   thread_mutex_init(&j->pool.m);
   thread_cond_init(&j->pool.go);
   thread_cond_init(&j->pool.idle);

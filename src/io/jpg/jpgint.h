@@ -30,9 +30,10 @@
 #include "../../common.h"
 #include "../../thread/pool.h"
 
-/* threads only from this many pixels (a test build can lower it) */
+/* pixels a thread at least: none below twice this, the rest one thread for
+   each (a test build can lower it) */
 #ifndef J_POOL_MIN
-#  define J_POOL_MIN (1u << 18)
+#  define J_POOL_MIN (1u << 19)
 #endif
 
 /* a frame's pixels a byte of its data past which the stream is read through

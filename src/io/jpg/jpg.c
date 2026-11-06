@@ -1221,9 +1221,19 @@ decode_stream(jpg_t *j, ImImage *im, ImByteOrder order, uint8_t **padp) {
         if ((uint64_t)j->width * j->height > (uint64_t)J_DRY * (uint64_t)(j->end - j->data) && !dry_run(j)) {
           return false;
         }
-        if ((uint64_t)j->width * j->height >= J_POOL_MIN && !j->hier && !j->pool) { /* a hierarchical one on one thread */
-          if (j->runner.run) j->pool = im_pool_wrap(&j->runner);
-          else if (j->threads > 1u) j->pool = im_pool_new(j->threads);
+        /* threads: one for each J_POOL_MIN pixels, no more than asked (below
+           that a thread's start and its share's edges cost more than it
+           saves); the caller's runner from J_POOL_MIN on; a hierarchical
+           sequence on one */
+        if (!j->hier && !j->pool) {
+          uint64_t px = (uint64_t)j->width * j->height, n = px / J_POOL_MIN;
+
+          if (j->runner.run) {
+            if (n) j->pool = im_pool_wrap(&j->runner);
+          } else {
+            if (n > j->threads) n = j->threads;
+            if (n > 1u) j->pool = im_pool_new((uint32_t)n);
+          }
         }
         j->multiscan = j->process != J_LOSSLESS && (j->process == J_PROGRESSIVE || j->nscomp < j->ncomp);
         if (!frame_alloc(j)) return false;
