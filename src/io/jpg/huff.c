@@ -233,11 +233,12 @@ huff_sym(jbits_t *b, const jhuff_t *h) {
    length holds; a DC symbol 15 at most (16 lossless) */
 IM_HIDE bool
 jpg_huff_build(jhuff_t *h, const uint8_t counts[16], const uint8_t *vals, bool dc, bool lossless) {
-  uint32_t len, i, p = 0u, code = 0u, total = 0u;
+  uint32_t len, i, p = 0u, code = 0u, total = 0u, end = 0u;
   uint16_t codes[256];
   uint8_t  sizes[256];
 
-  memset(h, 0, sizeof(*h));
+  /* all but the look-ups (those past the short codes cleared below) */
+  memset(&h->maxcode, 0, sizeof(*h) - offsetof(jhuff_t, maxcode));
   for (len = 1; len <= 16u; len++) total += counts[len - 1u];
   if (total > 256u) return false;
   memcpy(h->vals, vals, total);
@@ -266,24 +267,31 @@ jpg_huff_build(jhuff_t *h, const uint8_t counts[16], const uint8_t *vals, bool d
   }
   if (dc && h->maxsym > (lossless ? 16u : 15u)) return false;
 
-  /* one look: the code, and its value where both fit */
+  /* one look: the code, and its value where both fit; the short codes
+     fill the look-ups from the first on, one after another (canonical),
+     the rest none */
   for (i = 0; i < total; i++) {
-    uint32_t l = sizes[i], sym = h->vals[i], s = sym & 15u, first, span, f;
+    uint32_t l = sizes[i], sym = h->vals[i], s = sym & 15u, first, span, f, v;
 
     if (l > J_HBITS) break;
     first = (uint32_t)codes[i] << (J_HBITS - l);
     span  = 1u << (J_HBITS - l);
-    for (f = 0; f < span; f++) {
-      uint32_t e = l | sym << 8;
+    if (l + s <= J_HBITS && !(dc && sym == 16u)) {
+      /* its value's bits after the code: a run of look-ups each */
+      uint32_t run = 1u << (J_HBITS - l - s);
 
-      if (l + s <= J_HBITS && !(dc && sym == 16u)) {
-        uint32_t v = s ? ((first + f) >> (J_HBITS - l - s)) & ((1u << s) - 1u) : 0u;
+      for (v = 0; v < 1u << s; v++) {
+        uint32_t  e = (l + s) | J_FUSED | sym << 8 | (uint32_t)(uint16_t)extend(v, s) << 16;
+        uint32_t *q = h->fast + first + v * run;
 
-        e = (l + s) | J_FUSED | sym << 8 | (uint32_t)(uint16_t)extend(v, s) << 16;
+        for (f = 0; f < run; f++) q[f] = e;
       }
-      h->fast[first + f] = e;
+    } else {
+      for (f = 0; f < span; f++) h->fast[first + f] = l | sym << 8;
     }
+    end = first + span;
   }
+  memset(h->fast + end, 0, (J_HSIZE - end) * sizeof(h->fast[0]));
   h->ok = true;
   return true;
 }

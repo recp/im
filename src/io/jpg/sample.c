@@ -273,11 +273,11 @@ static bool
 ycc_tables(jycc_t *t, uint32_t max, uint32_t n) {
   uint32_t i, centre = (max + 1u) / 2u;
 
-  t->cr_r = malloc(n * sizeof(*t->cr_r));
-  t->cb_b = malloc(n * sizeof(*t->cb_b));
-  t->cr_g = malloc(n * sizeof(*t->cr_g));
-  t->cb_g = malloc(n * sizeof(*t->cb_g));
-  if (!t->cr_r || !t->cb_b || !t->cr_g || !t->cb_g) return false;
+  /* the four in one block: the 64-bit two first */
+  if (!(t->cr_g = malloc((size_t)n * (2u * sizeof(int64_t) + 2u * sizeof(int32_t))))) return false;
+  t->cb_g = t->cr_g + n;
+  t->cr_r = (int32_t *)(void *)(t->cb_g + n);
+  t->cb_b = t->cr_r + n;
   for (i = 0; i < n; i++) {
     int64_t x = (int64_t)i - centre;
 
@@ -291,10 +291,7 @@ ycc_tables(jycc_t *t, uint32_t max, uint32_t n) {
 
 static void
 ycc_free(jycc_t *t) {
-  free(t->cr_r);
-  free(t->cb_b);
   free(t->cr_g);
-  free(t->cb_g);
 }
 
 IM_INLINE int32_t
