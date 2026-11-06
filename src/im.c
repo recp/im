@@ -150,6 +150,9 @@ static const imloader extmap[256] = {
 #if IM_WITH_BMP
   [0x06] = dib_dec,         /* dib  */
 #endif
+#if IM_WITH_JP2
+  [0x0A] = jp2_dec,         /* jph  */
+#endif
 #if IM_WITH_PPM
   [0x1F] = ppm_dec,         /* ppm  */
 #endif
@@ -194,6 +197,9 @@ static const imloader extmap[256] = {
 #endif
 #if IM_WITH_JP2
   [0xBB] = jp2_dec,         /* jpc  */
+#endif
+#if IM_WITH_JP2
+  [0xD8] = jp2_dec,         /* jhc  */
 #endif
 #if IM_WITH_TGA
   [0xEA] = tga_dec,         /* tga  */
@@ -252,6 +258,8 @@ static void __attribute__((constructor)) verify_hashes(void) {
   print_ext_hash("jpc");
   print_ext_hash("jpf");
   print_ext_hash("jpx");
+  print_ext_hash("jph");
+  print_ext_hash("jhc");
   printf("-------------------\n");
 }
 #endif

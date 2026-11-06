@@ -15,9 +15,10 @@
  */
 
 /*
- * JPEG 2000 (ISO/IEC 15444-1), im's own: a JP2 file or a bare codestream;
- * tiles and tile-parts, precincts, the five progressions and POC, layers,
- * every code-block style but HT, packet headers in PPM or PPT, SOP and EPH,
+ * JPEG 2000 (ISO/IEC 15444-1), im's own: a JP2 (or JPH) file or a bare
+ * codestream; tiles and tile-parts, precincts, the five progressions and
+ * POC, layers, every code-block style, HT code-blocks (ISO/IEC 15444-15: a
+ * tile-component's all, one HT set), packet headers in PPM or PPT, SOP and EPH,
  * ROI's max-shift; the 5/3 and 9/7 wavelets, both colour transforms,
  * subsampled components; a JP2's palette, component mapping and channel
  * definitions, sYCC. The arithmetic is OpenJPEG's: its 9/7 constants and
@@ -257,6 +258,7 @@ typedef struct xscratch {
   size_t    bytes_cap;
   void     *lift;
   size_t    lift_len;
+  uint8_t  *ht;       /* an HT code-block's state (HT_SCRATCH bytes) */
 } xscratch_t;
 
 enum { X_THREADS = 16 }; /* a decode's, the caller's among them */
@@ -303,6 +305,7 @@ typedef struct jpx {
   uint32_t   threads; /* at most, the caller's among them; 0 as many as help */
   im_runner_t runner;  /* the caller's threads (run NULL: none) */
   uint8_t    zc[4][512], sc[256];
+  uint16_t   htv[2][8][128]; /* HT code-blocks' CxtVLC lookup (ht_tables) */
 } jpx_t;
 
 /* SPcod / SPcoc: the coding parts of `c` */
@@ -316,8 +319,10 @@ read_spcod(xcc_t *c, const uint8_t *s, size_t len, bool precincts) {
   c->ycb        = (uint8_t)((s[2] & 15u) + 2u);
   c->style      = s[3];
   c->reversible = s[4] == 1u;
+  /* HT code-blocks a tile-component's all or none (T.814 A.4: bit 7 their
+     mix, not read) */
   if (c->levels > X_LEVELS || c->xcb > 10u || c->ycb > 10u || c->xcb + c->ycb > 12u || s[4] > 1u
-      || (c->style & CB_HT)) {
+      || (c->style & 0x80u)) {
     return false;
   }
   for (i = 0; i <= c->levels; i++) {
@@ -768,7 +773,8 @@ seg_add(xtile_t *t, xcblk_t *b, uint32_t s, uint8_t style) {
   }
   g = &b->segs[s];
   memset(g, 0, sizeof(*g));
-  if (style & CB_TERMALL) g->max = 1u;
+  if (style & CB_HT) g->max = !s ? 1u : 109u; /* the cleanup pass alone, then the rest (as OpenJPEG) */
+  else if (style & CB_TERMALL) g->max = 1u;
   else if (style & CB_BYPASS) g->max = !s ? 10u : (b->segs[s - 1u].max == 1u || b->segs[s - 1u].max == 10u) ? 2u : 1u;
   else g->max = 109u;
   return true;
@@ -1362,10 +1368,13 @@ enum {
   T_PIS   = T_PI | T_PI << 3 | T_PI << 6 | T_PI << 9
 };
 
+static void ht_tables(jpx_t *j);
+
 static void
 t1_tables(jpx_t *j) {
   uint32_t i, o;
 
+  ht_tables(j);
   for (o = 0; o < 4u; o++) {
     for (i = 0; i < 512u; i++) {
       uint32_t v = (i >> 1 & 1u) + (i >> 7 & 1u), h = (i >> 3 & 1u) + (i >> 5 & 1u);
@@ -1645,6 +1654,538 @@ t1_cleanup(t1_t *t, uint32_t bpl, bool segsym) {
   t1_cleanup_(t, bpl, segsym, t->w, t->h, t->causal);
 }
 
+/* -- HT code-blocks (Rec. ITU-T T.814 | ISO/IEC 15444-15, clause 7) ----------------- */
+
+/* Annex C's CxtVLC tables, an entry a word: c_q (3 bits), rho_q (4),
+   u_off (1), e_k (4), e_1 (4), the codeword w (7, its first bit the
+   lowest) and its length (3) */
+static const uint32_t ht_vlc0[444] = {
+  0x2060008, 0x3BF1188, 0x1800010, 0x3FF2290, 0x2910018, 0x3DF2298, 0x39F1398, 0x1820020, 0x31344A0,
+  0x28E0028, 0x32344A8, 0x38F15A8, 0x3030030, 0x3EF00B0, 0x3AF0038, 0x3CF22B8, 0x30D02B8, 0x1840040,
+  0x33D88C0, 0x31D0048, 0x32D00C8, 0x2810050, 0x33588D0, 0x3F72AD0, 0x3B70058, 0x3D711D8, 0x30901D8,
+  0x29E0060, 0x397CCE0, 0x3154CE0, 0x3258CE0, 0x3E70068, 0x3A711E8, 0x3C745E8, 0x3878DE8, 0x3FB0070,
+  0x3CB22F0, 0x3058AF0, 0x3BB4EF0, 0x3DB0078, 0x39B99F8, 0x3EBABF8, 0x3ABCFF8, 0x3398FF8, 0x3F36EF8,
+  0x3192EF8, 0x38B5FF8, 0x3294FF8, 0x3B31FF8, 0x1000001, 0x20E0009, 0x39F1189, 0x2060011, 0x33B2291,
+  0x31B0019, 0x33D0099, 0x20A0021, 0x32B44A1, 0x30B0029, 0x33344A9, 0x3FF15A9, 0x3130031, 0x32300B1,
+  0x3BF0039, 0x3DF22B9, 0x30302B9, 0x2020041, 0x31D88C1, 0x32D0049, 0x30D00C9, 0x3350051, 0x31588D1,
+  0x3EF2AD1, 0x3AF0059, 0x3CF11D9, 0x31101D9, 0x2810061, 0x32588E1, 0x3054CE1, 0x38F0069, 0x39711E9,
+  0x33945E9, 0x3F78DE9, 0x3B70071, 0x3D722F1, 0x3198AF1, 0x3E74EF1, 0x3870079, 0x3298BF9, 0x3A788F9,
+  0x3092AF9, 0x3314EF9, 0x3C71FF9, 0x1000002, 0x20E000A, 0x31B118A, 0x2060012, 0x3BF2292, 0x32B001A,
+  0x333119A, 0x3FF239A, 0x20A0022, 0x30B44A2, 0x281002A, 0x3AF55AA, 0x31315AA, 0x32345AA, 0x3030032,
+  0x3DF00B2, 0x39F003A, 0x3EF22BA, 0x31113BA, 0x3B747BA, 0x2020042, 0x3CF88C2, 0x33D004A, 0x31D00CA,
+  0x32D0052, 0x30D00D2, 0x38F005A, 0x3F722DA, 0x33502DA, 0x3150062, 0x32544E2, 0x3D78CE2, 0x397006A,
+  0x30588EA, 0x3394CEA, 0x3E71DEA, 0x3A70072, 0x3FB22F2, 0x31902F2, 0x3C7007A, 0x3291FFA, 0x30911FA,
+  0x38723FA, 0x33147FA, 0x3BB8FFA, 0x1800003, 0x204000B, 0x33D118B, 0x28C0013, 0x3CF2293, 0x31D001B,
+  0x305119B, 0x3FF239B, 0x2960023, 0x32D44A3, 0x286002B, 0x29A55AB, 0x30D15AB, 0x33545AB, 0x3BF0033,
+  0x3DF44B3, 0x39F26B3, 0x3EF003B, 0x3AF66BB, 0x31546BB, 0x3F737BB, 0x32517BB, 0x38F27BB, 0x28A0043,
+  0x38788C3, 0x339004B, 0x3B711CB, 0x3D789CB, 0x3190053, 0x32988D3, 0x3972AD3, 0x3E7005B, 0x3A71BDB,
+  0x3C711DB, 0x30923DB, 0x3FB8BDB, 0x3310063, 0x31144E3, 0x3BB8CE3, 0x3DB006B, 0x39B99EB, 0x3AB5DEB,
+  0x3211DEB, 0x3EBCDEB, 0x3014DEB, 0x3CB8DEB, 0x38B0073, 0x3F34EF3, 0x39344F3, 0x33E8CF3, 0x3B32EF3,
+  0x3D3007B, 0x30EAAFB, 0x3E39BFB, 0x383CFFB, 0x2928FFB, 0x3A36EFB, 0x31E5FFB, 0x2824FFB, 0x3C33FFB,
+  0x29C1FFB, 0x32E2FFB, 0x1000004, 0x20E000C, 0x3BF118C, 0x2060014, 0x31B2294, 0x32B001C, 0x33D229C,
+  0x3FF139C, 0x20A0024, 0x3DF44A4, 0x30B002C, 0x33300AC, 0x3130034, 0x32300B4, 0x39F003C, 0x3EF44BC,
+  0x30304BC, 0x2020044, 0x31D88C4, 0x311004C, 0x3F700CC, 0x2810054, 0x3AFAAD4, 0x32D2AD4, 0x30D8AD4,
+  0x3CF005C, 0x38F2BDC, 0x33500DC, 0x3150064, 0x32588E4, 0x3B74CE4, 0x3D7006C, 0x38711EC, 0x30501EC,
+  0x3970074, 0x33944F4, 0x3198CF4, 0x3E72EF4, 0x3A7007C, 0x3C799FC, 0x32919FC, 0x3FB67FC, 0x30927FC,
+  0x3318BFC, 0x3BB4FFC, 0x1800005, 0x29A000D, 0x3FF118D, 0x28A0015, 0x31D2295, 0x32D001D, 0x3DF339D,
+  0x339239D, 0x3BF139D, 0x2920025, 0x39F44A5, 0x30D002D, 0x33544AD, 0x3EF15AD, 0x3150035, 0x32522B5,
+  0x3AF46B5, 0x3CF003D, 0x3D766BD, 0x30546BD, 0x38F37BD, 0x3F727BD, 0x3B717BD, 0x2820045, 0x31988C5,
+  0x326004D, 0x39788CD, 0x3E719CD, 0x29C0055, 0x329AAD5, 0x3092AD5, 0x3318AD5, 0x3A7005D, 0x38799DD,
+  0x31189DD, 0x3C73BDD, 0x3212BDD, 0x3FB1BDD, 0x3010065, 0x33E88E5, 0x3BB4CE5, 0x3DB006D, 0x3EB99ED,
+  0x31E89ED, 0x39B5DED, 0x32E4DED, 0x3AB1DED, 0x3CB0075, 0x38B66F5, 0x3B3AEF5, 0x30E2EF5, 0x3F3CEF5,
+  0x3368EF5, 0x3D34EF5, 0x393007D, 0x3C377FD, 0x31667FD, 0x3E357FD, 0x3A3CFFD, 0x28C4FFD, 0x3839DFD,
+  0x3BDAFFD, 0x2948FFD, 0x3FD3FFD, 0x2842FFD, 0x3061FFD, 0x1800006, 0x204000E, 0x303118E, 0x28C0016,
+  0x30D2296, 0x29A001E, 0x33D339E, 0x31D139E, 0x32D239E, 0x28A0026, 0x3BF44A6, 0x335002E, 0x31511AE,
+  0x3FF45AE, 0x3250036, 0x3DF22B6, 0x39F46B6, 0x3EF003E, 0x3CF66BE, 0x30546BE, 0x3AF37BE, 0x33617BE,
+  0x3F727BE, 0x2920046, 0x38F88C6, 0x339004E, 0x3B711CE, 0x3D789CE, 0x3190056, 0x32922D6, 0x3978AD6,
+  0x3E7005E, 0x3C799DE, 0x30919DE, 0x3A7ABDE, 0x3312BDE, 0x3FB8BDE, 0x3110066, 0x387CCE6, 0x3218CE6,
+  0x3BB4CE6, 0x3DB006E, 0x3B355EE, 0x30145EE, 0x39B8CEE, 0x3EB1DEE, 0x3AB0076, 0x3CB2EF6, 0x38B22F6,
+  0x3F3CEF6, 0x33E8EF6, 0x3D34EF6, 0x393007E, 0x31E66FE, 0x32EAEFE, 0x30E3FFE, 0x2822FFE, 0x3E39BFE,
+  0x316CFFE, 0x3068FFE, 0x3A35FFE, 0x29C1FFE, 0x3264FFE, 0x2920007, 0x305000F, 0x3FF118F, 0x3390017,
+  0x3BF2297, 0x3DF001F, 0x39F339F, 0x3EF239F, 0x3AF139F, 0x3CF0027, 0x38F44A7, 0x3D7002F, 0x31911AF,
+  0x3F745AF, 0x3B70037, 0x32900B7, 0x397003F, 0x3E766BF, 0x3A737BF, 0x3C727BF, 0x39B57BF, 0x30917BF,
+  0x38747BF, 0x3FB0047, 0x3BB88C7, 0x3DB004F, 0x33100CF, 0x3D30057, 0x31122D7, 0x3EB8AD7, 0x3AB005F,
+  0x3CB99DF, 0x38B3BDF, 0x3F31BDF, 0x3B3ABDF, 0x3212BDF, 0x3938BDF, 0x3E30067, 0x3A388E7, 0x3C34CE7,
+  0x383006F, 0x3FD99EF, 0x3DD5DEF, 0x3011DEF, 0x3BDCDEF, 0x33E4DEF, 0x39D8DEF, 0x3ED0077, 0x3AD66F7,
+  0x38DAEF7, 0x31E2EF7, 0x3CDCEF7, 0x30E8EF7, 0x3F54EF7, 0x395007F, 0x286FFFF, 0x3B5DFFF, 0x3D57FFF,
+  0x29A5FFF, 0x3A5BFFF, 0x28A3FFF, 0x32E9FFF, 0x2001FFF, 0x3E5EFFF, 0x3366FFF, 0x282AFFF, 0x20C2FFF,
+  0x316CFFF, 0x2048FFF, 0x2084FFF
+};
+static const uint32_t ht_vlc1[358] = {
+  0x1800008, 0x3271188, 0x1860010, 0x3172290, 0x28D0018, 0x33B0098, 0x1820020, 0x30744A0, 0x2950028,
+  0x32B00A8, 0x2810030, 0x3FF00B0, 0x39F0038, 0x31B00B8, 0x1840040, 0x28588C0, 0x2990048, 0x31300C8,
+  0x2890050, 0x30B88D0, 0x3BF2AD0, 0x3DF0058, 0x33300D8, 0x2910060, 0x32388E0, 0x3EF4CE0, 0x38F0068,
+  0x30300E8, 0x3AF0070, 0x3CF44F0, 0x33D04F0, 0x3F70078, 0x3B711F8, 0x31D01F8, 0x0800001, 0x2050009,
+  0x3FF1189, 0x2090011, 0x39F2291, 0x29D0019, 0x3BF1199, 0x3DF2399, 0x28D0021, 0x3B744A1, 0x3030029,
+  0x3EF00A9, 0x3AF0031, 0x3CF00B1, 0x38F0039, 0x3F700B9, 0x2010041, 0x39788C1, 0x30B0049, 0x3D700C9,
+  0x3330051, 0x3E700D1, 0x3A70059, 0x3AB00D9, 0x3130061, 0x3C700E1, 0x3870069, 0x3FB00E9, 0x3BB0071,
+  0x3DB00F1, 0x39B0079, 0x3EB44F9, 0x32304F9, 0x0800002, 0x209000A, 0x3FF118A, 0x2010012, 0x3232292,
+  0x33D001A, 0x3BF229A, 0x39F139A, 0x2950022, 0x3DF44A2, 0x303002A, 0x3EF00AA, 0x3AF0032, 0x3CF00B2,
+  0x38F003A, 0x39700BA, 0x2850042, 0x3F788C2, 0x3B7004A, 0x3D700CA, 0x31D0052, 0x3FBAAD2, 0x32D2AD2,
+  0x3E78AD2, 0x3A7005A, 0x3C72BDA, 0x38700DA, 0x30D0062, 0x3BB00E2, 0x3DB006A, 0x39B00EA, 0x3EB0072,
+  0x3AB44F2, 0x3CB04F2, 0x38B007A, 0x3F344FA, 0x3B315FA, 0x3D327FA, 0x3938FFA, 0x1000003, 0x20A000B,
+  0x30B118B, 0x2020013, 0x3232293, 0x28E001B, 0x3FF339B, 0x333239B, 0x313139B, 0x2960023, 0x3BF44A3,
+  0x303002B, 0x33D11AB, 0x39F45AB, 0x31D0033, 0x3DF00B3, 0x32D003B, 0x3AF44BB, 0x31E15BB, 0x3EF27BB,
+  0x2860043, 0x3CF88C3, 0x30D004B, 0x33500CB, 0x3150053, 0x32522D3, 0x38F8AD3, 0x305005B, 0x33988DB,
+  0x3973BDB, 0x3192BDB, 0x3F71BDB, 0x3290063, 0x30900E3, 0x3B7006B, 0x3D744EB, 0x33104EB, 0x3E70073,
+  0x3A744F3, 0x3C78CF3, 0x3EB2EF3, 0x311007B, 0x38766FB, 0x3FB37FB, 0x3BBAFFB, 0x3212FFB, 0x3018FFB,
+  0x3DB8AFB, 0x39B5FFB, 0x33E1FFB, 0x3AB4FFB, 0x0800004, 0x28D000C, 0x3FF118C, 0x2950014, 0x3BF2294,
+  0x3DF001C, 0x3EF009C, 0x2090024, 0x32344A4, 0x333002C, 0x39F00AC, 0x3130034, 0x3AF00B4, 0x3CF003C,
+  0x3D700BC, 0x2010044, 0x38F88C4, 0x3F7004C, 0x3B700CC, 0x31D0054, 0x39700D4, 0x3E7005C, 0x3EB00DC,
+  0x2850064, 0x3A7CCE4, 0x3C78CE4, 0x3874CE4, 0x3FB006C, 0x3BB00EC, 0x3DB0074, 0x39B22F4, 0x30302F4,
+  0x3AB007C, 0x3CB11FC, 0x38B23FC, 0x33D03FC, 0x1000005, 0x29E000D, 0x33B118D, 0x28A0015, 0x3BF2295,
+  0x31B001D, 0x30B009D, 0x2020025, 0x32B44A5, 0x28E002D, 0x33344AD, 0x3FF15AD, 0x3130035, 0x3EF00B5,
+  0x323003D, 0x3DF22BD, 0x31502BD, 0x2960045, 0x30388C5, 0x33D004D, 0x39F00CD, 0x31D0055, 0x32D00D5,
+  0x30D005D, 0x3CF11DD, 0x33501DD, 0x2860065, 0x32544E5, 0x3AF8CE5, 0x305006D, 0x3F711ED, 0x33945ED,
+  0x38F8DED, 0x3190075, 0x3D722F5, 0x3018AF5, 0x3B74EF5, 0x29A007D, 0x39799FD, 0x3E75DFD, 0x3873FFD,
+  0x3291FFD, 0x3A767FD, 0x309CFFD, 0x3314FFD, 0x3C7AFFD, 0x3118FFD, 0x3212FFD, 0x1800006, 0x202000E,
+  0x303118E, 0x20C0016, 0x33D2296, 0x31D001E, 0x30D229E, 0x3FF139E, 0x2040026, 0x32D44A6, 0x28A002E,
+  0x33544AE, 0x3AF15AE, 0x3150036, 0x3BF22B6, 0x3DF46B6, 0x325003E, 0x32922BE, 0x39F13BE, 0x3EF47BE,
+  0x2960046, 0x30588C6, 0x339004E, 0x31900CE, 0x2860056, 0x38FAAD6, 0x3092AD6, 0x3CF8AD6, 0x30E005E,
+  0x3F72BDE, 0x3B722DE, 0x3D78ADE, 0x3C71BDE, 0x29A0066, 0x397CCE6, 0x3E78CE6, 0x3A74CE6, 0x331006E,
+  0x3874DEE, 0x3FB44EE, 0x3BB8CEE, 0x3AB1DEE, 0x3110076, 0x3DB4EF6, 0x39B44F6, 0x3EBAEF6, 0x3218EF6,
+  0x3B32EF6, 0x301007E, 0x3CB33FE, 0x38B67FE, 0x3F3AFFE, 0x33E2FFE, 0x3D39BFE, 0x3E3CFFE, 0x31E8FFE,
+  0x3935FFE, 0x32E4FFE, 0x3A31FFE, 0x2040007, 0x333000F, 0x313118F, 0x3230017, 0x3FF2297, 0x303001F,
+  0x3BF119F, 0x3EF239F, 0x32D0027, 0x3DF44A7, 0x296002F, 0x33D11AF, 0x39F45AF, 0x31D0037, 0x3F700B7,
+  0x286003F, 0x3AF47BF, 0x3CF44BF, 0x38F37BF, 0x30D17BF, 0x3D727BF, 0x3350047, 0x3B788C7, 0x315004F,
+  0x3A700CF, 0x3250057, 0x32900D7, 0x29A005F, 0x3971BDF, 0x3E711DF, 0x30523DF, 0x3FB8BDF, 0x3390067,
+  0x31900E7, 0x28C006F, 0x3C71DEF, 0x38711EF, 0x30945EF, 0x39B8DEF, 0x3310077, 0x3BB2EF7, 0x3DB22F7,
+  0x33E8AF7, 0x38B4EF7, 0x180007F, 0x3EBFFFF, 0x3AB7FFF, 0x3CBBFFF, 0x3113FFF, 0x32167FF, 0x301AFFF,
+  0x28A2FFF, 0x31E9BFF, 0x30ECFFF, 0x2928FFF, 0x32E5FFF, 0x2821FFF, 0x29C4FFF
+};
+
+/* a decoder's lookup (jpx_t's htv): by the quad-type, the context and the
+   next 7 bits (the first the lowest), its codeword's length (3 bits),
+   rho (4), u_off (1), e_k (4), e_1 (4) */
+static void
+ht_tables(jpx_t *j) {
+  uint32_t t, k, v;
+
+  for (t = 0; t < 2u; t++) {
+    const uint32_t *tab = t ? ht_vlc1 : ht_vlc0;
+    uint32_t        n   = t ? (uint32_t)(sizeof(ht_vlc1) / sizeof(ht_vlc1[0])) : (uint32_t)(sizeof(ht_vlc0) / sizeof(ht_vlc0[0]));
+
+    for (k = 0; k < n; k++) {
+      uint32_t e = tab[k], c = e & 7u, w = (e >> 16) & 0x7Fu, lw = e >> 23;
+
+      for (v = 0; v < 128u; v++) {
+        if ((v & ((1u << lw) - 1u)) == w) j->htv[t][c][v] = (uint16_t)(lw | ((e >> 3) & 0x1FFFu) << 3);
+      }
+    }
+  }
+}
+
+/* the bit-streams of 7.1, a word of bits at a time: MagSgn and SigProp
+   forward, their bits LSB first, a byte after an 0xFF giving 7 (its MSB a
+   stuffing 0); VLC and MagRef backward, a byte giving 7 where its seven
+   LSBs are 1s and the one before was above 0x8F; MEL forward, MSB first,
+   7 after an 0xFF. Past its bytes: MagSgn 0xFFs (the first one an encoder
+   may leave out; more, a stream that doesn't conform), MEL 0xFFs, the
+   others zeros */
+typedef struct htfw {
+  const uint8_t *p, *end;
+  uint64_t       buf;
+  uint32_t       n, last, fill;
+} htfw_t;
+
+typedef struct htbw {
+  const uint8_t *p, *start;   /* the next byte: p - 1, down to start */
+  uint64_t       buf;
+  uint32_t       n, last;
+} htbw_t;
+
+typedef struct htmel {
+  const uint8_t *p, *end;
+  uint32_t       bits, tmp;
+  int32_t        k, run, one;
+} htmel_t;
+
+static const uint8_t mel_e[13] = { 0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 4, 5 };
+
+IM_INLINE void
+fw_init(htfw_t *r, const uint8_t *p, size_t len, uint32_t fill) {
+  r->p    = p;
+  r->end  = p + len;
+  r->buf  = 0;
+  r->n    = 0;
+  r->last = 0;
+  r->fill = fill;
+}
+
+IM_INLINE void
+fw_refill(htfw_t *r) {
+  while (r->n <= 56u) {
+    uint32_t b;
+
+    if (r->p < r->end) {
+      b = *r->p++;
+    } else {
+      b       = r->fill;
+      r->fill = r->fill == 0xFFu ? 0xFFu : 0u;
+    }
+    r->buf |= (uint64_t)(r->last == 0xFFu ? b & 0x7Fu : b) << r->n;
+    r->n += r->last == 0xFFu ? 7u : 8u;
+    r->last = b;
+  }
+}
+
+/* m bits (up to 32), the first the lowest */
+IM_INLINE uint32_t
+fw_bits(htfw_t *r, uint32_t m) {
+  uint32_t v;
+
+  if (r->n < m) fw_refill(r);
+  v = (uint32_t)(r->buf & (((uint64_t)1 << m) - 1u));
+  r->buf >>= m;
+  r->n -= m;
+  return v;
+}
+
+IM_INLINE void
+bw_refill(htbw_t *r) {
+  while (r->n <= 56u) {
+    uint32_t b = r->p > r->start ? *--r->p : 0u, k = 8u;
+
+    if (r->last > 0x8Fu && (b & 0x7Fu) == 0x7Fu) k = 7u;
+    r->buf |= (uint64_t)(b & ((1u << k) - 1u)) << r->n;
+    r->n += k;
+    r->last = b;
+  }
+}
+
+IM_INLINE uint32_t
+bw_peek(htbw_t *r) {
+  if (r->n < 16u) bw_refill(r);
+  return (uint32_t)r->buf;
+}
+
+IM_INLINE void
+bw_skip(htbw_t *r, uint32_t m) {
+  r->buf >>= m;
+  r->n -= m;
+}
+
+static uint32_t
+mel_bit(htmel_t *s) {
+  if (!s->bits) {
+    s->bits = s->tmp == 0xFFu ? 7u : 8u;
+    /* modDcup: the segment's last byte 0xFF, the one before its 4 LSBs 1s */
+    if (s->p + 1 < s->end) s->tmp = s->p + 2 == s->end ? *s->p | 0x0Fu : *s->p;
+    else s->tmp = 0xFFu;
+    if (s->p < s->end) s->p++;
+  }
+  s->bits--;
+  return (s->tmp >> s->bits) & 1u;
+}
+
+/* decodeMELSym (7.3.3) */
+static uint32_t
+mel_sym(htmel_t *s) {
+  if (!s->run && !s->one) {
+    uint32_t eval = mel_e[s->k];
+
+    if (mel_bit(s)) {
+      s->run = 1 << eval;
+      s->k   = s->k + 1 < 12 ? s->k + 1 : 12;
+    } else {
+      s->run = 0;
+      while (eval--) s->run = 2 * s->run + (int32_t)mel_bit(s);
+      s->k   = s->k > 0 ? s->k - 1 : 0;
+      s->one = 1;
+    }
+  }
+  if (s->run > 0) {
+    s->run--;
+    return 0u;
+  }
+  s->one = 0;
+  return 1u;
+}
+
+/* a U-VLC (7.3.6) from the VLC bits: its prefix 1, 2, 3 or 5 (1 to 3 bits) */
+IM_INLINE uint32_t
+u_prefix(htbw_t *v) {
+  uint32_t b = bw_peek(v);
+
+  if (b & 1u) { bw_skip(v, 1u); return 1u; }
+  if (b & 2u) { bw_skip(v, 2u); return 2u; }
+  bw_skip(v, 3u);
+  return b & 4u ? 3u : 5u;
+}
+
+IM_INLINE uint32_t
+u_suffix(htbw_t *v, uint32_t pfx) {
+  uint32_t b;
+
+  if (pfx < 3u) return 0u;
+  b = bw_peek(v);
+  if (pfx == 3u) {
+    bw_skip(v, 1u);
+    return b & 1u;
+  }
+  bw_skip(v, 5u);
+  return b & 31u;
+}
+
+IM_INLINE uint32_t
+u_ext(htbw_t *v, uint32_t sfx) {
+  uint32_t b;
+
+  if (sfx < 28u) return 0u;
+  b = bw_peek(v);
+  bw_skip(v, 4u);
+  return b & 15u;
+}
+
+/* the bits v takes (0 for 0) */
+IM_INLINE uint32_t
+bitlen64(uint64_t v) {
+#if defined(_MSC_VER) && !defined(__clang__)
+  unsigned long i;
+
+  return _BitScanReverse64(&i, v) ? (uint32_t)i + 1u : 0u;
+#else
+  return v ? 64u - (uint32_t)__builtin_clzll(v) : 0u;
+#endif
+}
+
+/* An HT code-block's samples into `out` (w × h, zeros, OpenJPEG's form, as
+   the T.800 passes leave theirs): the cleanup's magnitude mu at the plane
+   below p, its bin's centre, (2 mu + 1) << (p - 1); SigProp's newly
+   significant at the plane under it, 3 << (p - 2); MagRef's bit r there,
+   (2 mu + r) << (p - 1) | 1 << (p - 2). z the passes (1 to 3), `bound` the
+   largest exponent a quad may have (the zero bit-planes and one), `st` a
+   byte a padded sample (bit 0 the cleanup's significance, 1 SigProp's).
+   False: a stream that doesn't conform (`out` then to be cleared) */
+static bool
+ht_block(const uint16_t (*htv)[8][128], uint8_t *st, const uint8_t *cup, uint32_t lcup, const uint8_t *ref,
+         uint32_t lref, uint32_t w, uint32_t h, uint32_t p, uint32_t z, uint32_t bound, bool causal, int32_t *out) {
+  htfw_t   ms;
+  htbw_t   vlc;
+  htmel_t  mel;
+  uint32_t qw = (w + 1u) / 2u, qh = (h + 1u) / 2u, W = qw * 2u, scup, pcup, qx, qy, x, y, last;
+  uint8_t *eprev = st + (size_t)W * (qh * 2u), *ecur = eprev + W + 2u;
+  bool     bad = false;
+
+  if (lcup < 2u) return false;
+  scup = 16u * cup[lcup - 1u] + (cup[lcup - 2u] & 0x0Fu);
+  if (scup < 2u || scup > lcup || scup > 4079u) return false;
+  pcup = lcup - scup;
+  memset(st, 0, (size_t)W * (qh * 2u) + 2u * (W + 2u));
+
+  fw_init(&ms, cup, pcup, 0xFFu);
+  memset(&mel, 0, sizeof(mel));
+  mel.p   = cup + pcup;
+  mel.end = cup + lcup;
+  /* VLC: Scup's 12 bits skipped, the bytes to Pcup (the last two read as
+     modDcup has them) */
+  last      = cup[lcup - 2u] | 0x0Fu;
+  vlc.start = cup + pcup;
+  vlc.p     = cup + lcup - 2u;
+  vlc.buf   = last >> 4;
+  vlc.n     = ((last >> 4) & 7u) < 7u ? 4u : 3u;
+  vlc.last  = last;
+  if (vlc.n == 3u) vlc.buf &= 7u;
+
+  for (qy = 0; qy < qh; qy++) {
+    const uint16_t (*tab)[128] = htv[qy ? 1u : 0u];
+    uint8_t        *s0 = st + (size_t)(2u * qy) * W, *s1 = s0 + W, *sa = qy ? s0 - W : NULL;
+    int32_t        *o0 = out + (size_t)(2u * qy) * w, *o1 = o0 + w;
+    bool            row1 = 2u * qy + 1u < h;
+
+    for (qx = 0; qx < qw; qx += 2u) {
+      uint32_t inf[2] = { 0, 0 }, u[2] = { 0, 0 }, pfx[2] = { 0, 0 }, sfx[2] = { 0, 0 }, ext[2] = { 0, 0 };
+      uint32_t n = qx + 1u < qw ? 2u : 1u, k;
+
+      for (k = 0; k < n; k++) {
+        uint32_t q = qx + k, x0 = 2u * q, c, e;
+
+        if (!qy) {
+          c = q ? (s0[x0 - 2u] | s1[x0 - 2u]) + 2u * s0[x0 - 1u] + 4u * s1[x0 - 1u] : 0u;
+        } else {
+          uint32_t nw = q ? sa[x0 - 1u] : 0u, nf = q + 1u < qw ? sa[x0 + 2u] : 0u;
+          uint32_t wv = q ? s0[x0 - 1u] | s1[x0 - 1u] : 0u;
+
+          c = (nw | sa[x0]) + 2u * wv + 4u * (sa[x0 + 1u] | nf);
+        }
+        c &= 7u;
+        /* decodeSigEMB: an all-zero context's quad by the MEL first */
+        if (!c && !mel_sym(&mel)) {
+          inf[k] = 0u;
+          continue;
+        }
+        e = tab[c][bw_peek(&vlc) & 0x7Fu];
+        bw_skip(&vlc, e & 7u);
+        inf[k] = e >> 3;
+        s0[x0]      = (uint8_t)(inf[k] & 1u);
+        s1[x0]      = (uint8_t)((inf[k] >> 1) & 1u);
+        s0[x0 + 1u] = (uint8_t)((inf[k] >> 2) & 1u);
+        s1[x0 + 1u] = (uint8_t)((inf[k] >> 3) & 1u);
+      }
+      /* the unsigned residuals, the pair's steps interleaved (7.3.4) */
+      if (!qy && n == 2u && (inf[0] & inf[1] & 16u)) {
+        if (mel_sym(&mel)) {
+          for (k = 0; k < 2u; k++) pfx[k] = u_prefix(&vlc);
+          for (k = 0; k < 2u; k++) sfx[k] = u_suffix(&vlc, pfx[k]);
+          for (k = 0; k < 2u; k++) ext[k] = u_ext(&vlc, sfx[k]);
+          for (k = 0; k < 2u; k++) u[k] = 2u + pfx[k] + sfx[k] + 4u * ext[k];
+        } else {
+          uint32_t ubit = 0;
+
+          pfx[0] = u_prefix(&vlc);
+          if (pfx[0] > 2u) {
+            ubit = bw_peek(&vlc) & 1u;
+            bw_skip(&vlc, 1u);
+            pfx[1] = ubit + 1u;
+          } else {
+            pfx[1] = u_prefix(&vlc);
+          }
+          for (k = 0; k < 2u; k++) sfx[k] = u_suffix(&vlc, pfx[k]);
+          for (k = 0; k < 2u; k++) ext[k] = u_ext(&vlc, sfx[k]);
+          u[0] = pfx[0] + sfx[0] + 4u * ext[0];
+          u[1] = pfx[0] > 2u ? ubit + 1u : pfx[1] + sfx[1] + 4u * ext[1];
+        }
+      } else if ((inf[0] | inf[1]) & 16u) {
+        for (k = 0; k < n; k++) {
+          if (inf[k] & 16u) pfx[k] = u_prefix(&vlc);
+        }
+        for (k = 0; k < n; k++) {
+          if (inf[k] & 16u) sfx[k] = u_suffix(&vlc, pfx[k]);
+        }
+        for (k = 0; k < n; k++) {
+          if (inf[k] & 16u) ext[k] = u_ext(&vlc, sfx[k]);
+        }
+        for (k = 0; k < n; k++) {
+          if (inf[k] & 16u) u[k] = pfx[k] + sfx[k] + 4u * ext[k];
+        }
+      }
+      /* the exponent bounds (7.3.7), then the MagSgn values (7.3.8) */
+      for (k = 0; k < n; k++) {
+        uint32_t q = qx + k, x0 = 2u * q, rho = inf[k] & 15u, ek = (inf[k] >> 5) & 15u, e1 = (inf[k] >> 9) & 15u;
+        uint32_t kap = 1u, U, i;
+
+        if (!rho) {
+          ecur[x0] = ecur[x0 + 1u] = 0u;
+          continue;
+        }
+        if (qy && (rho & (rho - 1u))) {
+          uint32_t m = eprev[x0] > eprev[x0 + 1u] ? eprev[x0] : eprev[x0 + 1u];
+
+          if (q && eprev[x0 - 1u] > m) m = eprev[x0 - 1u];
+          if (q + 1u < qw && eprev[x0 + 2u] > m) m = eprev[x0 + 2u];
+          kap = m > 2u ? m - 1u : 1u;
+        }
+        U = kap + u[k];
+        if (U > bound || U > 32u) {
+          bad = true;
+          break;
+        }
+        for (i = 0; i < 4u; i++) {
+          uint32_t xx = x0 + (i >> 1), m;
+          uint64_t v, mag;
+
+          if (!(rho >> i & 1u)) {
+            if (i & 1u) ecur[xx] = 0u;
+            continue;
+          }
+          m   = U - (ek >> i & 1u);
+          v   = (uint64_t)fw_bits(&ms, m) | (uint64_t)(e1 >> i & 1u) << m;
+          /* mu = v / 2 + 1, the sign v's lowest bit */
+          if (i & 1u) ecur[xx] = (uint8_t)bitlen64(v | 1u); /* E: the bits of 2 mu - 1 = v + 1 rounded down to odd */
+          mag = ((v >> 1) * 2u + 3u) << (p - 1u);
+          if (mag > 0x7FFFFFFFu) {
+            bad = true;
+            break;
+          }
+          if (xx < w && (!(i & 1u) || row1)) {
+            int32_t *o = (i & 1u) ? o1 : o0;
+
+            o[xx] = (v & 1u) ? -(int32_t)mag : (int32_t)mag;
+          }
+        }
+        if (bad) break;
+      }
+      if (bad) break;
+    }
+    if (bad) break;
+    {
+      uint8_t *t = eprev;
+
+      eprev = ecur;
+      ecur  = t;
+    }
+  }
+  if (bad) return false;
+
+  /* SigProp (7.4): stripes of four rows, groups of four columns, the
+     magnitudes then the signs */
+  if (z >= 2u) {
+    htfw_t   sp;
+    uint32_t sy, gx, one = 3u << (p - 2u);
+
+    fw_init(&sp, ref, lref, 0u);
+    for (sy = 0; sy < h; sy += 4u) {
+      uint32_t ey = sy + 4u < h ? sy + 4u : h, lim = causal ? ey : h;
+
+      for (gx = 0; gx < w; gx += 4u) {
+        uint32_t ex = gx + 4u < w ? gx + 4u : w;
+
+        for (x = gx; x < ex; x++) {
+          for (y = sy; y < ey; y++) {
+            uint8_t *s = st + (size_t)y * W + x;
+            uint32_t mbr;
+
+            if (*s & 1u) continue;
+            mbr = (x ? s[-1] : 0u) | (x + 1u < w ? s[1] : 0u);
+            if (y) mbr |= s[-(ptrdiff_t)W] | (x ? s[-(ptrdiff_t)W - 1] : 0u) | (x + 1u < w ? s[1 - (ptrdiff_t)W] : 0u);
+            if (y + 1u < lim) mbr |= s[W] | (x ? s[W - 1u] : 0u) | (x + 1u < w ? s[W + 1u] : 0u);
+            if (mbr && fw_bits(&sp, 1u)) *s |= 2u;
+          }
+        }
+        for (x = gx; x < ex; x++) {
+          for (y = sy; y < ey; y++) {
+            if (st[(size_t)y * W + x] & 2u) out[(size_t)y * w + x] = fw_bits(&sp, 1u) ? -(int32_t)one : (int32_t)one;
+          }
+        }
+      }
+    }
+  }
+  /* MagRef (7.5): the cleanup's significant samples, the same scan: their
+     bit at p - 1 the refinement's, the half under it */
+  if (z == 3u) {
+    htbw_t   mr;
+    uint32_t sy, half = 1u << (p - 2u);
+
+    mr.start = ref;
+    mr.p     = ref + lref;
+    mr.buf   = 0;
+    mr.n     = 0;
+    mr.last  = 0xFFu;
+    for (sy = 0; sy < h; sy += 4u) {
+      uint32_t ey = sy + 4u < h ? sy + 4u : h;
+
+      for (x = 0; x < w; x++) {
+        for (y = sy; y < ey; y++) {
+          int32_t *o = out + (size_t)y * w + x;
+          uint32_t r, mag;
+
+          if (!(st[(size_t)y * W + x] & 1u)) continue;
+          r = bw_peek(&mr) & 1u;
+          bw_skip(&mr, 1u);
+          mag = (uint32_t)(*o < 0 ? -*o : *o);
+          mag = (mag ^ ((1u - r) << (p - 1u))) | half;
+          *o  = *o < 0 ? -(int32_t)mag : (int32_t)mag;
+        }
+      }
+    }
+  }
+  return true;
+}
+
+/* a decoded HT code-block's state, at most: a byte a padded sample (4096
+   and its width and height), two rows of exponents */
+enum { HT_SCRATCH = 5200u + 2u * 1028u };
+
 /* a code-block decoded into the tile-component's buffer, dequantized */
 static bool
 t1_block(const jpx_t *j, xscratch_t *sc, xcblk_t *b, const xband_t *band, const xcc_t *cc, xtc_t *tc) {
@@ -1681,12 +2222,29 @@ t1_block(const jpx_t *j, xscratch_t *sc, xcblk_t *b, const xband_t *band, const 
   t.zc     = j->zc[band->orient];
   t.sc     = j->sc;
   t.causal = (cc->style & CB_CAUSAL) != 0;
-  memset(t.flags, 0, (size_t)t.fs * ((h + 3u) / 4u + 2u) * sizeof(*t.flags));
+  if (!(cc->style & CB_HT)) memset(t.flags, 0, (size_t)t.fs * ((h + 3u) / 4u + 2u) * sizeof(*t.flags));
   memset(t.data, 0, (size_t)w * h * sizeof(*t.data));
   mq_reset(&t);
 
+  if (cc->style & CB_HT) {
+    /* T.814: its cleanup segment, then its refinement one; the passes of
+       one HT set (OpenJPEG's: placeholders not read), the cleanup alone
+       with no bit-plane under it. A stream that doesn't conform: zeros */
+    uint32_t passes = 0, lcup = b->segs[0].len <= total ? b->segs[0].len : (uint32_t)total, lref = 0, z;
+
+    for (s = 0; s < b->nsegs; s++) passes += b->segs[s].passes;
+    if (b->nsegs > 1u) lref = b->segs[1].len <= total - lcup ? b->segs[1].len : (uint32_t)(total - lcup);
+    z = passes < 3u ? passes : 3u;
+    if (!lref || bp < 2) z = 1u;
+    if (!sc->ht && !(sc->ht = malloc(HT_SCRATCH))) return false;
+    if (!ht_block(j->htv, sc->ht, sc->bytes, lcup, sc->bytes + lcup, lref, w, h, (uint32_t)bp, z,
+                  (uint32_t)(band->mb + 1 - b->numbps) + 1u + cc->roi, (cc->style & CB_CAUSAL) != 0, t.data)) {
+      memset(t.data, 0, (size_t)w * h * sizeof(*t.data));
+    }
+  }
+
   at = 0;
-  for (s = 0; s < b->nsegs; s++) {
+  for (s = 0; !(cc->style & CB_HT) && s < b->nsegs; s++) {
     const xseg_t *g   = &b->segs[s];
     bool          raw = (cc->style & CB_BYPASS) && passtype < 2u && bp <= b->numbps - 4;
     size_t        len = g->len <= total - at ? g->len : total - at;
@@ -3218,6 +3776,7 @@ done:
     free(j->scratch[c].cdata);
     free(j->scratch[c].bytes);
     free(j->scratch[c].lift);
+    free(j->scratch[c].ht);
   }
   arena_free_all(&j->arena);
   free(j);
@@ -3348,8 +3907,8 @@ jp2_dec(ImImage         ** __restrict dest,
 
   if (!*dest) {
 #ifdef __APPLE__
-    /* what isn't read here (HT code-blocks, JPX's extensions) Core Image
-       may read */
+    /* what isn't read here (JPX's extensions, a tile-component's HT and
+       T.800 code-blocks mixed) Core Image may read */
     {
       ImResult ret;
 
