@@ -108,8 +108,15 @@ typedef struct jbits {
   uint32_t       n;
 } jbits_t;
 
+typedef void (*jpg_idct_fn)(const int16_t *in, const uint16_t *q, void *out, size_t stride);
+
 typedef struct jcomp {
   uint8_t   id, h, v, tq;     /* SOF's */
+  uint8_t   ss;               /* a block's samples across in its plane: 8, or
+                                 fewer decoded smaller (a sample lossless) */
+  uint8_t   uh, uv;           /* h and v as its upsampling sees them */
+  uint32_t  ow, oh;           /* its samples across and down in its plane */
+  jpg_idct_fn idct;           /* to its plane, ss by ss */
   uint8_t   td, ta;           /* the current scan's tables */
   uint32_t  bw, bh;           /* blocks across and down, every MCU's */
   uint32_t  cw, ch;           /* its samples across and down (downsampled) */
@@ -128,6 +135,8 @@ typedef struct jpg {
 
   /* the frame */
   uint32_t  width, height, ncomp, prec;
+  uint32_t  scale;            /* the size divided by this: 1, 2, 4, 8 */
+  uint32_t  ds, ow, oh;       /* the smallest block's side; the pixels out */
   uint32_t  hmax, vmax, mcux, mcuy;
   uint32_t  process;          /* J_SEQUENTIAL, J_PROGRESSIVE, J_LOSSLESS */
   bool      arith, frame, multiscan;
@@ -178,8 +187,6 @@ typedef struct jpg {
   uint32_t   flow_self;
   uint64_t   flow_deps;
 
-  /* the IDCT's: 8- or 12-bit */
-  void    (*idct)(const int16_t *in, const uint16_t *q, void *out, size_t stride);
 } jpg_t;
 
 /* jpg.c */
@@ -193,6 +200,7 @@ typedef struct jopts {
   im_runner_t runner;      /* the caller's threads (run NULL: none) */
   uint8_t    *dest;        /* the caller's memory, `stride` a row; NULL: im's */
   size_t      dest_stride, dest_size;
+  uint32_t    scale;       /* 1 (or 0), 2, 4, 8: the size divided by it */
 } jopts_t;
 
 IM_HIDE bool jpg_decode_mem(const uint8_t *data, size_t len, ImImage *im, const jopts_t *o);
@@ -212,13 +220,15 @@ IM_HIDE void jpg_flow_row(jpg_t *j, uint32_t row);
 IM_HIDE bool jpg_scan_arith(jpg_t *j);
 
 /* idct.c */
-typedef void (*jpg_idct_fn)(const int16_t *in, const uint16_t *q, void *out, size_t stride);
 
 /* a block with only its DC: its every sample */
 IM_HIDE uint8_t jpg_dc8(int16_t dc, uint16_t q);
 IM_HIDE void jpg_idct8(const int16_t *in, const uint16_t *q, void *out, size_t stride);
 IM_HIDE jpg_idct_fn jpg_idct8_best(void);
 IM_HIDE void jpg_idct12(const int16_t *in, const uint16_t *q, void *out, size_t stride);
+
+/* the IDCT to a block `side` samples across (8, 4, 2, 1) at `prec` bits */
+IM_HIDE jpg_idct_fn jpg_idct_for(uint32_t side, uint32_t prec);
 
 /* sample.c */
 IM_HIDE bool jpg_out_ok(const jpg_t *j, jspace_t space);

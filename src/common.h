@@ -81,6 +81,7 @@ typedef struct im_open_config_t {
   im_runner_t       runner;         /* run NULL: none */
   void             *dest;           /* the caller's memory; NULL: im's */
   size_t            destStride, destSize;
+  uint32_t          scale;          /* the size over 1 (or 0), 2, 4, 8 */
 } im_open_config_t;
 
 /* the options as a decoder reads them (load.c) */

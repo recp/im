@@ -54,13 +54,13 @@ typedef struct jupc {
 static jupc_t
 up_method(const jpg_t *j, const jcomp_t *c) {
   jupc_t   u = { UP_ANY, 1u, 1u };
-  bool     fancy = j->process != J_LOSSLESS; /* libjpeg: no context rows where a block is a sample */
-  uint32_t hi = c->h, vi = c->v, ho = j->hmax, vo = j->vmax;
+  bool     fancy = j->ds > 1u; /* libjpeg: no context rows where a block is a sample */
+  uint32_t hi = c->uh, vi = c->uv, ho = j->hmax, vo = j->vmax;
 
   if (hi == ho && vi == vo) {
     u.how = UP_FULL;
   } else if (hi * 2u == ho && vi == vo) {
-    if (fancy && c->cw > 2u) u.how = UP_H2V1_FANCY;
+    if (fancy && c->ow > 2u) u.how = UP_H2V1_FANCY;
     else {
       u.how = UP_INT;
       u.hx  = 2u;
@@ -68,7 +68,7 @@ up_method(const jpg_t *j, const jcomp_t *c) {
   } else if (hi == ho && vi * 2u == vo && fancy) {
     u.how = UP_H1V2_FANCY;
   } else if (hi * 2u == ho && vi * 2u == vo) {
-    if (fancy && c->cw > 2u) u.how = UP_H2V2_FANCY;
+    if (fancy && c->ow > 2u) u.how = UP_H2V2_FANCY;
     else {
       u.how = UP_INT;
       u.hx  = 2u;
@@ -88,7 +88,7 @@ static const T*                                                                \
 NAME(const jpg_t *j, const jcomp_t *c, const jupc_t *u, uint32_t y, T *out) {  \
   const T *plane = c->plane, *rnear, *rfar;                                      \
   size_t   st    = c->stride;                                                  \
-  uint32_t n     = c->cw, x, cy;                                               \
+  uint32_t n     = c->ow, x, cy;                                               \
                                                                                \
   switch (u->how) {                                                            \
   case UP_FULL:                                                                \
@@ -115,7 +115,7 @@ NAME(const jpg_t *j, const jcomp_t *c, const jupc_t *u, uint32_t y, T *out) {  \
     cy   = y >> 1;                                                             \
     rnear = plane + (size_t)cy * st;                                            \
     if (!(y & 1u)) rfar = cy ? rnear - st : rnear;                                \
-    else rfar = cy + 1u < c->ch ? rnear + st : rnear;                             \
+    else rfar = cy + 1u < c->oh ? rnear + st : rnear;                             \
     if (u->how == UP_H1V2_FANCY) {                                             \
       for (x = 0; x < n; x++) out[x] = (T)(((W)rnear[x] * 3 + rfar[x] + bias) >> 2); \
       return out;                                                              \
@@ -140,13 +140,13 @@ NAME(const jpg_t *j, const jcomp_t *c, const jupc_t *u, uint32_t y, T *out) {  \
     const T *in = plane + (size_t)(y / u->vx) * st;                            \
                                                                                \
     if (u->hx == 1u) return in;                                                \
-    for (x = 0; x < j->width; x++) out[x] = in[x / u->hx];                     \
+    for (x = 0; x < j->ow; x++) out[x] = in[x / u->hx];                        \
     return out;                                                                \
   }                                                                            \
   default: {                                                                   \
-    const T *in = plane + (size_t)(((uint64_t)y * c->v) / j->vmax) * st;       \
+    const T *in = plane + (size_t)(((uint64_t)y * c->uv) / j->vmax) * st;      \
                                                                                \
-    for (x = 0; x < j->width; x++) out[x] = in[((uint64_t)x * c->h) / j->hmax]; \
+    for (x = 0; x < j->ow; x++) out[x] = in[((uint64_t)x * c->uh) / j->hmax];  \
     return out;                                                                \
   }                                                                            \
   }                                                                            \
@@ -167,7 +167,7 @@ up_row8(const jpg_t *j, const jcomp_t *c, const jupc_t *u, uint32_t y, uint8_t *
 #if J_NEON
   const uint8_t *plane = c->plane, *rnear, *rfar;
   size_t         st = c->stride;
-  uint32_t       n = c->cw, cy;
+  uint32_t       n = c->ow, cy;
 
   switch (u->how) {
   case UP_H2V1_FANCY: {
@@ -184,7 +184,7 @@ up_row8(const jpg_t *j, const jcomp_t *c, const jupc_t *u, uint32_t y, uint8_t *
     cy   = y >> 1;
     rnear = plane + (size_t)cy * st;
     if (!(y & 1u)) rfar = cy ? rnear - st : rnear;
-    else rfar = cy + 1u < c->ch ? rnear + st : rnear;
+    else rfar = cy + 1u < c->oh ? rnear + st : rnear;
     jn_colsum(rnear, rfar, n, r->sums + 1);
     if (u->how == UP_H2V2_FANCY) jn_h2v2(r->sums + 1, n, out);
     else jn_h1v2(r->sums + 1, n, (y & 1u) ? 2u : 1u, out);
@@ -195,7 +195,7 @@ up_row8(const jpg_t *j, const jcomp_t *c, const jupc_t *u, uint32_t y, uint8_t *
 #elif J_WASM
   const uint8_t *plane = c->plane, *rnear, *rfar;
   size_t         st = c->stride;
-  uint32_t       n = c->cw, cy;
+  uint32_t       n = c->ow, cy;
 
   switch (u->how) {
   case UP_H2V1_FANCY: {
@@ -212,7 +212,7 @@ up_row8(const jpg_t *j, const jcomp_t *c, const jupc_t *u, uint32_t y, uint8_t *
     cy   = y >> 1;
     rnear = plane + (size_t)cy * st;
     if (!(y & 1u)) rfar = cy ? rnear - st : rnear;
-    else rfar = cy + 1u < c->ch ? rnear + st : rnear;
+    else rfar = cy + 1u < c->oh ? rnear + st : rnear;
     jw_colsum(rnear, rfar, n, r->sums + 1);
     if (u->how == UP_H2V2_FANCY) jw_h2v2(r->sums + 1, n, out);
     else jw_h1v2(r->sums + 1, n, (y & 1u) ? 2u : 1u, out);
@@ -223,7 +223,7 @@ up_row8(const jpg_t *j, const jcomp_t *c, const jupc_t *u, uint32_t y, uint8_t *
 #elif J_X86
   const uint8_t *plane = c->plane, *rnear, *rfar;
   size_t         st = c->stride;
-  uint32_t       n = c->cw, cy;
+  uint32_t       n = c->ow, cy;
 
   if (r->x86) {
     switch (u->how) {
@@ -241,7 +241,7 @@ up_row8(const jpg_t *j, const jcomp_t *c, const jupc_t *u, uint32_t y, uint8_t *
       cy   = y >> 1;
       rnear = plane + (size_t)cy * st;
       if (!(y & 1u)) rfar = cy ? rnear - st : rnear;
-      else rfar = cy + 1u < c->ch ? rnear + st : rnear;
+      else rfar = cy + 1u < c->oh ? rnear + st : rnear;
       jx_colsum(rnear, rfar, n, r->sums + 1);
       if (u->how == UP_H2V2_FANCY) jx_h2v2(r->sums + 1, n, out);
       else jx_h1v2(r->sums + 1, n, (y & 1u) ? 2u : 1u, out);
@@ -453,10 +453,10 @@ static bool
 out_band(void *arg, uint32_t worker, uint32_t item) {
   jsout_t *o = arg;
   jpg_t   *j = o->j;
-  uint32_t n = j->ncomp, w = j->width, y0 = item * o->band, y1 = y0 + o->band, y, i;
+  uint32_t n = j->ncomp, w = j->ow, y0 = item * o->band, y1 = y0 + o->band, y, i;
   uint8_t *rows = o->rows[worker];
 
-  if (y1 > j->height) y1 = j->height;
+  if (y1 > j->oh) y1 = j->oh;
   for (y = y0; y < y1; y++) {
     if (!o->wide) {
       const uint8_t *row[J_COMPS];
@@ -508,8 +508,8 @@ jpg_out_ok(const jpg_t *j, jspace_t space) {
     return false;
   }
   if (!j->dest) return true;
-  pitch = (size_t)j->width * (n == 3u && j->rgb_pad ? 4u : n) * unit;
-  return j->dest_stride >= pitch && j->dest_size >= j->dest_stride * (j->height - 1u) + pitch
+  pitch = (size_t)j->ow * (n == 3u && j->rgb_pad ? 4u : n) * unit;
+  return j->dest_stride >= pitch && j->dest_size >= j->dest_stride * (j->oh - 1u) + pitch
          && !(unit == 2u && (((uintptr_t)j->dest | j->dest_stride) & 1u));
 }
 
@@ -518,7 +518,7 @@ jpg_out_ok(const jpg_t *j, jspace_t space) {
 IM_HIDE bool
 jpg_out(jpg_t *j, jspace_t space, ImImage *im, ImByteOrder order) {
   jsout_t *o;
-  uint32_t n = j->ncomp, w = j->width, h = j->height, i, nw = im_pool_size(j->pool);
+  uint32_t n = j->ncomp, w = j->ow, h = j->oh, i, nw = im_pool_size(j->pool);
   size_t   len;
   bool     ok = false;
 

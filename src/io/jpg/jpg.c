@@ -42,9 +42,9 @@ jpg_put(jpg_t *j, jcomp_t *c, int16_t *blk, uint32_t bx, uint32_t by) {
   size_t at;
 
   if (bx >= c->sw || by >= c->sh) return; /* an MCU's padding: never shown */
-  at = (size_t)by * 8u * c->stride + (size_t)bx * 8u;
-  if (j->prec <= 8u) j->idct(blk, c->q, (uint8_t *)c->plane + at, c->stride);
-  else j->idct(blk, c->q, (uint16_t *)c->plane + at, c->stride);
+  at = ((size_t)by * c->stride + bx) * c->ss;
+  if (j->prec <= 8u) c->idct(blk, c->q, (uint8_t *)c->plane + at, c->stride);
+  else c->idct(blk, c->q, (uint16_t *)c->plane + at, c->stride);
 }
 
 /* -- block smoothing (libjpeg's, jdcoefct.c) ------------------------------------- */
@@ -274,7 +274,6 @@ read_sof(jpg_t *j, uint32_t m, const uint8_t *s, uint32_t len) {
   if (j->process == J_LOSSLESS && j->arith) return false; /* libjpeg has none: not yet */
   if (!j->width || !j->ncomp || j->ncomp > J_COMPS || len != 6u + j->ncomp * 3u) return false;
   if (j->process == J_LOSSLESS ? j->prec < 2u || j->prec > 16u : j->prec != 8u && j->prec != 12u) return false;
-  j->idct = j->prec == 8u ? jpg_idct8_best() : jpg_idct12;
 
   j->hmax = j->vmax = 1u;
   for (i = 0; i < j->ncomp; i++) {
@@ -294,13 +293,22 @@ read_sof(jpg_t *j, uint32_t m, const uint8_t *s, uint32_t len) {
 }
 
 /* the frame's MCUs and planes' sizes, its size known; past J_SAMPLES a
-   component, refused (nothing made: the planes at the first scan) */
+   component, refused (nothing made: the planes at the first scan).
+
+   Decoded smaller (libjpeg's jdmaster.c): the pixels the size over the
+   scale, rounded up, a block 8 / scale samples across; a component
+   sampled more sparsely takes bigger blocks (by twos) while that leaves
+   its upsampling less to do. A lossless frame keeps its size. */
 static bool
 frame_size(jpg_t *j) {
   uint32_t i, unit;
+  bool     lossless = j->process == J_LOSSLESS;
 
   /* a data unit: a block, or (lossless) a sample */
-  unit    = j->process == J_LOSSLESS ? 1u : 8u;
+  unit    = lossless ? 1u : 8u;
+  j->ds   = lossless ? 1u : 8u / j->scale;
+  j->ow   = lossless ? j->width : (uint32_t)(((uint64_t)j->width * j->ds + 7u) / 8u);
+  j->oh   = lossless ? j->height : (uint32_t)(((uint64_t)j->height * j->ds + 7u) / 8u);
   j->mcux = (j->width + unit * j->hmax - 1u) / (unit * j->hmax);
   j->mcuy = (j->height + unit * j->vmax - 1u) / (unit * j->vmax);
   for (i = 0; i < j->ncomp; i++) {
@@ -313,7 +321,17 @@ frame_size(jpg_t *j) {
     c->ch     = (uint32_t)(((uint64_t)j->height * c->v + j->vmax - 1u) / j->vmax);
     c->sw     = (c->cw + unit - 1u) / unit;
     c->sh     = (c->ch + unit - 1u) / unit;
-    c->stride = (size_t)c->bw * unit;
+    c->ss     = (uint8_t)j->ds;
+    while (!lossless && c->ss < 8u && (j->hmax * j->ds) % (c->h * c->ss * 2u) == 0u
+           && (j->vmax * j->ds) % (c->v * c->ss * 2u) == 0u) {
+      c->ss = (uint8_t)(c->ss * 2u);
+    }
+    c->uh     = (uint8_t)(c->h * c->ss / j->ds);
+    c->uv     = (uint8_t)(c->v * c->ss / j->ds);
+    c->ow     = lossless ? c->cw : (uint32_t)(((uint64_t)j->width * c->h * c->ss + j->hmax * 8u - 1u) / (j->hmax * 8u));
+    c->oh     = lossless ? c->ch : (uint32_t)(((uint64_t)j->height * c->v * c->ss + j->vmax * 8u - 1u) / (j->vmax * 8u));
+    c->idct   = jpg_idct_for(c->ss, j->prec);
+    c->stride = (size_t)c->bw * c->ss;
     samples   = (uint64_t)c->bw * unit * c->bh * unit;
     if (samples > J_SAMPLES) return false;
     memset(c->bits, -1, sizeof(c->bits));
@@ -329,7 +347,7 @@ frame_alloc(jpg_t *j) {
   for (i = 0; i < j->ncomp; i++) {
     jcomp_t *c = &j->comp[i];
 
-    if (!(c->plane = malloc(c->stride * c->bh * (j->process == J_LOSSLESS ? 1u : 8u) * (j->prec > 8u ? 2u : 1u)))) {
+    if (!(c->plane = malloc(c->stride * c->bh * c->ss * (j->prec > 8u ? 2u : 1u)))) {
       return false;
     }
     if (j->multiscan && !(c->coefs = calloc((size_t)c->bw * c->bh * 64u, sizeof(int16_t)))) return false;
@@ -854,6 +872,7 @@ dry_run(const jpg_t *j) {
   d->dest           = j->dest;
   d->dest_stride    = j->dest_stride;
   d->dest_size      = j->dest_size;
+  d->scale          = j->scale;
   d->dry            = true;
   ok                = decode_stream(d, NULL, IM_BYTEORDER_ANY, &pad);
   free(pad);
@@ -1097,6 +1116,7 @@ jpg_decode_mem(const uint8_t *data, size_t len, ImImage *im, const jopts_t *o) {
   j->dest           = o->dest;
   j->dest_stride    = o->dest_stride;
   j->dest_size      = o->dest_size;
+  j->scale          = o->scale == 2u || o->scale == 4u || o->scale == 8u ? o->scale : 1u;
   ok                = decode(j, im, o->order);
   im_pool_free(j->pool);
   jpg_free(j);
@@ -1117,6 +1137,7 @@ opts_of(const im_open_config_t *c) {
   o.dest        = c->dest;
   o.dest_stride = c->destStride;
   o.dest_size   = c->destSize;
+  o.scale       = c->scale;
   return o;
 }
 

@@ -21,6 +21,10 @@
  * come out as there too); the columns first, kept to PASS1_BITS more,
  * then the rows. A sample past the range wraps within four times it
  * before it's clamped (libjpeg's range-limit table).
+ *
+ * Decoded smaller, a block to 4×4, 2×2 or one sample: libjpeg's reduced
+ * IDCTs (jidctred.c), the same fixed point, the coefficients a smaller
+ * block can't show left out.
  */
 
 #include "jpgint.h"
@@ -48,6 +52,17 @@
 #define FIX_2_053119869 ((int64_t)16819)
 #define FIX_2_562915447 ((int64_t)20995)
 #define FIX_3_072711026 ((int64_t)25172)
+/* the reduced IDCTs' */
+#define FIX_0_211164243 ((int64_t)1730)
+#define FIX_0_509795579 ((int64_t)4176)
+#define FIX_0_601344887 ((int64_t)4926)
+#define FIX_0_720959822 ((int64_t)5906)
+#define FIX_0_850430095 ((int64_t)6967)
+#define FIX_1_061594337 ((int64_t)8697)
+#define FIX_1_272758580 ((int64_t)10426)
+#define FIX_1_451774981 ((int64_t)11893)
+#define FIX_2_172734803 ((int64_t)17799)
+#define FIX_3_624509785 ((int64_t)29692)
 
 #define CONST_BITS 13
 #define DESCALE(x, n) (((x) + ((int64_t)1 << ((n) - 1))) >> (n))
@@ -217,4 +232,137 @@ jpg_idct8_best(void) {
 IM_HIDE void
 jpg_idct12(const int16_t *in, const uint16_t *q, void *out, size_t stride) {
   IDCT_BODY(uint16_t, 1, 2048, 4095)
+}
+
+/* -- smaller blocks ----------------------------------------------------------------- */
+
+/* a coefficient dequantized (the table's value as a 16-bit signed one) */
+#define DQ(k) ((int64_t)c[k] * qq[k])
+
+/* 4×4: columns 0–3 and 5–7 (4 can't show), then four rows */
+#define IDCT4_BODY(T, P, C, M)                                                 \
+  int32_t  ws[32];                                                             \
+  T       *o = out;                                                            \
+  uint32_t i;                                                                  \
+                                                                               \
+  for (i = 0; i < 8u; i++) {                                                   \
+    const int16_t *c  = in + i;                                                \
+    const int16_t *qq = (const int16_t *)q + i;                                \
+    int64_t        t0, t2, t10, t12, z1, z2, z3, z4;                           \
+                                                                               \
+    if (i == 4u) continue;                                                     \
+    if (!(c[8] | c[16] | c[24] | c[40] | c[48] | c[56])) {                     \
+      int32_t dc = (int32_t)LSHIFT(DQ(0), P);                                  \
+                                                                               \
+      ws[i] = ws[i + 8] = ws[i + 16] = ws[i + 24] = dc;                        \
+      continue;                                                                \
+    }                                                                          \
+    t0  = LSHIFT(DQ(0), CONST_BITS + 1);                                       \
+    t2  = DQ(16) * FIX_1_847759065 + DQ(48) * -FIX_0_765366865;                \
+    t10 = t0 + t2;                                                             \
+    t12 = t0 - t2;                                                             \
+    z1  = DQ(56);                                                              \
+    z2  = DQ(40);                                                              \
+    z3  = DQ(24);                                                              \
+    z4  = DQ(8);                                                               \
+    t0  = z1 * -FIX_0_211164243 + z2 * FIX_1_451774981 + z3 * -FIX_2_172734803 \
+          + z4 * FIX_1_061594337;                                              \
+    t2  = z1 * -FIX_0_509795579 + z2 * -FIX_0_601344887 + z3 * FIX_0_899976223 \
+          + z4 * FIX_2_562915447;                                              \
+    ws[i]      = (int32_t)DESCALE(t10 + t2, CONST_BITS - P + 1);               \
+    ws[i + 24] = (int32_t)DESCALE(t10 - t2, CONST_BITS - P + 1);               \
+    ws[i + 8]  = (int32_t)DESCALE(t12 + t0, CONST_BITS - P + 1);               \
+    ws[i + 16] = (int32_t)DESCALE(t12 - t0, CONST_BITS - P + 1);               \
+  }                                                                            \
+  for (i = 0; i < 4u; i++, o += stride) {                                      \
+    const int32_t *w = ws + i * 8u;                                            \
+    int64_t        t0, t2, t10, t12, z1, z2, z3, z4;                           \
+                                                                               \
+    if (!(w[1] | w[2] | w[3] | w[5] | w[6] | w[7])) {                          \
+      T v = LIMIT(DESCALE((int64_t)w[0], P + 3), C, M);                        \
+                                                                               \
+      o[0] = o[1] = o[2] = o[3] = v;                                           \
+      continue;                                                                \
+    }                                                                          \
+    t0  = LSHIFT((int64_t)w[0], CONST_BITS + 1);                               \
+    t2  = (int64_t)w[2] * FIX_1_847759065 + (int64_t)w[6] * -FIX_0_765366865;  \
+    t10 = t0 + t2;                                                             \
+    t12 = t0 - t2;                                                             \
+    z1  = w[7];                                                                \
+    z2  = w[5];                                                                \
+    z3  = w[3];                                                                \
+    z4  = w[1];                                                                \
+    t0  = z1 * -FIX_0_211164243 + z2 * FIX_1_451774981 + z3 * -FIX_2_172734803 \
+          + z4 * FIX_1_061594337;                                              \
+    t2  = z1 * -FIX_0_509795579 + z2 * -FIX_0_601344887 + z3 * FIX_0_899976223 \
+          + z4 * FIX_2_562915447;                                              \
+    o[0] = LIMIT(DESCALE(t10 + t2, CONST_BITS + P + 3 + 1), C, M);             \
+    o[3] = LIMIT(DESCALE(t10 - t2, CONST_BITS + P + 3 + 1), C, M);             \
+    o[1] = LIMIT(DESCALE(t12 + t0, CONST_BITS + P + 3 + 1), C, M);             \
+    o[2] = LIMIT(DESCALE(t12 - t0, CONST_BITS + P + 3 + 1), C, M);             \
+  }
+
+/* 2×2: columns 0, 1, 3, 5, 7, then two rows */
+#define IDCT2_BODY(T, P, C, M)                                                 \
+  int32_t  ws[16];                                                             \
+  T       *o = out;                                                            \
+  uint32_t i;                                                                  \
+                                                                               \
+  for (i = 0; i < 8u; i++) {                                                   \
+    const int16_t *c  = in + i;                                                \
+    const int16_t *qq = (const int16_t *)q + i;                                \
+    int64_t        t0, t10;                                                    \
+                                                                               \
+    if (i == 2u || i == 4u || i == 6u) continue;                               \
+    if (!(c[8] | c[24] | c[40] | c[56])) {                                     \
+      ws[i] = ws[i + 8] = (int32_t)LSHIFT(DQ(0), P);                           \
+      continue;                                                                \
+    }                                                                          \
+    t10 = LSHIFT(DQ(0), CONST_BITS + 2);                                       \
+    t0  = DQ(56) * -FIX_0_720959822;                                           \
+    t0 += DQ(40) * FIX_0_850430095;                                            \
+    t0 += DQ(24) * -FIX_1_272758580;                                           \
+    t0 += DQ(8) * FIX_3_624509785;                                             \
+    ws[i]     = (int32_t)DESCALE(t10 + t0, CONST_BITS - P + 2);                \
+    ws[i + 8] = (int32_t)DESCALE(t10 - t0, CONST_BITS - P + 2);                \
+  }                                                                            \
+  for (i = 0; i < 2u; i++, o += stride) {                                      \
+    const int32_t *w = ws + i * 8u;                                            \
+    int64_t        t0, t10;                                                    \
+                                                                               \
+    if (!(w[1] | w[3] | w[5] | w[7])) {                                        \
+      o[0] = o[1] = LIMIT(DESCALE((int64_t)w[0], P + 3), C, M);                \
+      continue;                                                                \
+    }                                                                          \
+    t10 = LSHIFT((int64_t)w[0], CONST_BITS + 2);                               \
+    t0  = (int64_t)w[7] * -FIX_0_720959822 + (int64_t)w[5] * FIX_0_850430095   \
+          + (int64_t)w[3] * -FIX_1_272758580 + (int64_t)w[1] * FIX_3_624509785; \
+    o[0] = LIMIT(DESCALE(t10 + t0, CONST_BITS + P + 3 + 2), C, M);             \
+    o[1] = LIMIT(DESCALE(t10 - t0, CONST_BITS + P + 3 + 2), C, M);             \
+  }
+
+/* one sample: the block's mean, its DC an eighth */
+#define IDCT1_BODY(T, C, M)                                                    \
+  int32_t dc = (int32_t)((int64_t)in[0] * (int16_t)q[0]);                      \
+                                                                               \
+  (void)stride;                                                                \
+  *(T *)out = LIMIT(DESCALE((int64_t)dc, 3), C, M);
+
+static void idct4_8(const int16_t *in, const uint16_t *q, void *out, size_t stride) { IDCT4_BODY(uint8_t, 2, 128, 255) }
+static void idct2_8(const int16_t *in, const uint16_t *q, void *out, size_t stride) { IDCT2_BODY(uint8_t, 2, 128, 255) }
+static void idct1_8(const int16_t *in, const uint16_t *q, void *out, size_t stride) { IDCT1_BODY(uint8_t, 128, 255) }
+static void idct4_12(const int16_t *in, const uint16_t *q, void *out, size_t stride) { IDCT4_BODY(uint16_t, 1, 2048, 4095) }
+static void idct2_12(const int16_t *in, const uint16_t *q, void *out, size_t stride) { IDCT2_BODY(uint16_t, 1, 2048, 4095) }
+static void idct1_12(const int16_t *in, const uint16_t *q, void *out, size_t stride) { IDCT1_BODY(uint16_t, 2048, 4095) }
+
+IM_HIDE jpg_idct_fn
+jpg_idct_for(uint32_t side, uint32_t prec) {
+  bool eight = prec <= 8u;
+
+  switch (side) {
+  case 4:  return eight ? idct4_8 : idct4_12;
+  case 2:  return eight ? idct2_8 : idct2_12;
+  case 1:  return eight ? idct1_8 : idct1_12;
+  default: return eight ? jpg_idct8_best() : jpg_idct12;
+  }
 }

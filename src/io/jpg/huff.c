@@ -929,7 +929,7 @@ seq_range(jctx_t *x, const jsblk_t *list, uint32_t nb, uint32_t w, uint32_t b0, 
       block_seq(&bs, s->dc, s->ac, s->pred, blk);
     }
     if (bx < c->sw && by < c->sh) {
-      j->idct(blk, c->q, (uint8_t *)c->plane + ((size_t)by * 8u * c->stride + (size_t)bx * 8u) * es, c->stride);
+      c->idct(blk, c->q, (uint8_t *)c->plane + ((size_t)by * c->stride + bx) * c->ss * es, c->stride);
     }
     if (++slot == nb) {
       slot = 0u;

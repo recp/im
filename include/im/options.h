@@ -87,6 +87,13 @@ typedef enum im_option_type_t {
      load fails); im->data.data stays NULL, row_pad_last the rows' gap.
      16-bit samples: `pixels` and `stride` even */
   IM_OPTION_DEST,
+
+  /* decoded smaller (uint): the width and height over 1 (the default), 2,
+     4 or 8, rounded up; other values 1. JPEG by a smaller IDCT (libjpeg's
+     scaled decode; a lossless one keeps its size); JPEG 2000 its finest
+     resolution levels left out (OpenJPEG's reduce; no more than it has).
+     The image's width and height say what came */
+  IM_OPTION_SCALE,
 } im_option_type_t;
 
 
@@ -171,7 +178,8 @@ im_option_bool(im_option_type_t optype, bool on) {
   return opt;
 }
 
-/* an option with a number: IM_OPTION_THREADS, IM_OPTION_JPEG_COLOR_TRANSFORM */
+/* an option with a number: IM_OPTION_THREADS, IM_OPTION_JPEG_COLOR_TRANSFORM,
+   IM_OPTION_OPACITY, IM_OPTION_SCALE */
 IM_INLINE
 im_option_int_t
 im_option_int(im_option_type_t optype, int32_t value) {

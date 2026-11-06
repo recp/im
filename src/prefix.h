@@ -41,6 +41,7 @@
 #  define jpg_idct12            IM_PFX(jpg_idct12)
 #  define jpg_idct8             IM_PFX(jpg_idct8)
 #  define jpg_idct8_best        IM_PFX(jpg_idct8_best)
+#  define jpg_idct_for          IM_PFX(jpg_idct_for)
 #  define jpg_info              IM_PFX(jpg_info)
 #  define jpg_natural           IM_PFX(jpg_natural)
 #  define jpg_out               IM_PFX(jpg_out)
