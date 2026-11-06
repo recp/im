@@ -3806,19 +3806,174 @@ compose8(jpx_t *j, const jp2_t *x, const jxopts_t *o, const xchan_t *ch, const u
   return true;
 }
 
+/* compose's general way, a piece of a row at a time on the pool: each
+   pixel's channels (a palette's colours, sYCC to RGB, to 8 or 16 bits as
+   asked), laid where they end (the opacity apart and un-premultiplied
+   where it's asked apart, RGB padded, 16-bit samples in the order asked,
+   the caller's memory) */
+typedef struct xgen {
+  const jp2_t    *x;
+  const xchan_t  *ch;
+  const uint32_t *use, *cols; /* cols: a channel's plane column for each X */
+  uint32_t        nuse, ncol, w, pieces, fstep, ybits;
+  bool            ycc, raw, eight, wide, apart, premult, pad, swap;
+  uint8_t        *px, *alpha;
+  size_t          pitch;
+  /* where the image pays for them: each channel's value as it's laid, by
+     its sample (through the palette), or by sYCC's R, G or B; sycc()'s
+     products by Cb and Cr */
+  const uint16_t *lut[5];
+  const int32_t  *rt, *bt;
+  const float    *ga, *gb;
+  bool            atx[5]; /* a channel's plane column is X */
+} xgen_t;
+
+/* a channel's value made 8 or 16 bits, as compose lays it */
+static inline uint32_t
+gen_depth(const xgen_t *g, int32_t v, uint32_t bits) {
+  if (g->raw) {
+    /* indexes (and an opacity with them): as they are, as compose8 */
+    int32_t t = v < 0 ? 0 : v;
+
+    return g->eight ? eight_shift(v, bits, true) : g->wide ? (uint32_t)(t > 65535 ? 65535 : t) : (uint32_t)(t > 255 ? 255 : t);
+  }
+  if (g->wide) return sixteen(v, bits);
+  return g->eight ? eight_shift(v, bits, false) : eight(v, bits);
+}
+
+/* a channel's sample through the palette, where it has one */
+static inline int32_t
+gen_pal(const jpx_t *j, const jp2_t *x, const xchan_t *ch, int32_t sm) {
+  if (ch->col >= 0) {
+    if (j->sgnd[ch->comp]) sm -= 1 << (j->prec[ch->comp] - 1u);
+    sm = sm < 0 ? 0 : sm >= (int32_t)x->pal_n ? (int32_t)x->pal_n - 1 : sm;
+    sm = x->pal[(uint32_t)sm * x->pal_cols + (uint32_t)ch->col];
+  }
+  return sm;
+}
+
+/* a piece of a row by the tables, the opacity with the colours: all of it
+   held here (the stores could be anything's to the compiler); 16-bit
+   values come out of their tables in the order asked */
+static void
+gen_lut(const xgen_t *g, const uint16_t *const *row, uint32_t X0, uint32_t X1, uint8_t *o) {
+  const bool      wide = g->wide, ycc = g->ycc;
+  const uint32_t  nuse = g->nuse, fstep = g->fstep, top = wide ? 0xFFFFu : 0xFFu, u0 = ycc ? 3u : 0u;
+  const int32_t   upb = (1 << g->ybits) - 1, *rt = g->rt, *bt = g->bt;
+  const float    *ga = g->ga, *gb = g->gb;
+  const uint16_t *l[5], *r[5];
+  const uint32_t *cl[5];
+  uint32_t        X, u;
+
+  for (u = 0; u < nuse; u++) {
+    l[u]  = g->lut[u];
+    r[u]  = row[u];
+    cl[u] = g->atx[u] ? NULL : g->cols + (size_t)u * g->w;
+  }
+  for (X = X0; X < X1; X++) {
+    uint32_t c[5];
+
+    if (ycc) {
+      int32_t yy = cl[0] ? r[0][cl[0][X]] : r[0][X], cb = cl[1] ? r[1][cl[1][X]] : r[1][X], cr = cl[2] ? r[2][cl[2][X]] : r[2][X];
+      int32_t R = yy + rt[cr], G = yy - (int32_t)(ga[cb] + gb[cr]), B = yy + bt[cb];
+
+      c[0] = l[0][R < 0 ? 0 : R > upb ? upb : R];
+      c[1] = l[1][G < 0 ? 0 : G > upb ? upb : G];
+      c[2] = l[2][B < 0 ? 0 : B > upb ? upb : B];
+    }
+    for (u = u0; u < nuse; u++) c[u] = l[u][cl[u] ? r[u][cl[u][X]] : r[u][X]];
+    if (fstep > nuse) c[3] = top;
+    if (wide) {
+      uint16_t *p = (uint16_t *)(void *)o;
+
+      for (u = 0; u < fstep; u++) p[u] = (uint16_t)c[u];
+      o += 2u * fstep;
+    } else {
+      for (u = 0; u < fstep; u++) o[u] = (uint8_t)c[u];
+      o += fstep;
+    }
+  }
+}
+
+static bool
+gen_piece(jpx_t *j, xscratch_t *s, void *ctx, uint32_t item) {
+  const xgen_t   *g = ctx;
+  const jp2_t    *x = g->x;
+  uint32_t        Y = item / g->pieces, X0 = (item % g->pieces) * X_PIECE, X1, X, u;
+  uint32_t        es = g->wide ? 2u : 1u, top = g->wide ? 65535u : 255u, nout = g->apart ? g->ncol : g->nuse;
+  bool            pad = g->pad && nout == 3u;
+  const uint16_t *row[5];
+
+  (void)s;
+  X1 = g->w - X0 > X_PIECE ? X0 + X_PIECE : g->w;
+  for (u = 0; u < g->nuse; u++) {
+    uint32_t cp = g->ch[g->use[u]].comp;
+    int64_t  sy = (int64_t)(j->y0 + Y) / j->dy[cp] - (int64_t)j->py0[cp];
+
+    sy     = sy < 0 ? 0 : sy >= j->ph[cp] ? (int64_t)j->ph[cp] - 1 : sy;
+    row[u] = j->plane[cp] + (size_t)sy * j->pw[cp];
+  }
+  if (g->lut[0] && !g->apart) {
+    gen_lut(g, row, X0, X1, g->px + (size_t)Y * g->pitch + (size_t)X0 * g->fstep * es);
+    return true;
+  }
+  for (X = X0; X < X1; X++) {
+    uint32_t c[5];
+    uint8_t *at = g->px + (size_t)Y * g->pitch + (size_t)X * g->fstep * es;
+
+    if (g->lut[0]) {
+      /* by the tables */
+      u = 0;
+      if (g->ycc) {
+        int32_t yy = row[0][g->cols[X]], cb = row[1][g->cols[g->w + X]], cr = row[2][g->cols[2u * g->w + X]];
+        int32_t r = yy + g->rt[cr], gg = yy - (int32_t)(g->ga[cb] + g->gb[cr]), b = yy + g->bt[cb], upb = (1 << g->ybits) - 1;
+
+        c[0] = g->lut[0][r < 0 ? 0 : r > upb ? upb : r];
+        c[1] = g->lut[1][gg < 0 ? 0 : gg > upb ? upb : gg];
+        c[2] = g->lut[2][b < 0 ? 0 : b > upb ? upb : b];
+        u    = 3u;
+      }
+      for (; u < g->nuse; u++) c[u] = g->lut[u][row[u][g->cols[(size_t)u * g->w + X]]];
+    } else {
+      int32_t v[5];
+
+      for (u = 0; u < g->nuse; u++) v[u] = gen_pal(j, x, &g->ch[g->use[u]], row[u][g->cols[(size_t)u * g->w + X]]);
+      if (g->ycc) sycc(1 << (g->ybits - 1u), (1 << g->ybits) - 1, v[0], v[1], v[2], &v[0], &v[1], &v[2]);
+      for (u = 0; u < g->nuse; u++) c[u] = gen_depth(g, v[u], g->ch[g->use[u]].bits);
+    }
+    if (g->apart) {
+      uint32_t al = c[g->ncol];
+
+      for (u = 0; g->premult && u < g->ncol; u++) {
+        uint64_t cc = c[u];
+
+        c[u] = al ? (uint32_t)(cc > al ? top : (cc * top + al / 2u) / al) : 0u;
+      }
+      if (g->wide) ((uint16_t *)(void *)g->alpha)[(size_t)Y * g->w + X] = (uint16_t)(g->swap ? bswapu16((uint16_t)al) : al);
+      else g->alpha[(size_t)Y * g->w + X] = (uint8_t)al;
+    }
+    if (pad) c[3] = top;
+    for (u = 0; u < g->fstep; u++) {
+      if (g->wide) ((uint16_t *)(void *)at)[u] = g->swap ? bswapu16((uint16_t)c[u]) : (uint16_t)c[u];
+      else at[u] = (uint8_t)c[u];
+    }
+  }
+  return true;
+}
+
 /* the planes as `im`'s pixels: the colours then the opacity, a sample 8
    bits or (any channel deeper) 16 in `order` */
 static bool
 compose(jpx_t *j, const jp2_t *x, ImImage *im, const jxopts_t *o) {
-  ImByteOrder order = o->order;
+  ImByteOrder order = o->order == IM_BYTEORDER_BIG || o->order == IM_BYTEORDER_LITTLE ? o->order : IM_BYTEORDER_HOST;
   xchan_t   ch[X_COMPS];
-  uint32_t  ncol, space, colour[4], use[5], nuse, k, u, w = j->x1 - j->x0, h = j->y1 - j->y0, X, Y, step, rowpad = 0;
+  uint32_t  ncol, space, colour[4], use[5], nuse, k, u, w = j->x1 - j->x0, h = j->y1 - j->y0, X, step, rowpad = 0;
   int32_t   opacity = -1;
-  bool      ycc = false, premult = false, wide = false, direct, laid = false;
+  bool      ycc = false, premult = false, wide = false;
   uint32_t *cols;
   uint8_t  *px, *icc = NULL;
   void     *alpha = NULL;
-  size_t    n = (size_t)w * h, len, i;
+  size_t    n = (size_t)w * h, len;
 
   {
     xpick_t pk;
@@ -3863,191 +4018,141 @@ compose(jpx_t *j, const jp2_t *x, ImImage *im, const jxopts_t *o) {
       px = NULL;
       if (!compose8(j, x, o, ch, use, nuse, ncol, apart, ycc, &px, &alpha, &step, &len, &rowpad)) return false;
       if (apart) opacity = -1;
-      laid = true;
       goto made;
     }
   }
 
 general:
-  step = nuse;
-  len  = n * step * (wide ? 2u : 1u);
-  if (!(px = malloc(len))) return false;
+  {
+    xgen_t g;
+    bool   apart = opacity >= 0 && o->opacity == IM_OPACITY_APART, ok;
+    size_t es = wide ? 2u : 1u, row;
+    void  *tabs = NULL;
 
-  /* 8-bit channels at full size, as they are: straight across */
-  direct = !ycc && !wide;
-  for (u = 0; u < nuse && direct; u++) {
-    const xchan_t *c = &ch[use[u]];
-
-    direct = c->col < 0 && c->bits == 8u && j->dx[c->comp] == 1u && j->dy[c->comp] == 1u;
-  }
-  if (direct) {
-    if (step == 3u) {
-      const uint16_t *r = j->plane[ch[use[0]].comp], *g = j->plane[ch[use[1]].comp], *b = j->plane[ch[use[2]].comp];
-
-      for (i = 0; i < n; i++) {
-        px[3u * i]      = (uint8_t)r[i];
-        px[3u * i + 1u] = (uint8_t)g[i];
-        px[3u * i + 2u] = (uint8_t)b[i];
-      }
-    } else if (step == 4u) {
-      const uint16_t *r = j->plane[ch[use[0]].comp], *g = j->plane[ch[use[1]].comp], *b = j->plane[ch[use[2]].comp];
-      const uint16_t *a = j->plane[ch[use[3]].comp];
-
-      for (i = 0; i < n; i++) {
-        px[4u * i]      = (uint8_t)r[i];
-        px[4u * i + 1u] = (uint8_t)g[i];
-        px[4u * i + 2u] = (uint8_t)b[i];
-        px[4u * i + 3u] = (uint8_t)a[i];
-      }
-    } else {
-      for (u = 0; u < step; u++) {
-        const uint16_t *p = j->plane[ch[use[u]].comp];
-
-        for (i = 0; i < n; i++) px[i * step + u] = (uint8_t)p[i];
-      }
-    }
-    goto made;
-  }
-
-  if (!(cols = malloc((size_t)w * sizeof(*cols) * 5u))) {
-    free(px);
-    return false;
-  }
-  for (Y = 0; Y < h; Y++) {
-    const uint16_t *row[5];
-
+    memset(&g, 0, sizeof(g));
+    g.x       = x;
+    g.ch      = ch;
+    g.use     = use;
+    g.nuse    = nuse;
+    g.ncol    = ncol;
+    g.w       = w;
+    g.pieces  = (w + X_PIECE - 1u) / X_PIECE;
+    g.ycc     = ycc;
+    g.ybits   = ch[colour[0]].bits;
+    g.raw     = o->raw;
+    g.eight   = o->eight;
+    g.wide    = wide;
+    g.apart   = apart;
+    g.premult = premult;
+    g.fstep   = apart ? ncol : nuse;
+    g.pad     = o->pad && g.fstep == 3u;
+    g.fstep   = g.pad ? 4u : g.fstep;
+    g.swap    = wide && order != IM_BYTEORDER_HOST && (order == IM_BYTEORDER_BIG) != X_HOST_BIG;
+    row       = (size_t)w * g.fstep * es;
+    /* each channel's plane column for each X */
+    if (!(cols = malloc((size_t)w * sizeof(*cols) * 5u))) return false;
     for (u = 0; u < nuse; u++) {
-      const xchan_t *c  = &ch[use[u]];
-      uint32_t       cp = c->comp, dx = j->dx[cp], dy = j->dy[cp];
-      int64_t        sy = (int64_t)(j->y0 + Y) / dy - (int64_t)j->py0[cp];
+      uint32_t cp = ch[use[u]].comp, dx = j->dx[cp];
 
-      sy     = sy < 0 ? 0 : sy >= j->ph[cp] ? (int64_t)j->ph[cp] - 1 : sy;
-      row[u] = j->plane[cp] + (size_t)sy * j->pw[cp];
-      if (Y == 0u) {
-        for (X = 0; X < w; X++) {
-          int64_t sx = (int64_t)(j->x0 + X) / dx - (int64_t)j->px0[cp];
+      for (X = 0; X < w; X++) {
+        int64_t sx = (int64_t)(j->x0 + X) / dx - (int64_t)j->px0[cp];
 
-          cols[u * w + X] = (uint32_t)(sx < 0 ? 0 : sx >= j->pw[cp] ? (int64_t)j->pw[cp] - 1 : sx);
-        }
+        cols[u * w + X] = (uint32_t)(sx < 0 ? 0 : sx >= j->pw[cp] ? (int64_t)j->pw[cp] - 1 : sx);
       }
+      /* the column X all along: none to look up */
+      for (X = 0; X < w && cols[u * w + X] == X; X++) {}
+      g.atx[u] = X == w;
     }
-    for (X = 0; X < w; X++) {
-      int32_t v[5];
-      size_t  at = ((size_t)Y * w + X) * step;
+    g.cols = cols;
+    /* the tables, where there are more pixels than their entries (not
+       for sYCC from a palette) */
+    {
+      size_t   T = 0, nb = 0, nr = 0;
+      bool     can = true;
+      uint32_t v;
 
       for (u = 0; u < nuse; u++) {
-        const xchan_t *c = &ch[use[u]];
-        int32_t        s = row[u][cols[u * w + X]];
-
-        if (c->col >= 0) {
-          if (j->sgnd[c->comp]) s -= 1 << (j->prec[c->comp] - 1u);
-          s = s < 0 ? 0 : s >= (int32_t)x->pal_n ? (int32_t)x->pal_n - 1 : s;
-          s = x->pal[(uint32_t)s * x->pal_cols + (uint32_t)c->col];
-        }
-        v[u] = s;
+        can = can && !(ycc && u < 3u && ch[use[u]].col >= 0);
+        T  += ycc && u < 3u ? (size_t)1 << g.ybits : (size_t)1 << j->prec[ch[use[u]].comp];
       }
       if (ycc) {
-        int32_t prec = (int32_t)ch[colour[0]].bits;
-
-        sycc(1 << (prec - 1), (1 << prec) - 1, v[0], v[1], v[2], &v[0], &v[1], &v[2]);
+        nb = (size_t)1 << j->prec[ch[use[1]].comp];
+        nr = (size_t)1 << j->prec[ch[use[2]].comp];
       }
-      if (o->raw) {
-        /* indexes: as they are */
-        int32_t s = v[0] < 0 ? 0 : v[0];
+      if (can && n >= T + nb + nr && (tabs = malloc(T * sizeof(uint16_t) + (nb + nr) * 2u * sizeof(int32_t)))) {
+        int32_t  *it  = tabs, off = 1 << (g.ybits - 1u);
+        uint16_t *lt;
 
-        if (o->eight) px[at] = eight_shift(v[0], ch[use[0]].bits, true);
-        else if (wide) ((uint16_t *)px)[at] = (uint16_t)(s > 65535 ? 65535 : s);
-        else px[at] = (uint8_t)(s > 255 ? 255 : s);
-      } else if (wide) {
-        for (u = 0; u < nuse; u++) ((uint16_t *)px)[at + u] = sixteen(v[u], ch[use[u]].bits);
-      } else if (o->eight) {
-        for (u = 0; u < nuse; u++) px[at + u] = eight_shift(v[u], ch[use[u]].bits, false);
-      } else {
-        for (u = 0; u < nuse; u++) px[at + u] = eight(v[u], ch[use[u]].bits);
+        if (ycc) {
+          float *ft = (float *)(void *)(it + nb + nr);
+
+          g.rt = it;
+          g.bt = it + nr;
+          g.ga = ft;
+          g.gb = ft + nb;
+          for (v = 0; v < nr; v++) {
+            it[v]           = (int32_t)(1.402f * (float)((int32_t)v - off));
+            ft[nb + v]      = 0.714f * (float)((int32_t)v - off);
+          }
+          for (v = 0; v < nb; v++) {
+            it[nr + v] = (int32_t)(1.772f * (float)((int32_t)v - off));
+            ft[v]      = 0.344f * (float)((int32_t)v - off);
+          }
+        }
+        lt = (uint16_t *)(void *)(it + 2u * (nb + nr));
+        for (u = 0; u < nuse; u++) {
+          const xchan_t *c  = &ch[use[u]];
+          uint32_t       nv = ycc && u < 3u ? 1u << g.ybits : 1u << j->prec[c->comp];
+
+          for (v = 0; v < nv; v++) {
+            lt[v] = (uint16_t)gen_depth(&g, ycc && u < 3u ? (int32_t)v : gen_pal(j, x, c, (int32_t)v), c->bits);
+            if (g.swap && !apart) lt[v] = bswapu16(lt[v]);
+          }
+          g.lut[u] = lt;
+          lt      += nv;
+        }
       }
     }
+    if (o->dest) {
+      if (o->dest_stride < row || o->dest_size < o->dest_stride * (h - 1u) + row
+          || (wide && (((uintptr_t)o->dest | o->dest_stride) & 1u))) {
+        free(cols);
+        free(tabs);
+        return false;
+      }
+      px      = o->dest;
+      g.pitch = o->dest_stride;
+    } else if (!(px = malloc(n * g.fstep * es))) {
+      free(cols);
+      free(tabs);
+      return false;
+    } else {
+      g.pitch = row;
+    }
+    g.px = px;
+    if (apart && !(g.alpha = malloc(n * es))) {
+      if (px != o->dest) free(px);
+      free(cols);
+      free(tabs);
+      return false;
+    }
+    ok = pool_run(j, gen_piece, &g, g.pieces * h);
+    free(cols);
+    free(tabs);
+    if (!ok) {
+      if (px != o->dest) free(px);
+      free(g.alpha);
+      return false;
+    }
+    alpha  = g.alpha;
+    step   = g.fstep;
+    len    = o->dest ? o->dest_stride * (h - 1u) + row : n * g.fstep * es;
+    rowpad = o->dest ? (uint32_t)(o->dest_stride - row) : 0u;
+    if (px == o->dest) px = NULL;
+    if (apart) opacity = -1;
   }
-  free(cols);
 
 made:
-  /* the opacity apart: the colours drawn together (un-premultiplied where
-     the JP2 says premultiplied, to the nearest), the last sample of
-     each pixel to its own plane */
-  if (!laid && o->opacity == IM_OPACITY_APART && opacity >= 0) {
-    uint32_t top = wide ? 65535u : 255u;
-
-    if (!(alpha = malloc(n * (wide ? 2u : 1u)))) {
-      free(px);
-      return false;
-    }
-    for (i = 0; i < n; i++) {
-      if (wide) {
-        uint16_t *p = (uint16_t *)(void *)px, al = p[i * step + ncol];
-
-        for (u = 0; u < ncol; u++) {
-          uint64_t c = p[i * step + u];
-
-          if (premult) c = al ? (c > al ? top : (c * top + al / 2u) / al) : 0u;
-          p[i * ncol + u] = (uint16_t)c;
-        }
-        ((uint16_t *)alpha)[i] = al;
-      } else {
-        uint8_t al = px[i * step + ncol];
-
-        for (u = 0; u < ncol; u++) {
-          uint32_t c = px[i * step + u];
-
-          if (premult) c = al ? (c > al ? top : (c * top + al / 2u) / al) : 0u;
-          px[i * ncol + u] = (uint8_t)c;
-        }
-        ((uint8_t *)alpha)[i] = al;
-      }
-    }
-    step    = ncol;
-    len     = n * step * (wide ? 2u : 1u);
-    opacity = -1;
-  }
-
-  /* 16-bit samples in the order asked for; the host's if any */
-  if (order != IM_BYTEORDER_BIG && order != IM_BYTEORDER_LITTLE) order = IM_BYTEORDER_HOST;
-  if (wide && order != IM_BYTEORDER_HOST && (order == IM_BYTEORDER_BIG) != X_HOST_BIG) {
-    uint16_t *p = (uint16_t *)px;
-
-    for (i = 0; i < n * step; i++) p[i] = bswapu16(p[i]);
-    for (i = 0; alpha && i < n; i++) ((uint16_t *)alpha)[i] = bswapu16(((uint16_t *)alpha)[i]);
-  }
-
-  /* RGB as RGB0: each pixel spread to four, from the last (in place) */
-  if (!laid && o->pad && step == 3u) {
-    uint8_t *q = realloc(px, n * 4u * (wide ? 2u : 1u));
-
-    if (!q) {
-      free(px);
-      free(alpha);
-      return false;
-    }
-    px = q;
-    if (wide) {
-      uint16_t *p = (uint16_t *)(void *)px;
-
-      for (i = n; i-- > 0u;) {
-        p[4u * i + 3u] = 0xFFFFu;
-        p[4u * i + 2u] = p[3u * i + 2u];
-        p[4u * i + 1u] = p[3u * i + 1u];
-        p[4u * i]      = p[3u * i];
-      }
-    } else {
-      for (i = n; i-- > 0u;) {
-        px[4u * i + 3u] = 0xFFu;
-        px[4u * i + 2u] = px[3u * i + 2u];
-        px[4u * i + 1u] = px[3u * i + 1u];
-        px[4u * i]      = px[3u * i];
-      }
-    }
-    step = 4u;
-    len  = n * 4u * (wide ? 2u : 1u);
-  }
-
   /* the colours' profile, where the JP2 gives one for them (not sYCC's,
      nor for indexes) */
   if (!o->raw && !ycc && x->icc_data && x->icc_len) {
@@ -4059,27 +4164,8 @@ made:
     memcpy(icc, x->icc_data, x->icc_len);
   }
 
-  /* the caller's memory: the rows there, at its stride (laid there already
-     the quick way) */
-  if (laid) {
-    im->row_pad_last = rowpad;
-  } else if (o->dest) {
-    size_t row = (size_t)w * step * (wide ? 2u : 1u), y;
-
-    if (o->dest_stride < row || o->dest_size < o->dest_stride * (h - 1u) + row
-        || (wide && (((uintptr_t)o->dest | o->dest_stride) & 1u))) {
-      free(px);
-      free(alpha);
-      free(icc);
-      return false;
-    }
-    for (y = 0; y < h; y++) memcpy(o->dest + y * o->dest_stride, px + y * row, row);
-    free(px);
-    px                = NULL;
-    len               = o->dest_stride * (h - 1u) + row;
-    im->row_pad_last  = (uint32_t)(o->dest_stride - row);
-  }
-
+  /* a row's padding where it's laid in the caller's memory, at its stride */
+  im->row_pad_last       = rowpad;
   im->width              = w;
   im->height             = h;
   im->data.data          = px;
