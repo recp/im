@@ -362,8 +362,74 @@ jpg_idct_diff(uint32_t prec) {
   (void)stride;                                                                \
   *(T *)out = LIMIT(DESCALE((int64_t)dc, 3), C, M);
 
-static void idct4_8(const int16_t *in, const uint16_t *q, void *out, size_t stride) { IDCT4_BODY(uint8_t, 2, 128, 255) }
-static void idct2_8(const int16_t *in, const uint16_t *q, void *out, size_t stride) { IDCT2_BODY(uint8_t, 2, 128, 255) }
+static void idct4_8_plain(const int16_t *in, const uint16_t *q, void *out, size_t stride) { IDCT4_BODY(uint8_t, 2, 128, 255) }
+
+static void
+idct4_8(const int16_t *in, const uint16_t *q, void *out, size_t stride) {
+#if J_NEON
+  if (jpg_idct4_neon(in, q, out, stride)) return;
+#endif
+  idct4_8_plain(in, q, out, stride);
+}
+static void idct2_8_plain(const int16_t *in, const uint16_t *q, void *out, size_t stride) { IDCT2_BODY(uint8_t, 2, 128, 255) }
+
+#if J_NEON
+/* 2×2: the columns' pass on NEON lanes (its forms' coefficients sum to at
+   most 85759: 32768 + 5906 + 6967 + 10426 + 29692, so within 25000 an
+   input's sums hold in 32 bits; past it the plain path), the two rows'
+   as idct.c's */
+static bool
+idct2_neon(const int16_t *in, const uint16_t *q, uint8_t *o, size_t stride) {
+  static const uint8_t rows[5] = { 0, 1, 3, 5, 7 };
+  int32x4_t lo[8], hi[8], m = vdupq_n_s32(0);
+  int32_t   ws[16];
+  uint32_t  i;
+
+  for (i = 0; i < 5u; i++) {
+    uint32_t  r  = rows[i];
+    int16x8_t c  = vld1q_s16(in + 8u * r);
+    int16x8_t qq = vreinterpretq_s16_u16(vld1q_u16(q + 8u * r));
+
+    lo[r] = vmull_s16(vget_low_s16(c), vget_low_s16(qq));
+    hi[r] = vmull_high_s16(c, qq);
+    m     = vmaxq_s32(m, vmaxq_s32(vabsq_s32(lo[r]), vabsq_s32(hi[r])));
+  }
+  if (vmaxvq_u32(vreinterpretq_u32_s32(m)) > 25000u) return false;
+  {
+    int32x4_t t10l = vshlq_n_s32(lo[0], 15), t10h = vshlq_n_s32(hi[0], 15);
+    int32x4_t t0l  = vmlaq_n_s32(vmlsq_n_s32(vmlaq_n_s32(vmulq_n_s32(lo[7], -5906), lo[5], 6967), lo[3], 10426), lo[1], 29692);
+    int32x4_t t0h  = vmlaq_n_s32(vmlsq_n_s32(vmlaq_n_s32(vmulq_n_s32(hi[7], -5906), hi[5], 6967), hi[3], 10426), hi[1], 29692);
+
+    vst1q_s32(ws, vrshrq_n_s32(vaddq_s32(t10l, t0l), 13));
+    vst1q_s32(ws + 4, vrshrq_n_s32(vaddq_s32(t10h, t0h), 13));
+    vst1q_s32(ws + 8, vrshrq_n_s32(vsubq_s32(t10l, t0l), 13));
+    vst1q_s32(ws + 12, vrshrq_n_s32(vsubq_s32(t10h, t0h), 13));
+  }
+  for (i = 0; i < 2u; i++, o += stride) {
+    const int32_t *w = ws + i * 8u;
+    int64_t        t0, t10;
+
+    if (!(w[1] | w[3] | w[5] | w[7])) {
+      o[0] = o[1] = (uint8_t)LIMIT(DESCALE((int64_t)w[0], 5), 128, 255);
+      continue;
+    }
+    t10 = LSHIFT((int64_t)w[0], CONST_BITS + 2);
+    t0  = (int64_t)w[7] * -FIX_0_720959822 + (int64_t)w[5] * FIX_0_850430095
+          + (int64_t)w[3] * -FIX_1_272758580 + (int64_t)w[1] * FIX_3_624509785;
+    o[0] = (uint8_t)LIMIT(DESCALE(t10 + t0, CONST_BITS + 2 + 3 + 2), 128, 255);
+    o[1] = (uint8_t)LIMIT(DESCALE(t10 - t0, CONST_BITS + 2 + 3 + 2), 128, 255);
+  }
+  return true;
+}
+#endif
+
+static void
+idct2_8(const int16_t *in, const uint16_t *q, void *out, size_t stride) {
+#if J_NEON
+  if (idct2_neon(in, q, out, stride)) return;
+#endif
+  idct2_8_plain(in, q, out, stride);
+}
 static void idct1_8(const int16_t *in, const uint16_t *q, void *out, size_t stride) { IDCT1_BODY(uint8_t, 128, 255) }
 static void idct4_12(const int16_t *in, const uint16_t *q, void *out, size_t stride) { IDCT4_BODY(uint16_t, 1, 2048, 4095) }
 static void idct2_12(const int16_t *in, const uint16_t *q, void *out, size_t stride) { IDCT2_BODY(uint16_t, 1, 2048, 4095) }

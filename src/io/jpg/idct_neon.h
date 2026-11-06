@@ -246,4 +246,86 @@ jpg_idct8_neon(const int16_t *in, const uint16_t *q, uint8_t *out, size_t stride
   return true;
 }
 
+/* The 4×4 (idct.c's IDCT4_BODY, libjpeg's jpeg_idct_4x4) the same way: a
+   pass's outputs are linear forms whose coefficients' magnitudes sum to at
+   most 77910 (16384 + 15137 + 6270 + 1730 + 11893 + 17799 + 8697, with the
+   rounding's 2^18), so 32 bits hold every intermediate while a pass's
+   inputs are within 27000; past it, false (the 64-bit path). Row and
+   column 4 take no part; the DC-only columns' and rows' shortcuts give
+   what the sums do */
+#define JN_R0211 1730
+#define JN_R0509 4176
+#define JN_R0601 4926
+#define JN_R1061 8697
+#define JN_R1451 11893
+#define JN_R2172 17799
+
+/* one 1-D pass over x[0–3, 5–7], out o[0–3], undescaled */
+#define JN_PASS4(x, o)                                                         \
+  do {                                                                         \
+    int32x4_t t0, t2, t10, t12, u0, u2;                                        \
+                                                                               \
+    t0  = vshlq_n_s32(x[0], 14);                                               \
+    t2  = vmlsq_n_s32(vmulq_n_s32(x[2], JN_F1847), x[6], JN_F0765);            \
+    t10 = vaddq_s32(t0, t2);                                                   \
+    t12 = vsubq_s32(t0, t2);                                                   \
+    u0  = vmlaq_n_s32(vmlsq_n_s32(vmlaq_n_s32(vmulq_n_s32(x[7], -JN_R0211), x[5], JN_R1451), x[3], JN_R2172),  \
+                      x[1], JN_R1061);                                         \
+    u2  = vmlaq_n_s32(vmlaq_n_s32(vmlsq_n_s32(vmulq_n_s32(x[7], -JN_R0509), x[5], JN_R0601), x[3], JN_F0899),  \
+                      x[1], JN_F2562);                                         \
+    o[0] = vaddq_s32(t10, u2);                                                 \
+    o[3] = vsubq_s32(t10, u2);                                                 \
+    o[1] = vaddq_s32(t12, u0);                                                 \
+    o[2] = vsubq_s32(t12, u0);                                                 \
+  } while (0)
+
+IM_INLINE bool
+jpg_idct4_neon(const int16_t *in, const uint16_t *q, uint8_t *out, size_t stride) {
+  int32x4_t lo[8], hi[8], olo[4], ohi[4], col[8], o[4];
+  uint32_t  i;
+
+  /* dequantized: row k's columns 0–3 in lo[k], 4–7 in hi[k] */
+  for (i = 0; i < 8u; i++) {
+    int16x8_t c  = vld1q_s16(in + 8u * i);
+    int16x8_t qq = vreinterpretq_s16_u16(vld1q_u16(q + 8u * i));
+
+    if (i == 4u) continue;
+    lo[i] = vmull_s16(vget_low_s16(c), vget_low_s16(qq));
+    hi[i] = vmull_high_s16(c, qq);
+  }
+  lo[4] = hi[4] = vdupq_n_s32(0);
+  if (jn_maxabs(lo, 8u) > 27000u || jn_maxabs(hi, 8u) > 27000u) return false;
+
+  /* the columns: lanes are columns; four rows out */
+  JN_PASS4(lo, olo);
+  JN_PASS4(hi, ohi);
+  for (i = 0; i < 4u; i++) {
+    olo[i] = vrshrq_n_s32(olo[i], 12);
+    ohi[i] = vrshrq_n_s32(ohi[i], 12);
+  }
+  if (jn_maxabs(olo, 4u) > 27000u || jn_maxabs(ohi, 4u) > 27000u) return false;
+
+  /* transposed: col[k] column k's four rows */
+  jn_tr4(&olo[0], &olo[1], &olo[2], &olo[3]);
+  jn_tr4(&ohi[0], &ohi[1], &ohi[2], &ohi[3]);
+  for (i = 0; i < 4u; i++) {
+    col[i]      = olo[i];
+    col[i + 4u] = ohi[i];
+  }
+
+  /* the rows: lanes are rows; o[k] column k's out */
+  JN_PASS4(col, o);
+  {
+    const int32x4_t wrap = vdupq_n_s32(1023), off = vdupq_n_s32(512), back = vdupq_n_s32(384);
+    uint8_t         r[16];
+
+    for (i = 0; i < 4u; i++) o[i] = vsubq_s32(vandq_s32(vaddq_s32(vrshrq_n_s32(o[i], 19), off), wrap), back);
+    jn_tr4(&o[0], &o[1], &o[2], &o[3]); /* o[r] row r's four */
+    vst1q_u8(r, vqmovn_high_u16(vqmovn_u16(vcombine_u16(vqmovun_s32(o[0]), vqmovun_s32(o[1]))),
+                                vcombine_u16(vqmovun_s32(o[2]), vqmovun_s32(o[3]))));
+    for (i = 0; i < 4u; i++) memcpy(out + i * stride, r + 4u * i, 4u);
+  }
+  return true;
+}
+
 #endif /* src_io_jpg_idct_neon_h */
