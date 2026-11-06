@@ -3470,6 +3470,12 @@ typedef struct xlay {
   bool            apart, pad;
   bool            ident;   /* every channel a full-size component's 8-bit
                               samples as they are: narrowed and interleaved */
+  /* sYCC (the first three channels): sycc()'s products by the samples, the
+     same values (G's two floats summed, then truncated, as there) */
+  bool            ycc, yident; /* yident: 8-bit, its tables changing none */
+  int32_t         upb, off;
+  const int32_t  *rt, *bt;
+  const float    *ga, *gb;
 } xlay_t;
 
 static bool
@@ -3533,6 +3539,80 @@ lay_piece(jpx_t *j, xscratch_t *s, void *ctx, uint32_t item) {
     }
     return true;
   }
+  if (l->ycc) {
+    /* the three to RGB (sycc), each to its 8 bits by its table */
+    const uint16_t *src[3];
+    const uint32_t *cl[3];
+
+    for (u = 0; u < 3u; u++) {
+      uint32_t cp = l->comp[u];
+      int64_t  sy = (int64_t)(j->y0 + Y) / j->dy[cp] - (int64_t)j->py0[cp];
+
+      sy     = sy < 0 ? 0 : sy >= j->ph[cp] ? (int64_t)j->ph[cp] - 1 : sy;
+      src[u] = j->plane[cp] + (size_t)sy * j->pw[cp];
+      cl[u]  = l->cols[u];
+    }
+    X = X0;
+    q = o;
+#if X_NEON
+    /* full size, 8 bits as they are: eight a time, sycc()'s floats in the
+       same operations (nothing fused; truncated toward zero, as its casts) */
+    if (l->yident && !cl[0] && !cl[1] && !cl[2] && (l->step == 3u || l->step == 4u)) {
+      const int32x4_t off = vdupq_n_s32(l->off), top = vdupq_n_s32(l->upb), zero = vdupq_n_s32(0);
+
+      for (; X + 8u <= X1; X += 8u, q += 8u * l->step) {
+        uint16x8_t Yv = vld1q_u16(src[0] + X), Cb = vld1q_u16(src[1] + X), Cr = vld1q_u16(src[2] + X);
+        uint16x8_t rgb[3];
+        uint32_t   hlf;
+
+        for (hlf = 0; hlf < 2u; hlf++) {
+          uint16x4_t  y4  = hlf ? vget_high_u16(Yv) : vget_low_u16(Yv);
+          uint16x4_t  cb4 = hlf ? vget_high_u16(Cb) : vget_low_u16(Cb);
+          uint16x4_t  cr4 = hlf ? vget_high_u16(Cr) : vget_low_u16(Cr);
+          int32x4_t   y   = vreinterpretq_s32_u32(vmovl_u16(y4));
+          float32x4_t fb  = vcvtq_f32_s32(vsubq_s32(vreinterpretq_s32_u32(vmovl_u16(cb4)), off));
+          float32x4_t fr  = vcvtq_f32_s32(vsubq_s32(vreinterpretq_s32_u32(vmovl_u16(cr4)), off));
+          int32x4_t   r   = vaddq_s32(y, vcvtq_s32_f32(vmulq_n_f32(fr, 1.402f)));
+          int32x4_t   g   = vsubq_s32(y, vcvtq_s32_f32(vaddq_f32(vmulq_n_f32(fb, 0.344f), vmulq_n_f32(fr, 0.714f))));
+          int32x4_t   b   = vaddq_s32(y, vcvtq_s32_f32(vmulq_n_f32(fb, 1.772f)));
+          uint16x4_t  r4  = vmovn_u32(vreinterpretq_u32_s32(vminq_s32(vmaxq_s32(r, zero), top)));
+          uint16x4_t  g4  = vmovn_u32(vreinterpretq_u32_s32(vminq_s32(vmaxq_s32(g, zero), top)));
+          uint16x4_t  b4  = vmovn_u32(vreinterpretq_u32_s32(vminq_s32(vmaxq_s32(b, zero), top)));
+
+          if (!hlf) {
+            rgb[0] = vcombine_u16(r4, r4);
+            rgb[1] = vcombine_u16(g4, g4);
+            rgb[2] = vcombine_u16(b4, b4);
+          } else {
+            rgb[0] = vcombine_u16(vget_low_u16(rgb[0]), r4);
+            rgb[1] = vcombine_u16(vget_low_u16(rgb[1]), g4);
+            rgb[2] = vcombine_u16(vget_low_u16(rgb[2]), b4);
+          }
+        }
+        if (l->step == 3u) {
+          uint8x8x3_t v = { { vmovn_u16(rgb[0]), vmovn_u16(rgb[1]), vmovn_u16(rgb[2]) } };
+
+          vst3_u8(q, v);
+        } else {
+          uint8x8x4_t v = { { vmovn_u16(rgb[0]), vmovn_u16(rgb[1]), vmovn_u16(rgb[2]), vdup_n_u8(0xFFu) } };
+
+          vst4_u8(q, v); /* the 4th: a pad's, or the opacity's after */
+        }
+      }
+    }
+#endif
+    for (; X < X1; X++, q += l->step) {
+      int32_t yy = src[0][cl[0] ? cl[0][X] : X], cb = src[1][cl[1] ? cl[1][X] : X], cr = src[2][cl[2] ? cl[2][X] : X];
+      int32_t r = yy + l->rt[cr], g = yy - (int32_t)(l->ga[cb] + l->gb[cr]), b = yy + l->bt[cb];
+
+      r    = r < 0 ? 0 : r > l->upb ? l->upb : r;
+      g    = g < 0 ? 0 : g > l->upb ? l->upb : g;
+      b    = b < 0 ? 0 : b > l->upb ? l->upb : b;
+      q[0] = l->lut[0][r];
+      q[1] = l->lut[1][g];
+      q[2] = l->lut[2][b];
+    }
+  }
   if (l->whole) {
     uint32_t        cp = l->comp[0];
     int64_t         sy = (int64_t)(j->y0 + Y) - (int64_t)j->py0[cp];
@@ -3547,7 +3627,7 @@ lay_piece(jpx_t *j, xscratch_t *s, void *ctx, uint32_t item) {
     }
     return true;
   }
-  for (u = 0; u < l->nuse; u++) {
+  for (u = l->ycc ? 3u : 0u; u < l->nuse; u++) {
     uint32_t        cp = l->comp[u];
     int64_t         sy = (int64_t)(j->y0 + Y) / j->dy[cp] - (int64_t)j->py0[cp];
     const uint16_t *src;
@@ -3582,15 +3662,38 @@ lay_piece(jpx_t *j, xscratch_t *s, void *ctx, uint32_t item) {
    NULL: no memory; `*px` NULL and true: laid in the caller's */
 static bool
 compose8(jpx_t *j, const jp2_t *x, const jxopts_t *o, const xchan_t *ch, const uint32_t *use, uint32_t nuse,
-         uint32_t ncol, bool apart, uint8_t **pxp, void **alphap, uint32_t *stepp, size_t *lenp, uint32_t *padp) {
+         uint32_t ncol, bool apart, bool ycc, uint8_t **pxp, void **alphap, uint32_t *stepp, size_t *lenp, uint32_t *padp) {
   xlay_t    l;
   uint32_t  w = j->x1 - j->x0, h = j->y1 - j->y0, u, X, total = 0;
   uint32_t *cols = NULL;
   uint8_t  *luts, *px;
+  int32_t  *yt = NULL;
   size_t    n = (size_t)w * h, row;
   bool      ok;
 
   memset(&l, 0, sizeof(l));
+  /* sYCC: the products by each sample value (the three at one depth) */
+  if (ycc) {
+    uint32_t prec = j->prec[ch[use[0]].comp], nv = 1u << prec, v;
+    int32_t  off = 1 << (prec - 1u);
+
+    if (!(yt = malloc((size_t)nv * 4u * sizeof(*yt)))) return false;
+    l.ycc = true;
+    l.upb = (1 << prec) - 1;
+    l.off = off;
+    l.rt  = yt;
+    l.bt  = yt + nv;
+    l.ga  = (const float *)(void *)(yt + 2u * nv);
+    l.gb  = (const float *)(void *)(yt + 3u * nv);
+    for (v = 0; v < nv; v++) {
+      int32_t c = (int32_t)v - off;
+
+      yt[v]                            = (int32_t)(1.402f * (float)c);
+      yt[nv + v]                       = (int32_t)(1.772f * (float)c);
+      ((float *)(void *)(yt + 2u * nv))[v] = 0.344f * (float)c;
+      ((float *)(void *)(yt + 3u * nv))[v] = 0.714f * (float)c;
+    }
+  }
   l.nuse  = nuse;
   l.ncol  = ncol;
   l.w     = w;
@@ -3600,7 +3703,10 @@ compose8(jpx_t *j, const jp2_t *x, const jxopts_t *o, const xchan_t *ch, const u
   l.step  = l.pad ? 4u : l.step;
   row     = (size_t)w * l.step;
   for (u = 0; u < nuse; u++) total += 1u << j->prec[ch[use[u]].comp];
-  if (!(luts = malloc(total + ((size_t)4u << j->prec[ch[use[0]].comp])))) return false;
+  if (!(luts = malloc(total + ((size_t)4u << j->prec[ch[use[0]].comp])))) {
+    free(yt);
+    return false;
+  }
   total = 0;
   for (u = 0; u < nuse; u++) {
     const xchan_t *c = &ch[use[u]];
@@ -3615,6 +3721,7 @@ compose8(jpx_t *j, const jp2_t *x, const jxopts_t *o, const xchan_t *ch, const u
     if (j->dx[cp] != 1u || j->px0[cp] != j->x0 || j->pw[cp] < w) {
       if (!cols && !(cols = malloc((size_t)w * sizeof(*cols) * 5u))) {
         free(luts);
+        free(yt);
         return false;
       }
       for (X = 0; X < w; X++) {
@@ -3625,9 +3732,18 @@ compose8(jpx_t *j, const jp2_t *x, const jxopts_t *o, const xchan_t *ch, const u
       l.cols[u] = cols + (size_t)u * w;
     }
   }
+  /* sYCC's 8 bits as they are (its three tables changing none) */
+  if (ycc && j->prec[l.comp[0]] == 8u) {
+    uint32_t v;
+
+    l.yident = true;
+    for (u = 0; u < 3u; u++) {
+      for (v = 0; l.yident && v < 256u; v++) l.yident = l.lut[u][v] == v;
+    }
+  }
   /* every channel a full-size component's 8-bit samples as they are (a
      table that changes none): narrowed and interleaved */
-  if (!apart && !cols && (nuse == 1u || nuse == 3u || nuse == 4u) && (l.step == nuse || (l.pad && nuse == 3u))) {
+  if (!ycc && !apart && !cols && (nuse == 1u || nuse == 3u || nuse == 4u) && (l.step == nuse || (l.pad && nuse == 3u))) {
     l.ident = true;
     for (u = 0; u < nuse && l.ident; u++) {
       uint32_t cp = l.comp[u], v;
@@ -3638,7 +3754,7 @@ compose8(jpx_t *j, const jp2_t *x, const jxopts_t *o, const xchan_t *ch, const u
   }
   /* every channel one full-size component's (a palette's colours, gray):
      each value's pixel whole, four bytes a value */
-  if (!l.ident && !apart && l.step > 1u && !cols && j->dy[l.comp[0]] == 1u) {
+  if (!ycc && !l.ident && !apart && l.step > 1u && !cols && j->dy[l.comp[0]] == 1u) {
     uint32_t v, nv = 1u << j->prec[l.comp[0]];
     uint8_t *whole = luts + total;
 
@@ -3655,6 +3771,7 @@ compose8(jpx_t *j, const jp2_t *x, const jxopts_t *o, const xchan_t *ch, const u
     if (o->dest_stride < row || o->dest_size < o->dest_stride * (h - 1u) + row) {
       free(luts);
       free(cols);
+      free(yt);
       return false;
     }
     px      = o->dest;
@@ -3667,6 +3784,7 @@ compose8(jpx_t *j, const jp2_t *x, const jxopts_t *o, const xchan_t *ch, const u
     if (px != o->dest) free(px);
     free(luts);
     free(cols);
+    free(yt);
     return false;
   }
   l.px     = px;
@@ -3674,6 +3792,7 @@ compose8(jpx_t *j, const jp2_t *x, const jxopts_t *o, const xchan_t *ch, const u
   ok       = pool_run(j, lay_piece, &l, l.pieces * h);
   free(luts);
   free(cols);
+  free(yt);
   if (!ok) {
     if (px != o->dest) free(px);
     free(l.alpha);
@@ -3722,10 +3841,19 @@ compose(jpx_t *j, const jp2_t *x, ImImage *im, const jxopts_t *o) {
   if (opacity >= 0) use[nuse++] = (uint32_t)opacity;
   for (u = 0; u < nuse; u++) wide = wide || (ch[use[u]].bits > 8u && !o->eight);
 
-  /* 8 bits, no sYCC, no premultiplied opacity apart: the quick way, laid
-     where it ends (small deep images, whose tables are more than their
-     samples, compose's own) */
-  if (!ycc && !wide && !(premult && opacity >= 0 && o->opacity == IM_OPACITY_APART)) {
+  /* 8 bits, no premultiplied opacity apart: the quick way, laid where it
+     ends (small deep images, whose tables are more than their samples,
+     compose's own); sYCC too where its three are one depth's and no
+     palette's */
+  {
+    bool quick = ycc ? ncol == 3u && nuse >= 3u : true;
+
+    for (u = 0; quick && ycc && u < 3u; u++) {
+      quick = ch[use[u]].col < 0 && j->prec[ch[use[u]].comp] == j->prec[ch[use[0]].comp] && ch[use[u]].bits == j->prec[ch[use[0]].comp];
+    }
+    if (!quick) goto general;
+  }
+  if (!wide && !(premult && opacity >= 0 && o->opacity == IM_OPACITY_APART)) {
     size_t lut = 0;
 
     for (u = 0; u < nuse; u++) lut += (size_t)1 << j->prec[ch[use[u]].comp];
@@ -3733,13 +3861,14 @@ compose(jpx_t *j, const jp2_t *x, ImImage *im, const jxopts_t *o) {
       bool apart = opacity >= 0 && o->opacity == IM_OPACITY_APART;
 
       px = NULL;
-      if (!compose8(j, x, o, ch, use, nuse, ncol, apart, &px, &alpha, &step, &len, &rowpad)) return false;
+      if (!compose8(j, x, o, ch, use, nuse, ncol, apart, ycc, &px, &alpha, &step, &len, &rowpad)) return false;
       if (apart) opacity = -1;
       laid = true;
       goto made;
     }
   }
 
+general:
   step = nuse;
   len  = n * step * (wide ? 2u : 1u);
   if (!(px = malloc(len))) return false;
