@@ -20,7 +20,7 @@ TODO
 - [x] Cocoa and Win32 helpers
 - [x] From memory (`im_load_mem`, `im_info_mem`: JPEG, JPEG 2000), with options: threads, a JPEG's colour
       transform said by its container, CMYK as stored, RGB padded to RGB0, a palette's indexes, 8 bits
-      by OpenJPEG's rounding, the opacity apart (or not decoded)
+      by OpenJPEG's rounding, the opacity apart (or not decoded), decoded ½, ¼ or ⅛ the size
 - [x] Formats picked at build time: `-DIM_FORMATS="jpg;jp2"` (default `all`); only png needs the
       defl and huff submodules
 - [x] WebAssembly (WASI): wasi-sdk's toolchain file, `-DIM_STATIC=ON` (`-msimd128` for SIMD128);
@@ -45,7 +45,7 @@ TODO
   - [x] on threads: restart intervals, speculative Huffman, progressive scans row by row
   - [x] DNL (the height after the first scan; libjpeg refuses it)
   - [ ] hierarchical, lossless arithmetic
-  - [ ] scaled decode: ½, ¼, ⅛ by a smaller IDCT (djpeg's `-scale`)
+  - [x] decoded smaller (`IM_OPTION_SCALE`): ½, ¼, ⅛ by a smaller IDCT, libjpeg's scaled decode to the byte
 - [x] PNG (In Progress)
   - [x] palette
   - [x] color types
@@ -63,7 +63,7 @@ TODO
   - [x] gray, RGB, RGBA, CMYK; 8 and 16 bits; palette, sYCC, ICC profile
   - [x] threads
   - [ ] HT (Part 15), Part 2 (Apple's decoder reads them on Apple platforms)
-  - [ ] reduced resolution: the finest levels left out (OpenJPEG's `reduce`)
+  - [x] decoded smaller (`IM_OPTION_SCALE`): the finest levels left out, OpenJPEG's `reduce` to the sample
   - [ ] SIMD
 - [ ] JXL
   - [x] Apple platform
