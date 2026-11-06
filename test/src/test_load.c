@@ -24,7 +24,8 @@
  * gray channel each pixel mapping to one colour of the usual decode; 8
  * bits OpenJPEG's rounding of the 16 (taken back to their depth); the
  * opacity apart (the colours un-premultiplied) or not decoded; one thread
- * what many give; im_info_mem the headers' word.
+ * what many give; im_info_mem the headers' word; decoded smaller, as
+ * libjpeg's and OpenJPEG's (their pixels hashed).
  */
 
 #include "../include/common.h"
@@ -593,6 +594,113 @@ TEST_IMPL(dest) {
       ASSERT(!b);
     }
     free(buf);
+    im_free(a);
+  }
+
+  TEST_SUCCESS
+}
+
+static uint32_t
+fnv1a(const uint8_t *p, size_t n) {
+  uint32_t h = 2166136261u;
+  size_t   i;
+
+  for (i = 0; i < n; i++) h = (h ^ p[i]) * 16777619u;
+  return h;
+}
+
+/* decoded smaller: a JPEG ½, ¼, ⅛ as libjpeg's scaled decode gives it (a
+   lossless one at its size), a JPEG 2000 its finest levels left out as
+   OpenJPEG's reduce; the size over the scale, rounded up; into the
+   caller's memory at that size */
+TEST_IMPL(scale) {
+  static const struct {
+    const char *dir, *name;
+    uint32_t    scale, w, h, hash;
+  } cases[] = {
+    { "jpg", "420.jpg",        2,  19,  12, 0xF7664BE3u }, /* chroma's own block size: no upsampling */
+    { "jpg", "420.jpg",        4,  10,   6, 0xE34090A3u },
+    { "jpg", "420.jpg",        8,   5,   3, 0x2933CE47u },
+    { "jpg", "422.jpg",        2,  19,  12, 0xD8D69540u },
+    { "jpg", "440.jpg",        4,  10,   6, 0x2AE7CE1Au },
+    { "jpg", "411.jpg",        2,  19,  12, 0xEB514F55u }, /* 2×2 chroma blocks still twice as wide */
+    { "jpg", "411.jpg",        8,   5,   3, 0xA65B6D99u },
+    { "jpg", "311.jpg",        4,  10,   6, 0x49484034u },
+    { "jpg", "mixed.jpg",      2,  19,  12, 0xD0450488u },
+    { "jpg", "mixed.jpg",      8,   5,   3, 0xC0F60D59u },
+    { "jpg", "tiny.jpg",       8,   1,   1, 0x76595BC5u },
+    { "jpg", "prog.jpg",       4,  10,   6, 0xE34090A3u }, /* 420.jpg's coefficients */
+    { "jpg", "prog-cut.jpg",   2,  19,  12, 0x048ADAD2u }, /* smoothed, then smaller */
+    { "jpg", "p12.jpg",        2,  19,  12, 0x1C8E4DD6u },
+    { "jpg", "p12.jpg",        8,   5,   3, 0x9F1DE7BBu },
+    { "jpg", "arith-prog.jpg", 8,   5,   3, 0x2933CE47u },
+    { "jpg", "ycck.jpg",       4,  10,   6, 0xFB3DD00Eu },
+    { "jpg", "gray.jpg",       2,  19,  12, 0x26851658u },
+    { "jpg", "ll1.jpg",        8,  37,  23, 0x03A59D62u }, /* lossless: its size */
+    { "jpg", "threads.jpg",    2, 389, 389, 0xBD5E6926u },
+    { "jpg", "threads.jpg",    8,  98,  98, 0x4DBC78A0u },
+    { "jp2", "rct.jp2",        2,  19,  12, 0x616860B0u },
+    { "jp2", "rct.jp2",        8,   5,   3, 0x0644D8EAu },
+    { "jp2", "ict-tiles.j2k",  4,  10,   6, 0x1272B1A3u },
+    { "jp2", "sycc420.jp2",    2,  19,  12, 0xD7A5A5ABu },
+    { "jp2", "palette.jp2",    4,  10,   6, 0xF4B0DCECu },
+    { "jp2", "alpha.jp2",      8,   5,   3, 0x3CBFFA9Bu },
+    { "jp2", "gray16.jp2",     2,  19,  12, 0xB817F4B4u },
+    { "jp2", "poc.j2k",        4,  10,   6, 0xA377A9A6u },
+    { "jp2", "styles.jp2",     8,   5,   3, 0xDF7269EFu },
+    { "jp2", "imageio.jp2",    2, 320, 240, 0x9BC2E154u },
+  };
+  im_option_byteorder_t le = im_option_row_byteorder(IM_BYTEORDER_LITTLE);
+  size_t                i;
+
+  for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+    im_option_int_t sc = im_option_int(IM_OPTION_SCALE, (int32_t)cases[i].scale);
+    ImImage        *a = mem(cases[i].dir, cases[i].name, &sc.base, &le.base), *b;
+    uint32_t        h;
+
+    ASSERT(a && a->data.data && a->width == cases[i].w && a->height == cases[i].h);
+    ASSERT(a->len == (size_t)a->width * a->height * a->bytesPerPixel);
+    h = fnv1a(a->data.data, a->len);
+    if (h != cases[i].hash) fprintf(stderr, "  %s at 1/%u: 0x%08X\n", cases[i].name, cases[i].scale, h);
+    ASSERT(h == cases[i].hash);
+    /* the caller's memory, as big as the smaller image */
+    {
+      size_t           row = (size_t)a->width * a->bytesPerPixel, size = row * a->height;
+      uint8_t         *buf = malloc(size);
+      im_option_dest_t d   = im_option_dest(buf, row, size);
+      im_option_int_t  one = im_option_int(IM_OPTION_SCALE, (int32_t)cases[i].scale);
+      im_option_base_t *opts[4] = { &one.base, &le.base, &d.base, NULL };
+
+      ASSERT(buf);
+      b = NULL;
+      {
+        char     path[1024];
+        FILE    *f;
+        long     n;
+        uint8_t *data;
+
+        snprintf(path, sizeof(path), "%s/%s/%s", IM_TEST_DATA, cases[i].dir, cases[i].name);
+        ASSERT((f = fopen(path, "rb")));
+        fseek(f, 0, SEEK_END);
+        n = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        ASSERT((data = malloc((size_t)n)) && fread(data, 1, (size_t)n, f) == (size_t)n);
+        fclose(f);
+        ASSERT(im_load_mem(&b, data, (size_t)n, opts, IM_OPEN_INTENT_READONLY) == IM_OK && b);
+        ASSERT(!b->data.data && b->width == a->width && b->height == a->height && !memcmp(buf, a->data.data, size));
+        im_free(b);
+        free(data);
+      }
+      free(buf);
+    }
+    im_free(a);
+  }
+  /* other scales: the full size */
+  {
+    im_option_int_t three = im_option_int(IM_OPTION_SCALE, 3);
+    ImImage        *a = mem("jpg", "420.jpg", &three.base, NULL);
+
+    ASSERT(a && a->width == 37u && a->height == 23u);
     im_free(a);
   }
 

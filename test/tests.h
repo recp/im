@@ -51,6 +51,7 @@ TEST_DECLARE(jp2_options)
 TEST_DECLARE(info_mem)
 TEST_DECLARE(runner)
 TEST_DECLARE(dest)
+TEST_DECLARE(scale)
 #endif
 
 /*****************************************************************************/
@@ -82,6 +83,7 @@ TEST_LIST {
   TEST_ENTRY(info_mem)
   TEST_ENTRY(runner)
   TEST_ENTRY(dest)
+  TEST_ENTRY(scale)
 #endif
 };
 
