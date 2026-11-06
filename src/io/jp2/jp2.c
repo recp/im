@@ -48,6 +48,17 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if (defined(__ARM_NEON) || defined(_M_ARM64)) && !defined(IM_NO_SIMD)
+#  include <arm_neon.h>
+#  define X_NEON 1
+#elif (defined(__SSE2__) || defined(_M_X64)) && !defined(IM_NO_SIMD)
+#  include <emmintrin.h>
+#  define X_SSE2 1
+#elif defined(__wasm_simd128__) && !defined(IM_NO_SIMD)
+#  include <wasm_simd128.h>
+#  define X_WASM 1
+#endif
+
 #if defined(__clang__)
 #pragma STDC FP_CONTRACT OFF
 #elif defined(__GNUC__)
@@ -1949,36 +1960,47 @@ bitlen64(uint64_t v) {
 #endif
 }
 
-/* An HT code-block's samples into `out` (w × h, zeros, OpenJPEG's form, as
-   the T.800 passes leave theirs): the cleanup's magnitude mu at the plane
-   below p, its bin's centre, (2 mu + 1) << (p - 1); SigProp's newly
-   significant at the plane under it, 3 << (p - 2); MagRef's bit r there,
-   (2 mu + r) << (p - 1) | 1 << (p - 2). z the passes (1 to 3), `bound` the
-   largest exponent a quad may have (the zero bit-planes and one), `st` a
-   byte a padded sample (bit 0 the cleanup's significance, 1 SigProp's).
-   False: a stream that doesn't conform (`out` then to be cleared) */
+/* an HT code-block's padded size (whole quads): its width W, height H;
+   the state ht_block keeps: a byte a sample with two zero columns each
+   side and a zero row above (bit 0 the cleanup's significance, 1
+   SigProp's), two rows of exponents, the samples (W apart) */
+IM_INLINE size_t
+ht_state(uint32_t W, uint32_t H) {
+  return ((size_t)(W + 4u) * (H + 1u) + 2u * (W + 4u) + (size_t)W * 3u + 7u) & ~(size_t)7u;
+}
+
+/* An HT code-block's samples into `out` (W × H, the padded block's, W
+   apart; OpenJPEG's form, as the T.800 passes leave theirs): the cleanup's
+   magnitude mu at the plane below p, its bin's centre, (2 mu + 1) <<
+   (p - 1); SigProp's newly significant at the plane under it, 3 <<
+   (p - 2); MagRef's bit r there, (2 mu + r) << (p - 1) | 1 << (p - 2).
+   z the passes (1 to 3), `bound` the largest exponent a quad may have (the
+   zero bit-planes and one). False: a stream that doesn't conform (or whose
+   magnitudes 31 bits don't hold); `out` then to be cleared */
 static bool
 ht_block(const uint16_t (*htv)[8][128], uint8_t *st, const uint8_t *cup, uint32_t lcup, const uint8_t *ref,
          uint32_t lref, uint32_t w, uint32_t h, uint32_t p, uint32_t z, uint32_t bound, bool causal, int32_t *out) {
   htfw_t   ms;
   htbw_t   vlc;
   htmel_t  mel;
-  uint32_t qw = (w + 1u) / 2u, qh = (h + 1u) / 2u, W = qw * 2u, scup, pcup, qx, qy, x, y, last;
-  uint8_t *eprev = st + (size_t)W * (qh * 2u), *ecur = eprev + W + 2u;
-  bool     bad = false;
+  uint32_t qw = (w + 1u) / 2u, qh = (h + 1u) / 2u, W = qw * 2u, H = qh * 2u, SW = W + 4u, scup, pcup, qx, qy, x, y, last;
+  uint8_t *sig = st + SW + 2u, *eprev = st + (size_t)SW * (H + 1u) + 2u, *ecur = eprev + SW;
+  uint16_t *qi = (uint16_t *)(void *)(st + (((size_t)SW * (H + 3u) + 1u) & ~(size_t)1u));
+  uint8_t  *qu = (uint8_t *)(qi + qw);
+  uint32_t  sh = p - 1u;
 
   if (lcup < 2u) return false;
   scup = 16u * cup[lcup - 1u] + (cup[lcup - 2u] & 0x0Fu);
   if (scup < 2u || scup > lcup || scup > 4079u) return false;
   pcup = lcup - scup;
-  memset(st, 0, (size_t)W * (qh * 2u) + 2u * (W + 2u));
+  memset(st, 0, (size_t)SW * (H + 1u) + 2u * SW);
 
   fw_init(&ms, cup, pcup, 0xFFu);
   memset(&mel, 0, sizeof(mel));
   mel.p   = cup + pcup;
   mel.end = cup + lcup;
-  /* VLC: Scup's 12 bits skipped, the bytes to Pcup (the last two read as
-     modDcup has them) */
+  /* VLC: Scup's 12 bits skipped, the bytes down to Pcup (the second last
+     as modDcup has it) */
   last      = cup[lcup - 2u] | 0x0Fu;
   vlc.start = cup + pcup;
   vlc.p     = cup + lcup - 2u;
@@ -1987,127 +2009,124 @@ ht_block(const uint16_t (*htv)[8][128], uint8_t *st, const uint8_t *cup, uint32_
   vlc.last  = last;
   if (vlc.n == 3u) vlc.buf &= 7u;
 
+  /* a row of quads in two passes: its VLC, MEL and U-VLC symbols (the
+     significance patterns, EMB patterns, residuals: qi, qu), then its
+     MagSgn values */
   for (qy = 0; qy < qh; qy++) {
     const uint16_t (*tab)[128] = htv[qy ? 1u : 0u];
-    uint8_t        *s0 = st + (size_t)(2u * qy) * W, *s1 = s0 + W, *sa = qy ? s0 - W : NULL;
-    int32_t        *o0 = out + (size_t)(2u * qy) * w, *o1 = o0 + w;
-    bool            row1 = 2u * qy + 1u < h;
+    uint8_t        *s0 = sig + (size_t)(2u * qy) * SW, *s1 = s0 + SW, *sa = s0 - SW;
+    int32_t        *o0 = out + (size_t)(2u * qy) * W, *o1 = o0 + W;
 
     for (qx = 0; qx < qw; qx += 2u) {
-      uint32_t inf[2] = { 0, 0 }, u[2] = { 0, 0 }, pfx[2] = { 0, 0 }, sfx[2] = { 0, 0 }, ext[2] = { 0, 0 };
-      uint32_t n = qx + 1u < qw ? 2u : 1u, k;
+      uint32_t inf[2] = { 0, 0 }, u[2] = { 0, 0 }, n = qx + 1u < qw ? 2u : 1u, k;
 
       for (k = 0; k < n; k++) {
-        uint32_t q = qx + k, x0 = 2u * q, c, e;
+        ptrdiff_t x0 = 2 * (ptrdiff_t)(qx + k);
+        uint32_t  c, e;
 
-        if (!qy) {
-          c = q ? (s0[x0 - 2u] | s1[x0 - 2u]) + 2u * s0[x0 - 1u] + 4u * s1[x0 - 1u] : 0u;
-        } else {
-          uint32_t nw = q ? sa[x0 - 1u] : 0u, nf = q + 1u < qw ? sa[x0 + 2u] : 0u;
-          uint32_t wv = q ? s0[x0 - 1u] | s1[x0 - 1u] : 0u;
-
-          c = (nw | sa[x0]) + 2u * wv + 4u * (sa[x0 + 1u] | nf);
-        }
-        c &= 7u;
+        /* the context (7.3.5): the neighbours' significance, zero past the
+           block (the guard columns and row) */
+        if (!qy) c = (s0[x0 - 2] | s1[x0 - 2]) + 2u * s0[x0 - 1] + 4u * s1[x0 - 1];
+        else c = (sa[x0 - 1] | sa[x0]) + 2u * (s0[x0 - 1] | s1[x0 - 1]) + 4u * (sa[x0 + 1] | sa[x0 + 2]);
         /* decodeSigEMB: an all-zero context's quad by the MEL first */
-        if (!c && !mel_sym(&mel)) {
-          inf[k] = 0u;
-          continue;
-        }
+        if (!c && (mel.run > 0 ? (mel.run--, 1) : !mel_sym(&mel))) continue;
         e = tab[c][bw_peek(&vlc) & 0x7Fu];
         bw_skip(&vlc, e & 7u);
         inf[k] = e >> 3;
-        s0[x0]      = (uint8_t)(inf[k] & 1u);
-        s1[x0]      = (uint8_t)((inf[k] >> 1) & 1u);
-        s0[x0 + 1u] = (uint8_t)((inf[k] >> 2) & 1u);
-        s1[x0 + 1u] = (uint8_t)((inf[k] >> 3) & 1u);
+        s0[x0]     = (uint8_t)(inf[k] & 1u);
+        s1[x0]     = (uint8_t)((inf[k] >> 1) & 1u);
+        s0[x0 + 1] = (uint8_t)((inf[k] >> 2) & 1u);
+        s1[x0 + 1] = (uint8_t)((inf[k] >> 3) & 1u);
       }
       /* the unsigned residuals, the pair's steps interleaved (7.3.4) */
-      if (!qy && n == 2u && (inf[0] & inf[1] & 16u)) {
-        if (mel_sym(&mel)) {
-          for (k = 0; k < 2u; k++) pfx[k] = u_prefix(&vlc);
-          for (k = 0; k < 2u; k++) sfx[k] = u_suffix(&vlc, pfx[k]);
-          for (k = 0; k < 2u; k++) ext[k] = u_ext(&vlc, sfx[k]);
-          for (k = 0; k < 2u; k++) u[k] = 2u + pfx[k] + sfx[k] + 4u * ext[k];
-        } else {
-          uint32_t ubit = 0;
+      if ((inf[0] | inf[1]) & 16u) {
+        uint32_t pfx[2] = { 0, 0 }, sfx[2] = { 0, 0 }, ext[2] = { 0, 0 };
 
-          pfx[0] = u_prefix(&vlc);
-          if (pfx[0] > 2u) {
-            ubit = bw_peek(&vlc) & 1u;
-            bw_skip(&vlc, 1u);
-            pfx[1] = ubit + 1u;
+        if (!qy && n == 2u && (inf[0] & inf[1] & 16u)) {
+          if (mel.run > 0 ? (mel.run--, 0) : mel_sym(&mel)) {
+            for (k = 0; k < 2u; k++) pfx[k] = u_prefix(&vlc);
+            for (k = 0; k < 2u; k++) sfx[k] = u_suffix(&vlc, pfx[k]);
+            for (k = 0; k < 2u; k++) ext[k] = u_ext(&vlc, sfx[k]);
+            for (k = 0; k < 2u; k++) u[k] = 2u + pfx[k] + sfx[k] + 4u * ext[k];
           } else {
-            pfx[1] = u_prefix(&vlc);
+            uint32_t ubit = 0;
+
+            pfx[0] = u_prefix(&vlc);
+            if (pfx[0] > 2u) {
+              ubit = bw_peek(&vlc) & 1u;
+              bw_skip(&vlc, 1u);
+              pfx[1] = ubit + 1u;
+            } else {
+              pfx[1] = u_prefix(&vlc);
+            }
+            for (k = 0; k < 2u; k++) sfx[k] = u_suffix(&vlc, pfx[k]);
+            for (k = 0; k < 2u; k++) ext[k] = u_ext(&vlc, sfx[k]);
+            u[0] = pfx[0] + sfx[0] + 4u * ext[0];
+            u[1] = pfx[0] > 2u ? ubit + 1u : pfx[1] + sfx[1] + 4u * ext[1];
           }
-          for (k = 0; k < 2u; k++) sfx[k] = u_suffix(&vlc, pfx[k]);
-          for (k = 0; k < 2u; k++) ext[k] = u_ext(&vlc, sfx[k]);
-          u[0] = pfx[0] + sfx[0] + 4u * ext[0];
-          u[1] = pfx[0] > 2u ? ubit + 1u : pfx[1] + sfx[1] + 4u * ext[1];
-        }
-      } else if ((inf[0] | inf[1]) & 16u) {
-        for (k = 0; k < n; k++) {
-          if (inf[k] & 16u) pfx[k] = u_prefix(&vlc);
-        }
-        for (k = 0; k < n; k++) {
-          if (inf[k] & 16u) sfx[k] = u_suffix(&vlc, pfx[k]);
-        }
-        for (k = 0; k < n; k++) {
-          if (inf[k] & 16u) ext[k] = u_ext(&vlc, sfx[k]);
-        }
-        for (k = 0; k < n; k++) {
-          if (inf[k] & 16u) u[k] = pfx[k] + sfx[k] + 4u * ext[k];
+        } else {
+          for (k = 0; k < n; k++) {
+            if (inf[k] & 16u) pfx[k] = u_prefix(&vlc);
+          }
+          for (k = 0; k < n; k++) {
+            if (inf[k] & 16u) sfx[k] = u_suffix(&vlc, pfx[k]);
+          }
+          for (k = 0; k < n; k++) {
+            if (inf[k] & 16u) ext[k] = u_ext(&vlc, sfx[k]);
+          }
+          for (k = 0; k < n; k++) {
+            if (inf[k] & 16u) u[k] = pfx[k] + sfx[k] + 4u * ext[k];
+          }
         }
       }
-      /* the exponent bounds (7.3.7), then the MagSgn values (7.3.8) */
       for (k = 0; k < n; k++) {
-        uint32_t q = qx + k, x0 = 2u * q, rho = inf[k] & 15u, ek = (inf[k] >> 5) & 15u, e1 = (inf[k] >> 9) & 15u;
-        uint32_t kap = 1u, U, i;
-
-        if (!rho) {
-          ecur[x0] = ecur[x0 + 1u] = 0u;
-          continue;
-        }
-        if (qy && (rho & (rho - 1u))) {
-          uint32_t m = eprev[x0] > eprev[x0 + 1u] ? eprev[x0] : eprev[x0 + 1u];
-
-          if (q && eprev[x0 - 1u] > m) m = eprev[x0 - 1u];
-          if (q + 1u < qw && eprev[x0 + 2u] > m) m = eprev[x0 + 2u];
-          kap = m > 2u ? m - 1u : 1u;
-        }
-        U = kap + u[k];
-        if (U > bound || U > 32u) {
-          bad = true;
-          break;
-        }
-        for (i = 0; i < 4u; i++) {
-          uint32_t xx = x0 + (i >> 1), m;
-          uint64_t v, mag;
-
-          if (!(rho >> i & 1u)) {
-            if (i & 1u) ecur[xx] = 0u;
-            continue;
-          }
-          m   = U - (ek >> i & 1u);
-          v   = (uint64_t)fw_bits(&ms, m) | (uint64_t)(e1 >> i & 1u) << m;
-          /* mu = v / 2 + 1, the sign v's lowest bit */
-          if (i & 1u) ecur[xx] = (uint8_t)bitlen64(v | 1u); /* E: the bits of 2 mu - 1 = v + 1 rounded down to odd */
-          mag = ((v >> 1) * 2u + 3u) << (p - 1u);
-          if (mag > 0x7FFFFFFFu) {
-            bad = true;
-            break;
-          }
-          if (xx < w && (!(i & 1u) || row1)) {
-            int32_t *o = (i & 1u) ? o1 : o0;
-
-            o[xx] = (v & 1u) ? -(int32_t)mag : (int32_t)mag;
-          }
-        }
-        if (bad) break;
+        qi[qx + k] = (uint16_t)inf[k];
+        qu[qx + k] = (uint8_t)u[k];
       }
-      if (bad) break;
     }
-    if (bad) break;
+
+    /* the exponent bounds (7.3.7), then the MagSgn values (7.3.8): every
+       sample of the row's quads written, zeros too */
+    for (qx = 0; qx < qw; qx++) {
+      ptrdiff_t x0 = 2 * (ptrdiff_t)qx;
+      uint32_t  inf = qi[qx], rho = inf & 15u, ek = (inf >> 5) & 15u, e1 = (inf >> 9) & 15u, U, m, v;
+
+      if (!rho) {
+        o0[x0] = o0[x0 + 1] = o1[x0] = o1[x0 + 1] = 0;
+        ecur[x0] = ecur[x0 + 1] = 0u;
+        continue;
+      }
+      U = 1u;
+      if (qy) {
+        uint32_t ma = eprev[x0 - 1] > eprev[x0] ? eprev[x0 - 1] : eprev[x0];
+        uint32_t mb = eprev[x0 + 1] > eprev[x0 + 2] ? eprev[x0 + 1] : eprev[x0 + 2];
+
+        ma = ma > mb ? ma : mb;
+        U  = (rho & (rho - 1u)) && ma > 2u ? ma - 1u : 1u; /* gamma: more than one significant */
+      }
+      U += qu[qx];
+      if (U > bound || U + p > 31u) return false;
+      /* mu = v / 2 + 1, the sign v's lowest bit; (2 mu + 1) = 2 (v >> 1) + 3.
+         No branch on a sample's significance: an insignificant one's bits
+         none, its magnitude masked to 0 */
+#define HT_SAMPLE(i, dst)                                                      \
+      {                                                                        \
+        uint32_t sg = (rho >> (i)) & 1u, mag, neg;                             \
+                                                                               \
+        m   = (U - ((ek >> (i)) & 1u)) & (0u - sg);                            \
+        v   = fw_bits(&ms, m) | ((e1 >> (i)) & 1u) << m;                       \
+        mag = (((v >> 1) * 2u + 3u) << sh) & (0u - sg);                        \
+        neg = v & 1u;                                                          \
+        dst = (int32_t)((mag ^ (0u - neg)) + neg);                             \
+      }
+      HT_SAMPLE(0, o0[x0])
+      HT_SAMPLE(1, o1[x0])
+      ecur[x0] = (uint8_t)(bitlen64(v | 1u) & (0u - ((rho >> 1) & 1u))); /* E: the bits of 2 mu - 1 */
+      HT_SAMPLE(2, o0[x0 + 1])
+      HT_SAMPLE(3, o1[x0 + 1])
+      ecur[x0 + 1] = (uint8_t)(bitlen64(v | 1u) & (0u - ((rho >> 3) & 1u)));
+#undef HT_SAMPLE
+    }
     {
       uint8_t *t = eprev;
 
@@ -2115,7 +2134,6 @@ ht_block(const uint16_t (*htv)[8][128], uint8_t *st, const uint8_t *cup, uint32_
       ecur  = t;
     }
   }
-  if (bad) return false;
 
   /* SigProp (7.4): stripes of four rows, groups of four columns, the
      magnitudes then the signs */
@@ -2132,19 +2150,19 @@ ht_block(const uint16_t (*htv)[8][128], uint8_t *st, const uint8_t *cup, uint32_
 
         for (x = gx; x < ex; x++) {
           for (y = sy; y < ey; y++) {
-            uint8_t *s = st + (size_t)y * W + x;
+            uint8_t *s = sig + (size_t)y * SW + x;
             uint32_t mbr;
 
             if (*s & 1u) continue;
-            mbr = (x ? s[-1] : 0u) | (x + 1u < w ? s[1] : 0u);
-            if (y) mbr |= s[-(ptrdiff_t)W] | (x ? s[-(ptrdiff_t)W - 1] : 0u) | (x + 1u < w ? s[1 - (ptrdiff_t)W] : 0u);
-            if (y + 1u < lim) mbr |= s[W] | (x ? s[W - 1u] : 0u) | (x + 1u < w ? s[W + 1u] : 0u);
+            /* past the block: the padding's zeros, the guards' */
+            mbr = s[-1] | s[1] | s[-(ptrdiff_t)SW] | s[-(ptrdiff_t)SW - 1] | s[1 - (ptrdiff_t)SW];
+            if (y + 1u < lim) mbr |= s[SW] | s[SW - 1u] | s[SW + 1u];
             if (mbr && fw_bits(&sp, 1u)) *s |= 2u;
           }
         }
         for (x = gx; x < ex; x++) {
           for (y = sy; y < ey; y++) {
-            if (st[(size_t)y * W + x] & 2u) out[(size_t)y * w + x] = fw_bits(&sp, 1u) ? -(int32_t)one : (int32_t)one;
+            if (sig[(size_t)y * SW + x] & 2u) out[(size_t)y * W + x] = fw_bits(&sp, 1u) ? -(int32_t)one : (int32_t)one;
           }
         }
       }
@@ -2166,10 +2184,10 @@ ht_block(const uint16_t (*htv)[8][128], uint8_t *st, const uint8_t *cup, uint32_
 
       for (x = 0; x < w; x++) {
         for (y = sy; y < ey; y++) {
-          int32_t *o = out + (size_t)y * w + x;
+          int32_t *o = out + (size_t)y * W + x;
           uint32_t r, mag;
 
-          if (!(st[(size_t)y * W + x] & 1u)) continue;
+          if (!(sig[(size_t)y * SW + x] & 1u)) continue;
           r = bw_peek(&mr) & 1u;
           bw_skip(&mr, 1u);
           mag = (uint32_t)(*o < 0 ? -*o : *o);
@@ -2182,17 +2200,17 @@ ht_block(const uint16_t (*htv)[8][128], uint8_t *st, const uint8_t *cup, uint32_
   return true;
 }
 
-/* a decoded HT code-block's state, at most: a byte a padded sample (4096
-   and its width and height), two rows of exponents */
-enum { HT_SCRATCH = 5200u + 2u * 1028u };
+/* ht_block's state and samples at most (a padded block: W × H at most
+   4096 + 1024 + 4 + 1, W + 4 by H + 1 at most 10324 bytes) */
+enum { HT_SCRATCH = 10336u + 2u * 1028u + 5200u * 4u };
 
 /* a code-block decoded into the tile-component's buffer, dequantized */
 static bool
 t1_block(const jpx_t *j, xscratch_t *sc, xcblk_t *b, const xband_t *band, const xcc_t *cc, xtc_t *tc) {
   t1_t     t;
   uint32_t w = (uint32_t)(b->x1 - b->x0), h = (uint32_t)(b->y1 - b->y0), x, y, s, passtype = 2u;
-  int32_t  bp = (int32_t)cc->roi + b->numbps;
-  size_t   total = 0, at = 0, stride = (size_t)(tc->x1 - tc->x0);
+  int32_t  bp = (int32_t)cc->roi + b->numbps, *dat;
+  size_t   total = 0, at = 0, stride = (size_t)(tc->x1 - tc->x0), ds = w; /* dat: the samples, ds apart */
 
   if (!b->nsegs || b->numbps <= 0 || bp >= 31 || !w || !h) return true;
   if (!sc->flags && (!(sc->flags = malloc((1026u * 4u + 2048u) * sizeof(*sc->flags)))
@@ -2223,7 +2241,8 @@ t1_block(const jpx_t *j, xscratch_t *sc, xcblk_t *b, const xband_t *band, const 
   t.sc     = j->sc;
   t.causal = (cc->style & CB_CAUSAL) != 0;
   if (!(cc->style & CB_HT)) memset(t.flags, 0, (size_t)t.fs * ((h + 3u) / 4u + 2u) * sizeof(*t.flags));
-  memset(t.data, 0, (size_t)w * h * sizeof(*t.data));
+  dat = t.data;
+  if (!(cc->style & CB_HT)) memset(t.data, 0, (size_t)w * h * sizeof(*t.data));
   mq_reset(&t);
 
   if (cc->style & CB_HT) {
@@ -2237,9 +2256,11 @@ t1_block(const jpx_t *j, xscratch_t *sc, xcblk_t *b, const xband_t *band, const 
     z = passes < 3u ? passes : 3u;
     if (!lref || bp < 2) z = 1u;
     if (!sc->ht && !(sc->ht = malloc(HT_SCRATCH))) return false;
+    ds  = (w + 1u) & ~1u;
+    dat = (int32_t *)(void *)(sc->ht + ht_state((uint32_t)ds, (h + 1u) & ~1u));
     if (!ht_block(j->htv, sc->ht, sc->bytes, lcup, sc->bytes + lcup, lref, w, h, (uint32_t)bp, z,
-                  (uint32_t)(band->mb + 1 - b->numbps) + 1u + cc->roi, (cc->style & CB_CAUSAL) != 0, t.data)) {
-      memset(t.data, 0, (size_t)w * h * sizeof(*t.data));
+                  (uint32_t)(band->mb + 1 - b->numbps) + 1u + cc->roi, (cc->style & CB_CAUSAL) != 0, dat)) {
+      memset(dat, 0, ds * ((h + 1u) & ~1u) * sizeof(*dat));
     }
   }
 
@@ -2274,10 +2295,12 @@ t1_block(const jpx_t *j, xscratch_t *sc, xcblk_t *b, const xband_t *band, const 
   if (cc->roi) {
     int32_t thresh = (int32_t)1 << cc->roi;
 
-    for (x = 0; x < w * h; x++) {
-      int32_t v = t.data[x], m = v < 0 ? -v : v;
+    for (y = 0; y < h; y++) {
+      for (x = 0; x < w; x++) {
+        int32_t v = dat[(size_t)y * ds + x], m = v < 0 ? -v : v;
 
-      if (m >= thresh) t.data[x] = v < 0 ? -(m >> cc->roi) : m >> cc->roi;
+        if (m >= thresh) dat[(size_t)y * ds + x] = v < 0 ? -(m >> cc->roi) : m >> cc->roi;
+      }
     }
   }
 
@@ -2288,14 +2311,14 @@ t1_block(const jpx_t *j, xscratch_t *sc, xcblk_t *b, const xband_t *band, const 
       int32_t *out = (int32_t *)tc->data + oy * stride + ox;
 
       for (y = 0; y < h; y++) {
-        for (x = 0; x < w; x++) out[(size_t)y * stride + x] = t.data[(size_t)y * w + x] / 2;
+        for (x = 0; x < w; x++) out[(size_t)y * stride + x] = dat[(size_t)y * ds + x] / 2;
       }
     } else {
       float *out  = (float *)tc->data + oy * stride + ox;
       float  step = 0.5f * band->step;
 
       for (y = 0; y < h; y++) {
-        for (x = 0; x < w; x++) out[(size_t)y * stride + x] = (float)t.data[(size_t)y * w + x] * step;
+        for (x = 0; x < w; x++) out[(size_t)y * stride + x] = (float)dat[(size_t)y * ds + x] * step;
       }
     }
   }
@@ -2689,28 +2712,76 @@ typedef struct xplace {
 } xplace_t;
 
 /* a component's samples to its plane's: the DC level shift, clamped to its
-   depth, made unsigned. 9/7's rounded as OpenJPEG's lrintf, the float held
-   to just past the depth first, so the loop has no branch */
+   depth, made unsigned. 5/3's clamped before the shift (the same values, in
+   32 bits); 9/7's rounded as OpenJPEG's lrintf (to nearest, ties to even),
+   the float held to just past the depth first, so the loop has no branch,
+   four at a time where the CPU has SIMD (the same roundings) */
 static void
 place_samples(const jpx_t *j, uint32_t c, bool reversible, const void *src, uint16_t *out, uint32_t w) {
   int32_t  prec = j->prec[c], lo = j->sgnd[c] ? -(1 << (prec - 1)) : 0, hi = j->sgnd[c] ? (1 << (prec - 1)) - 1 : (1 << prec) - 1;
   int32_t  shift = j->sgnd[c] ? 0 : 1 << (prec - 1), lift = j->sgnd[c] ? 1 << (prec - 1) : 0;
-  uint32_t x;
+  uint32_t x = 0;
 
   if (reversible) {
     const int32_t *s = src;
+    int32_t        a = lo - shift, b = hi - shift, add = shift + lift;
 
-    for (x = 0; x < w; x++) {
-      int64_t v = (int64_t)s[x] + shift;
+    for (; x < w; x++) {
+      int32_t v = s[x];
 
-      v      = v < lo ? lo : v > hi ? hi : v;
-      out[x] = (uint16_t)(v + lift);
+      v      = v < a ? a : v > b ? b : v;
+      out[x] = (uint16_t)(v + add);
     }
   } else {
     const float *s   = src;
     const float  flo = (float)(lo - shift - 1), fhi = (float)(hi - shift + 1);
 
-    for (x = 0; x < w; x++) {
+#if X_NEON
+    {
+      float32x4_t fl = vdupq_n_f32(flo), fh = vdupq_n_f32(fhi);
+      int32x4_t   il = vdupq_n_s32(lo), ih = vdupq_n_s32(hi), sh = vdupq_n_s32(shift), lf = vdupq_n_s32(lift);
+
+      for (; x + 8u <= w; x += 8u) {
+        int32x4_t a = vcvtnq_s32_f32(vminq_f32(vmaxq_f32(vld1q_f32(s + x), fl), fh));
+        int32x4_t b = vcvtnq_s32_f32(vminq_f32(vmaxq_f32(vld1q_f32(s + x + 4u), fl), fh));
+
+        a = vaddq_s32(vminq_s32(vmaxq_s32(vaddq_s32(a, sh), il), ih), lf);
+        b = vaddq_s32(vminq_s32(vmaxq_s32(vaddq_s32(b, sh), il), ih), lf);
+        vst1q_u16(out + x, vcombine_u16(vmovn_u32(vreinterpretq_u32_s32(a)), vmovn_u32(vreinterpretq_u32_s32(b))));
+      }
+    }
+#elif X_SSE2
+    {
+      __m128 fl = _mm_set1_ps(flo), fh = _mm_set1_ps(fhi);
+      __m128i sh = _mm_set1_epi32(shift - 32768 + lift), bias = _mm_set1_epi16((short)-32768);
+      __m128i il = _mm_set1_epi16((short)(lo + lift - 32768)), ih = _mm_set1_epi16((short)(hi + lift - 32768));
+
+      /* to 16 bits signed around the middle (packs saturates there), held
+         to the depth, then back */
+      for (; x + 8u <= w; x += 8u) {
+        __m128i a = _mm_add_epi32(_mm_cvtps_epi32(_mm_min_ps(_mm_max_ps(_mm_loadu_ps(s + x), fl), fh)), sh);
+        __m128i b = _mm_add_epi32(_mm_cvtps_epi32(_mm_min_ps(_mm_max_ps(_mm_loadu_ps(s + x + 4u), fl), fh)), sh);
+        __m128i v = _mm_min_epi16(_mm_max_epi16(_mm_packs_epi32(a, b), il), ih);
+
+        _mm_storeu_si128((__m128i *)(void *)(out + x), _mm_sub_epi16(v, bias));
+      }
+    }
+#elif X_WASM
+    {
+      v128_t fl = wasm_f32x4_splat(flo), fh = wasm_f32x4_splat(fhi);
+      v128_t il = wasm_i32x4_splat(lo), ih = wasm_i32x4_splat(hi), sh = wasm_i32x4_splat(shift), lf = wasm_i32x4_splat(lift);
+
+      for (; x + 8u <= w; x += 8u) {
+        v128_t a = wasm_i32x4_trunc_sat_f32x4(wasm_f32x4_nearest(wasm_f32x4_min(wasm_f32x4_max(wasm_v128_load(s + x), fl), fh)));
+        v128_t b = wasm_i32x4_trunc_sat_f32x4(wasm_f32x4_nearest(wasm_f32x4_min(wasm_f32x4_max(wasm_v128_load(s + x + 4u), fl), fh)));
+
+        a = wasm_i32x4_add(wasm_i32x4_min(wasm_i32x4_max(wasm_i32x4_add(a, sh), il), ih), lf);
+        b = wasm_i32x4_add(wasm_i32x4_min(wasm_i32x4_max(wasm_i32x4_add(b, sh), il), ih), lf);
+        wasm_v128_store(out + x, wasm_u16x8_narrow_i32x4(a, b));
+      }
+    }
+#endif
+    for (; x < w; x++) {
       float   f = s[x];
       int32_t v;
 
@@ -3252,6 +3323,8 @@ typedef struct xlay {
   uint8_t        *px, *alpha;
   size_t          pitch;
   bool            apart, pad;
+  bool            ident;   /* every channel a full-size component's 8-bit
+                              samples as they are: narrowed and interleaved */
 } xlay_t;
 
 static bool
@@ -3262,6 +3335,59 @@ lay_piece(jpx_t *j, xscratch_t *s, void *ctx, uint32_t item) {
 
   (void)s;
   X1 = l->w - X0 > X_PIECE ? X0 + X_PIECE : l->w;
+  if (l->ident) {
+    const uint16_t *src[4] = { NULL, NULL, NULL, NULL };
+
+    for (u = 0; u < l->nuse; u++) {
+      uint32_t cp = l->comp[u];
+      int64_t  sy = (int64_t)(j->y0 + Y) / j->dy[cp] - (int64_t)j->py0[cp];
+
+      sy     = sy < 0 ? 0 : sy >= j->ph[cp] ? (int64_t)j->ph[cp] - 1 : sy;
+      src[u] = j->plane[cp] + (size_t)sy * j->pw[cp];
+    }
+    X = X0;
+    if (l->nuse == 1u) {
+      for (; X < X1; X++) o[X - X0] = (uint8_t)src[0][X];
+    } else if (l->nuse == 3u && l->step == 3u) {
+#if X_NEON
+      for (; X + 16u <= X1; X += 16u, o += 48) {
+        uint8x16x3_t v;
+
+        v.val[0] = vcombine_u8(vmovn_u16(vld1q_u16(src[0] + X)), vmovn_u16(vld1q_u16(src[0] + X + 8u)));
+        v.val[1] = vcombine_u8(vmovn_u16(vld1q_u16(src[1] + X)), vmovn_u16(vld1q_u16(src[1] + X + 8u)));
+        v.val[2] = vcombine_u8(vmovn_u16(vld1q_u16(src[2] + X)), vmovn_u16(vld1q_u16(src[2] + X + 8u)));
+        vst3q_u8(o, v);
+      }
+#endif
+      for (; X < X1; X++, o += 3) {
+        o[0] = (uint8_t)src[0][X];
+        o[1] = (uint8_t)src[1][X];
+        o[2] = (uint8_t)src[2][X];
+      }
+    } else {
+      /* four a pixel: RGBA, CMYK, or RGB padded with 0xFF */
+      const uint16_t *a = l->nuse == 4u ? src[3] : NULL;
+
+#if X_NEON
+      for (; X + 16u <= X1; X += 16u, o += 64) {
+        uint8x16x4_t v;
+
+        v.val[0] = vcombine_u8(vmovn_u16(vld1q_u16(src[0] + X)), vmovn_u16(vld1q_u16(src[0] + X + 8u)));
+        v.val[1] = vcombine_u8(vmovn_u16(vld1q_u16(src[1] + X)), vmovn_u16(vld1q_u16(src[1] + X + 8u)));
+        v.val[2] = vcombine_u8(vmovn_u16(vld1q_u16(src[2] + X)), vmovn_u16(vld1q_u16(src[2] + X + 8u)));
+        v.val[3] = a ? vcombine_u8(vmovn_u16(vld1q_u16(a + X)), vmovn_u16(vld1q_u16(a + X + 8u))) : vdupq_n_u8(0xFFu);
+        vst4q_u8(o, v);
+      }
+#endif
+      for (; X < X1; X++, o += 4) {
+        o[0] = (uint8_t)src[0][X];
+        o[1] = (uint8_t)src[1][X];
+        o[2] = (uint8_t)src[2][X];
+        o[3] = a ? (uint8_t)a[X] : 0xFFu;
+      }
+    }
+    return true;
+  }
   if (l->whole) {
     uint32_t        cp = l->comp[0];
     int64_t         sy = (int64_t)(j->y0 + Y) - (int64_t)j->py0[cp];
@@ -3354,9 +3480,20 @@ compose8(jpx_t *j, const jp2_t *x, const jxopts_t *o, const xchan_t *ch, const u
       l.cols[u] = cols + (size_t)u * w;
     }
   }
+  /* every channel a full-size component's 8-bit samples as they are (a
+     table that changes none): narrowed and interleaved */
+  if (!apart && !cols && (nuse == 1u || nuse == 3u || nuse == 4u) && (l.step == nuse || (l.pad && nuse == 3u))) {
+    l.ident = true;
+    for (u = 0; u < nuse && l.ident; u++) {
+      uint32_t cp = l.comp[u], v;
+
+      if (j->prec[cp] > 8u) l.ident = false;
+      for (v = 0; l.ident && v < 1u << j->prec[cp]; v++) l.ident = l.lut[u][v] == v;
+    }
+  }
   /* every channel one full-size component's (a palette's colours, gray):
      each value's pixel whole, four bytes a value */
-  if (!apart && l.step > 1u && !cols && j->dy[l.comp[0]] == 1u) {
+  if (!l.ident && !apart && l.step > 1u && !cols && j->dy[l.comp[0]] == 1u) {
     uint32_t v, nv = 1u << j->prec[l.comp[0]];
     uint8_t *whole = luts + total;
 
