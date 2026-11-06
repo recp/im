@@ -63,7 +63,9 @@ TODO
   - [x] every code-block style, 5/3 and 9/7, RCT and ICT, subsampling
   - [x] gray, RGB, RGBA, CMYK; 8 and 16 bits; palette, sYCC, ICC profile
   - [x] threads
-  - [ ] HT (Part 15), Part 2 (Apple's decoder reads them on Apple platforms)
+  - [x] HT (Part 15): HT code-blocks (a tile-component's all; one HT set), the cleanup, SigProp and MagRef
+        passes, JPH files; OpenJPEG's samples
+  - [ ] Part 2 (Apple's decoder reads it on Apple platforms)
   - [x] decoded smaller (`IM_OPTION_SCALE`): the finest levels left out, OpenJPEG's `reduce` to the sample
   - [ ] SIMD
 - [ ] JXL
