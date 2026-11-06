@@ -495,6 +495,17 @@ jpg_out_rows(jsout_t *o, uint32_t worker, uint32_t y0, uint32_t y1) {
       if (o->pad) pad16(p, w, (uint16_t *)(void *)(o->px + (size_t)y * o->pitch));
     }
   }
+  /* the planes' rows only these rows read given back (a big image's): two
+     either side kept for the bands round them */
+  for (i = 0; i < n; i++) {
+    const jcomp_t *c   = &j->comp[i];
+    size_t         row = c->stride * (o->wide ? 2u : 1u), all = c->plane_size / row;
+    uint64_t       r0  = y0 ? (uint64_t)y0 * c->oh / j->oh + 2u : 0u;
+    uint64_t       r1  = y1 >= j->oh ? all : (uint64_t)y1 * c->oh / j->oh;
+
+    r1 = y1 >= j->oh ? r1 : r1 > 2u ? r1 - 2u : 0u;
+    if (r1 > r0) im_release(j->big, (uint8_t *)c->plane + r0 * row, (size_t)(r1 - r0) * row);
+  }
 }
 
 static bool
@@ -558,7 +569,8 @@ jpg_out_begin(jpg_t *j, jspace_t space, ImByteOrder order) {
   o->on     = o->pad ? 4u : n;
   o->swap   = order != IM_BYTEORDER_HOST && (order == IM_BYTEORDER_BIG) != J_HOST_BIG;
   o->rowlen = (size_t)j->hmax * 8u * (j->mcux + 1u) + 16u;
-  o->band   = j->pool ? h / (nw * 8u) : h;
+  /* on one thread bands too, so a big image's planes go as its rows come */
+  o->band   = j->pool ? h / (nw * 8u) : 256u;
   o->band   = o->band < 8u ? 8u : o->band;
   o->order  = order;
   len       = (size_t)w * h * o->on * (o->wide ? 2u : 1u);

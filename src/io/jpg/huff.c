@@ -1665,10 +1665,9 @@ spec_pass1(void *arg, uint32_t worker, uint32_t item) {
          come, decoded again in (3) */
       if (ch->ncoef + 128u > ch->coefcap) {
         size_t   cap  = ch->coefcap * 2u;
-        int16_t *next = realloc(ch->coef, cap * sizeof(*next));
+        int16_t *next = im_big_grow(ch->coef, ch->coefcap * sizeof(*next), cap * sizeof(*next), j->big);
 
         if (!next) {
-          free(ch->coef);
           ch->coef = NULL;
           st.dc[ci] = (int32_t)((uint32_t)st.dc[ci] + (uint32_t)block_drop(&bs, j->dc[j->comp[ci].td], j->ac[j->comp[ci].ta]));
           st.blk++;
@@ -1884,7 +1883,7 @@ scan_spec(jpg_t *j, im_pool_t *pool, uint32_t w, uint32_t h, size_t margin, bool
       uint64_t nblk = (uint64_t)sp.total * 3u / sp.n, a = nblk * 2u + ((uint64_t)part * 3u) * 2u, b = nblk * 128u;
 
       ch[i].coefcap = (size_t)(a < b ? a : b) + 1024u;
-      ch[i].coef    = malloc(ch[i].coefcap * sizeof(int16_t));
+      ch[i].coef    = im_big_alloc(ch[i].coefcap * sizeof(int16_t), false, j->big);
     }
   }
   for (i = 0; i < nw; i++) {
@@ -1902,7 +1901,7 @@ scan_spec(jpg_t *j, im_pool_t *pool, uint32_t w, uint32_t h, size_t margin, bool
   for (i = 0; i < nw; i++) free(ctx[i].tail);
   for (i = 0; i < sp.n; i++) {
     free(ch[i].rec);
-    free(ch[i].coef);
+    im_big_free(ch[i].coef, ch[i].coefcap * sizeof(int16_t), j->big);
   }
   return ok;
 }

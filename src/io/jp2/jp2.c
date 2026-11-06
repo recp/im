@@ -70,12 +70,21 @@ enum {
   X_LEVELS = 32,
   X_BANDS  = 1 + 3 * X_LEVELS,
   X_POCS   = 32,
-  X_PIXELS = 1u << 26,  /* an image's */
+  X_PIXELS = 1u << 30,  /* an image's (as JPEG's a component's) */
   X_BLOCKS = 1u << 22,  /* code-blocks a tile */
   X_PRECS  = 1u << 22,  /* precincts a tile */
   X_PAL    = 1024,      /* a palette's entries */
   X_ARENA  = 1u << 30   /* a tile's structures and data */
 };
+
+#ifndef X_BIG
+#  define X_BIG ((uint64_t)256u << 20) /* (a test build can lower it) */
+#endif
+/* a big image's tile-component's samples from this many bytes mapped (less:
+   the tile's arena, a small tile not mapped for each) */
+#ifndef X_MAP_MIN
+#  define X_MAP_MIN ((uint64_t)32u << 20)
+#endif
 
 /* -- memory: a bump allocator on malloc ---------------------------------------- */
 
@@ -90,6 +99,7 @@ struct arena_block {
   arena_block_t *next;
   size_t         used;
   size_t         cap;
+  bool           mapped; /* a big image's big block: from the system */
   /* data follows */
 };
 
@@ -97,6 +107,8 @@ typedef struct arena {
   arena_block_t *head;
   uint64_t       used;  /* charged, blocks included */
   uint64_t       limit;
+  bool           big;   /* blocks of X_MAP_MIN or more mapped (given back
+                           the moment they're let go) */
 } arena_t;
 
 static void*
@@ -110,11 +122,15 @@ arena_alloc(arena_t *arena, uint64_t want) {
   b    = arena->head;
 
   if (!b || b->cap - b->used < size) {
+    bool map;
+
     cap = size > BLOCK_BYTES / 4 ? size : BLOCK_BYTES;
+    map = arena->big && cap >= X_MAP_MIN;
     if (size > SIZE_MAX - sizeof(*b) - 16u || arena->used + cap + sizeof(*b) > arena->limit
-        || !(b = malloc(sizeof(*b) + 16u + cap))) {
+        || !(b = im_big_alloc(sizeof(*b) + 16u + cap, false, map))) {
       return NULL;
     }
+    b->mapped    = map;
     b->cap       = cap;
     b->used      = 0u;
     arena->used += cap + sizeof(*b);
@@ -141,7 +157,7 @@ arena_free_all(arena_t *arena) {
 
   for (b = arena->head; b; b = next) {
     next = b->next;
-    free(b);
+    im_big_free(b, sizeof(*b) + 16u + b->cap, b->mapped);
   }
   arena->head = NULL;
   arena->used = 0u;
@@ -315,6 +331,9 @@ typedef struct jpx {
   /* the components decoded: a sample 16 bits, made unsigned */
   uint16_t *plane[X_COMPS];
   uint32_t  pw[X_COMPS], ph[X_COMPS], px0[X_COMPS], py0[X_COMPS];
+  /* a big image's (X_BIG bytes or more of planes and a tile's samples):
+     both mapped, given back as they're done with (mm/mmap.h) */
+  bool      big;
   xscratch_t scratch[X_THREADS];
   xpool_t    pool;
   xworker_t  worker[X_THREADS - 1];
@@ -758,6 +777,9 @@ typedef struct xtc {
   uint32_t     nres, nuse; /* its resolutions; those decoded (the rest left out) */
   xres_t       res[X_LEVELS + 1];
   void        *data; /* int32, or float for 9/7 */
+  size_t       mapped; /* data's bytes where mapped (a big image's big
+                          tile), given back as its rows are placed; 0:
+                          the tile's arena's */
   const xcc_t *cc;
 } xtc_t;
 
@@ -2936,6 +2958,62 @@ t1_job(jpx_t *j, xscratch_t *s, void *ctx, uint32_t item) {
 
 /* -- into the planes --------------------------------------------------------------- */
 
+/* component c's plane's bytes */
+static size_t
+plane_bytes(const jpx_t *j, uint32_t c) {
+  return (size_t)j->pw[c] * j->ph[c] * sizeof(uint16_t);
+}
+
+/* a big image's plane rows of component c that rows Y0 … Y1 - 1 out of
+   `h` read and no others: given back (the rows at the ends, which the
+   bands round them may share, kept) */
+static void
+plane_release(const jpx_t *j, uint32_t c, uint32_t Y0, uint32_t Y1, uint32_t h) {
+  int64_t lo, hi;
+
+  if (!j->big || !j->plane[c]) return;
+  lo = Y0 ? (int64_t)(j->y0 + Y0) / j->dy[c] - (int64_t)j->py0[c] + 1 : 0;
+  hi = Y1 >= h ? (int64_t)j->ph[c] : (int64_t)(j->y0 + Y1 - 1u) / j->dy[c] - (int64_t)j->py0[c];
+  lo = lo < 0 ? 0 : lo;
+  hi = hi > (int64_t)j->ph[c] ? (int64_t)j->ph[c] : hi;
+  if (hi > lo) im_release(true, j->plane[c] + (size_t)lo * j->pw[c], (size_t)(hi - lo) * j->pw[c] * sizeof(uint16_t));
+}
+
+/* compose's job by bands of rows where the image is big: each band's rows'
+   pieces, then its planes' rows given back */
+enum { X_BAND = 16u };
+
+typedef struct xbands {
+  xjob_fn  fn;
+  void    *ctx;
+  uint32_t pieces, h;
+} xbands_t;
+
+static bool
+band_job(jpx_t *j, xscratch_t *s, void *ctx, uint32_t item) {
+  const xbands_t *b  = ctx;
+  uint32_t        Y0 = item * X_BAND, Y1 = Y0 + X_BAND < b->h ? Y0 + X_BAND : b->h, k, c;
+  bool            ok = true;
+
+  for (k = Y0 * b->pieces; k < Y1 * b->pieces; k++) ok = b->fn(j, s, b->ctx, k) && ok;
+  for (c = 0; c < j->ncomp; c++) plane_release(j, c, Y0, Y1, b->h);
+  return ok;
+}
+
+/* `fn` for items [0, pieces × h) (a row's pieces in turn): by bands where
+   the image is big */
+static bool
+compose_run(jpx_t *j, xjob_fn fn, void *ctx, uint32_t pieces, uint32_t h) {
+  xbands_t b;
+
+  if (!j->big) return pool_run(j, fn, ctx, pieces * h);
+  b.fn     = fn;
+  b.ctx    = ctx;
+  b.pieces = pieces;
+  b.h      = h;
+  return pool_run(j, band_job, &b, (h + X_BAND - 1u) / X_BAND);
+}
+
 typedef struct xplace {
   xtile_t *t;
   bool     mct;
@@ -3090,10 +3168,30 @@ place_row(jpx_t *j, xscratch_t *s, void *ctx, uint32_t item) {
   return true;
 }
 
+/* the rows of a band in turn; a mapped tile-component's rows placed given
+   back */
+static bool
+place_band(jpx_t *j, xscratch_t *s, void *ctx, uint32_t item) {
+  const xplace_t *pl = ctx;
+  uint32_t        r0 = item * X_BAND, r1 = r0 + X_BAND < pl->rows ? r0 + X_BAND : pl->rows, r, c;
+
+  for (r = r0; r < r1; r++) {
+    if (!place_row(j, s, ctx, r)) return false;
+  }
+  for (c = 0; c < j->ncomp; c++) {
+    const xtc_t *tc  = &pl->t->tc[c];
+    size_t       row = (size_t)(tc->x1 - tc->x0) * 4u;
+
+    if (tc->mapped) im_release(true, (uint8_t *)tc->data + (size_t)r0 * row, (size_t)(r1 - r0) * row);
+  }
+  return true;
+}
+
 /* -- a tile ----------------------------------------------------------------------- */
 
 static bool
 tile_decode(jpx_t *j, uint32_t tile) {
+  uint64_t  bytes;
   xtile_t  *t;
   bool      coc[X_COMPS] = { false }, qcc[X_COMPS] = { false }, poc_seen = false, ok = false;
   uint32_t  i, c, nparts = 0, p, q;
@@ -3102,6 +3200,7 @@ tile_decode(jpx_t *j, uint32_t tile) {
 
   if (!(t = calloc(1, sizeof(*t)))) return false;
   t->arena.limit = X_ARENA;
+  t->arena.big   = j->big;
   t->cod         = j->cod;
 
   /* its tile-parts' headers, in order; their packets and packet headers */
@@ -3167,7 +3266,13 @@ tile_decode(jpx_t *j, uint32_t tile) {
     xtc_t *tc = &t->tc[c];
 
     if (!tc_build(j, t, c)) goto done;
-    if (!(tc->data = zget(&t->arena, (uint64_t)(tc->x1 - tc->x0) * (uint64_t)(tc->y1 - tc->y0) * 4u))) goto done;
+    bytes = (uint64_t)(tc->x1 - tc->x0) * (uint64_t)(tc->y1 - tc->y0) * 4u;
+    if (j->big && bytes >= X_MAP_MIN && bytes <= SIZE_MAX) {
+      if (!(tc->data = im_big_alloc((size_t)bytes, true, true))) goto done;
+      tc->mapped = (size_t)bytes;
+    } else if (!(tc->data = zget(&t->arena, bytes))) {
+      goto done;
+    }
   }
 
   /* the packets */
@@ -3242,11 +3347,18 @@ tile_decode(jpx_t *j, uint32_t tile) {
         pl.rows = (uint32_t)(top(&t->tc[c])->y1 - top(&t->tc[c])->y0);
       }
     }
-    if (!pool_run(j, place_row, &pl, pl.rows)) goto done;
+    /* a mapped tile-component's by bands, its rows given back as they go */
+    for (c = 0; c < j->ncomp && !t->tc[c].mapped; c++) {}
+    if (c < j->ncomp ? !pool_run(j, place_band, &pl, (pl.rows + X_BAND - 1u) / X_BAND) : !pool_run(j, place_row, &pl, pl.rows)) {
+      goto done;
+    }
   }
   ok = true;
 
 done:
+  for (c = 0; c < X_COMPS; c++) {
+    if (t->tc[c].mapped) im_big_free(t->tc[c].data, t->tc[c].mapped, true);
+  }
   arena_free_all(&t->arena);
   free(t);
   return ok;
@@ -3875,7 +3987,7 @@ compose8(jpx_t *j, const jp2_t *x, const jxopts_t *o, const xchan_t *ch, const u
   }
   l.px     = px;
   l.pieces = (w + X_PIECE - 1u) / X_PIECE;
-  ok       = pool_run(j, lay_piece, &l, l.pieces * h);
+  ok       = compose_run(j, lay_piece, &l, l.pieces, h);
   free(luts);
   free(cols);
   free(yt);
@@ -4222,7 +4334,7 @@ general:
       free(tabs);
       return false;
     }
-    ok = pool_run(j, gen_piece, &g, g.pieces * h);
+    ok = compose_run(j, gen_piece, &g, g.pieces, h);
     free(cols);
     free(tabs);
     if (!ok) {
@@ -4322,12 +4434,22 @@ jpx_decode(const uint8_t *data, size_t len, ImImage *im, const jxopts_t *o) {
   for (c = 0; c < j->ncomp; c++) {
     if (j->cod.cc[c].levels < j->reduce) j->reduce = j->cod.cc[c].levels;
   }
-  for (c = 0; c < j->ncomp; c++) {
-    j->px0[c] = (uint32_t)ceil_pow2(ceil_div_u(j->x0, j->dx[c]), j->reduce);
-    j->py0[c] = (uint32_t)ceil_pow2(ceil_div_u(j->y0, j->dy[c]), j->reduce);
-    j->pw[c]  = (uint32_t)ceil_pow2(ceil_div_u(j->x1, j->dx[c]), j->reduce) - j->px0[c];
-    j->ph[c]  = (uint32_t)ceil_pow2(ceil_div_u(j->y1, j->dy[c]), j->reduce) - j->py0[c];
-    if (!j->pw[c] || !j->ph[c] || !(j->plane[c] = calloc((size_t)j->pw[c] * j->ph[c], sizeof(uint16_t)))) goto done;
+  {
+    uint64_t all = 0u, tile = 0u;
+
+    for (c = 0; c < j->ncomp; c++) {
+      j->px0[c] = (uint32_t)ceil_pow2(ceil_div_u(j->x0, j->dx[c]), j->reduce);
+      j->py0[c] = (uint32_t)ceil_pow2(ceil_div_u(j->y0, j->dy[c]), j->reduce);
+      j->pw[c]  = (uint32_t)ceil_pow2(ceil_div_u(j->x1, j->dx[c]), j->reduce) - j->px0[c];
+      j->ph[c]  = (uint32_t)ceil_pow2(ceil_div_u(j->y1, j->dy[c]), j->reduce) - j->py0[c];
+      all      += (uint64_t)j->pw[c] * j->ph[c] * sizeof(uint16_t);
+      tile     += ((uint64_t)j->tw / j->dx[c] + 1u) * ((uint64_t)j->th / j->dy[c] + 1u) * 4u;
+    }
+    /* the planes and a tile's samples: past X_BIG, the image a big one */
+    j->big = all + tile >= X_BIG;
+    for (c = 0; c < j->ncomp; c++) {
+      if (!j->pw[c] || !j->ph[c] || !(j->plane[c] = im_big_alloc(plane_bytes(j, c), true, j->big))) goto done;
+    }
   }
   /* no opacity wanted: its component (no colour's, past the colour
      transform's three) not decoded */
@@ -4356,7 +4478,7 @@ jpx_decode(const uint8_t *data, size_t len, ImImage *im, const jxopts_t *o) {
 
 done:
   pool_stop(j);
-  for (c = 0; c < X_COMPS; c++) free(j->plane[c]);
+  for (c = 0; c < X_COMPS; c++) im_big_free(j->plane[c], plane_bytes(j, c), j->big);
   for (c = 0; c < X_THREADS; c++) {
     free(j->scratch[c].flags);
     free(j->scratch[c].cdata);

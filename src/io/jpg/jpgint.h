@@ -36,6 +36,12 @@
 #  define J_POOL_MIN (1u << 19)
 #endif
 
+/* a frame's working memory (planes, coefficients) from which it's given
+   back as it's done with (a test build can lower it) */
+#ifndef J_BIG
+#  define J_BIG ((uint64_t)256u << 20)
+#endif
+
 /* a frame's pixels a byte of its data past which the stream is read through
    first, its scans' data passed over (a test build can lower it, 0: always) */
 #ifndef J_DRY
@@ -124,6 +130,7 @@ typedef struct jcomp {
   uint32_t  sw, sh;           /* blocks a scan of it alone covers */
   void     *plane;            /* bw × 8 by bh × 8 samples: uint8 or uint16 */
   size_t    stride;           /* samples a plane row */
+  size_t    plane_size;       /* its bytes */
   int16_t  *coefs;            /* multi-scan: 64 a block, natural order */
   uint16_t  q[64];            /* its quantization table, as at its first scan */
   bool      latched;
@@ -141,6 +148,8 @@ typedef struct jpg {
   uint32_t  hmax, vmax, mcux, mcuy;
   uint32_t  process;          /* J_SEQUENTIAL, J_PROGRESSIVE, J_LOSSLESS */
   bool      arith, frame, multiscan;
+  bool      big;              /* its working memory given back as it goes
+                                 (mm/mmap.h's im_big_alloc) */
   jcomp_t   comp[J_COMPS];
 
   /* hierarchical (Annex J): DHP's frame; each of its components' samples

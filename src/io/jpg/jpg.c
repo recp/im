@@ -216,6 +216,17 @@ typedef struct jidct {
   uint32_t band, items[J_COMPS + 1]; /* items before component i */
 } jidct_t;
 
+/* the coefficients of block rows by0 … by1 - 1 done with, given back (a
+   big image's): two rows either side kept for the bands round them
+   (smoothing reads two rows away); none of a hierarchical frame's */
+static void
+idct_release(const jpg_t *j, const jcomp_t *c, uint32_t by0, uint32_t by1) {
+  size_t   row = (size_t)c->bw * 64u * sizeof(int16_t);
+  uint32_t r0 = by0 ? by0 + 2u : 0u, r1 = by1 >= c->sh ? c->bh : (by1 > 2u ? by1 - 2u : 0u);
+
+  if (r1 > r0) im_release(j->big, (uint8_t *)c->coefs + (size_t)r0 * row, (size_t)(r1 - r0) * row);
+}
+
 /* component ci's block rows by0 … by1 - 1 */
 static void
 idct_rows(const jidct_t *t, uint32_t ci, uint32_t by0, uint32_t by1) {
@@ -225,11 +236,13 @@ idct_rows(const jidct_t *t, uint32_t ci, uint32_t by0, uint32_t by1) {
 
   if (t->smooth) {
     smooth_comp(j, ci, t->latch[ci], t->prev[ci], by0, by1);
+    idct_release(j, c, by0, by1);
     return;
   }
   for (by = by0; by < by1; by++) {
     for (bx = 0; bx < c->sw; bx++) jpg_put(j, c, c->coefs + ((size_t)by * c->bw + bx) * 64u, bx, by);
   }
+  idct_release(j, c, by0, by1);
 }
 
 static bool
@@ -252,7 +265,9 @@ idct_plan(jpg_t *j, jidct_t *t) {
   t->j      = j;
   t->smooth = !j->hier && smoothing_ok(j, t->latch, t->prev); /* a hierarchical frame as its encoder made it */
   for (i = 0; i < j->ncomp; i++) rows = j->comp[i].sh > rows ? j->comp[i].sh : rows;
-  t->band     = j->pool ? rows / (im_pool_size(j->pool) * 4u) : rows;
+  /* on one thread bands too, so a big image's coefficients go as its
+     planes come */
+  t->band     = j->pool ? rows / (im_pool_size(j->pool) * 4u) : 32u;
   t->band     = t->band ? t->band : 1u;
   t->items[0] = 0u;
   for (i = 0; i < j->ncomp; i++) t->items[i + 1u] = t->items[i] + (j->comp[i].sh + t->band - 1u) / t->band;
@@ -372,18 +387,31 @@ frame_size(jpg_t *j) {
   return true;
 }
 
-/* the planes, and a multi-scan image's coefficients */
+/* a component's coefficients' bytes */
+static size_t
+coef_size(const jcomp_t *c) {
+  return (size_t)c->bw * c->bh * 64u * sizeof(int16_t);
+}
+
+/* the planes, and a multi-scan image's coefficients; J_BIG bytes of them
+   or more (not a hierarchical frame's), given back as they're done with */
 static bool
 frame_alloc(jpg_t *j) {
+  uint64_t all = 0u;
   uint32_t i;
 
   for (i = 0; i < j->ncomp; i++) {
     jcomp_t *c = &j->comp[i];
 
-    if (!(c->plane = malloc(c->stride * c->bh * c->ss * (j->diff ? 4u : j->prec > 8u ? 2u : 1u)))) {
-      return false;
-    }
-    if (j->multiscan && !(c->coefs = calloc((size_t)c->bw * c->bh * 64u, sizeof(int16_t)))) return false;
+    c->plane_size = c->stride * c->bh * c->ss * (j->diff ? 4u : j->prec > 8u ? 2u : 1u);
+    all += c->plane_size + (j->multiscan ? coef_size(c) : 0u);
+  }
+  j->big = !j->hier && all >= J_BIG;
+  for (i = 0; i < j->ncomp; i++) {
+    jcomp_t *c = &j->comp[i];
+
+    if (!(c->plane = im_big_alloc(c->plane_size, false, j->big))) return false;
+    if (j->multiscan && !(c->coefs = im_big_alloc(coef_size(c), true, j->big))) return false;
   }
   return true;
 }
@@ -517,8 +545,8 @@ frame_done(jpg_t *j) {
     for (i = 0; ok && i < j->ncomp; i++) ok = frame_comp(j, &j->comp[i]);
   }
   for (i = 0; i < J_COMPS; i++) {
-    free(j->comp[i].plane);
-    free(j->comp[i].coefs);
+    im_big_free(j->comp[i].plane, j->comp[i].plane_size, j->big);
+    im_big_free(j->comp[i].coefs, coef_size(&j->comp[i]), j->big);
   }
   memset(j->comp, 0, sizeof(j->comp));
   j->frame     = false;
@@ -568,7 +596,8 @@ hier_planes(jpg_t *j) {
     c->uv = c->v;
     c->ss = 1u;
     c->stride = w;
-    if (!(c->plane = malloc((size_t)w * h * (j->prec > 8u ? 2u : 1u)))) return false;
+    c->plane_size = (size_t)w * h * (j->prec > 8u ? 2u : 1u);
+    if (!(c->plane = im_big_alloc(c->plane_size, false, j->big))) return false;
     for (y = 0; y < h; y++) {
       const uint16_t *r = j->ref[i] + (size_t)y * j->rw[i];
 
@@ -816,8 +845,8 @@ jpg_free(jpg_t *j) {
   uint32_t i;
 
   for (i = 0; i < J_COMPS; i++) {
-    free(j->comp[i].plane);
-    free(j->comp[i].coefs);
+    im_big_free(j->comp[i].plane, j->comp[i].plane_size, j->big);
+    im_big_free(j->comp[i].coefs, coef_size(&j->comp[i]), j->big);
     free(j->ref[i]);
   }
   for (i = 0; i < 4u; i++) {
