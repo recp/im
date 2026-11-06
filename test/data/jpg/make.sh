@@ -85,6 +85,16 @@ mv cmyk/cmyk-37x23-444.jpg cmyk.jpg
 mv cmyk/ycck-37x23-420.jpg ycck.jpg
 mv cmyk/cmyk-noadobe-37x23-444.jpg cmyk-plain.jpg
 rm -rf cmyk mkcmyk
+# lossless with arithmetic coding, which cjpeg can't write: Thomas Richter's
+# libjpeg (github.com/thorfdbg/libjpeg), its `jpeg` tool, with one fix (its
+# Tables::QuantizationTableIndexOf giving 0, or 1 for chroma, where there's
+# no DQT, as its lossless frames have none); RGB as it is, predictor 4, the
+# 4:2:0 one a restart each MCU row. Each one's pixels its Huffman twin's
+# (the same tool's -p -c), which libjpeg reads to the byte; the first and
+# the third the picture's own
+${JPEG:-jpeg} -p -a -c $s ll-arith.jpg >/dev/null
+${JPEG:-jpeg} -p -a -c -s 1x1,2x2,2x2 -z 19 $s ll-arith-420.jpg >/dev/null
+${JPEG:-jpeg} -p -a -c -z 37 $s ll-arith-rst.jpg >/dev/null
 # a picture large enough for threads, a restart each MCU row
 sips -s format png "/System/Library/Desktop Pictures/iMac Blue.heic" --out big.png >/dev/null
 sips --resampleWidth 777 big.png --out big.png >/dev/null

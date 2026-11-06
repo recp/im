@@ -19,7 +19,8 @@
  * pixels hashed as im gives them, each of which is libjpeg-turbo's to the
  * byte (deeper samples spread over 16 bits, shallower over 8, Adobe's CMYK
  * un-inverted): every sampling libjpeg upsamples, progressive, restarts,
- * 12-bit, arithmetic coding, lossless at 2 to 16 bits, CMYK and YCCK, a
+ * 12-bit, arithmetic coding, lossless at 2 to 16 bits (and arithmetic
+ * coded, as its Huffman twin), CMYK and YCCK, a
  * height from a DNL (420.jpg's and prog.jpg's pixels),
  * streams cut short (the rest grey; a progressive one smoothed), a large
  * one on threads; 16-bit samples in either order; an ICC profile's chunks
@@ -104,41 +105,44 @@ TEST_IMPL(jpg_fixtures) {
     const char *name;
     uint32_t    format, bits, space, w, h, hash;
   } cases[] = {
-    { "420.jpg",        RGB,  8,  sRGB,   37,  23,  0x82F94015u }, /* fancy h2v2 */
-    { "444.jpg",        RGB,  8,  sRGB,   37,  23,  0xF8F67F35u },
-    { "422.jpg",        RGB,  8,  sRGB,   37,  23,  0x72B0C4F5u }, /* fancy h2v1 */
-    { "440.jpg",        RGB,  8,  sRGB,   37,  23,  0x485F8039u }, /* fancy h1v2 */
-    { "411.jpg",        RGB,  8,  sRGB,   37,  23,  0xDD0E7CD7u }, /* each sample four times */
-    { "311.jpg",        RGB,  8,  sRGB,   37,  23,  0x726867A6u }, /* three times */
-    { "mixed.jpg",      RGB,  8,  sRGB,   37,  23,  0xB4DD8811u }, /* 2x2, 1x2, 2x1 */
-    { "tiny.jpg",       RGB,  8,  sRGB,   7,   5,   0x0DEFE61Du }, /* chroma two wide: repeated */
-    { "prog.jpg",       RGB,  8,  sRGB,   37,  23,  0x82F94015u }, /* 420.jpg's coefficients */
-    { "prog-rst.jpg",   RGB,  8,  sRGB,   37,  23,  0x82F94015u },
-    { "opt.jpg",        RGB,  8,  sRGB,   37,  23,  0x82F94015u },
-    { "rst.jpg",        RGB,  8,  sRGB,   37,  23,  0xF8F67F35u }, /* a restart a block */
-    { "gray.jpg",       GRAY, 8,  GRAYCS, 37,  23,  0xC7FB2BA7u },
-    { "rgb.jpg",        RGB,  8,  sRGB,   37,  23,  0x5A75988Au }, /* RGB, no transform */
-    { "p12.jpg",        RGB,  16, sRGB,   37,  23,  0x77EEB558u },
-    { "p12-prog.jpg",   RGB,  16, sRGB,   37,  23,  0xAFD76F1Au },
-    { "arith.jpg",      RGB,  8,  sRGB,   37,  23,  0x82F94015u },
-    { "arith-prog.jpg", RGB,  8,  sRGB,   37,  23,  0x82F94015u },
-    { "arith-rst.jpg",  RGB,  8,  sRGB,   37,  23,  0x82F94015u },
-    { "arith-p12.jpg",  RGB,  16, sRGB,   37,  23,  0x77EEB558u },
-    { "ll1.jpg",        RGB,  8,  sRGB,   37,  23,  0x03A59D62u }, /* lossless */
-    { "ll7-pt4.jpg",    RGB,  8,  sRGB,   37,  23,  0x015A688Fu },
-    { "ll-p2.jpg",      RGB,  8,  sRGB,   37,  23,  0x36BC0E05u }, /* 2 bits, spread */
-    { "ll-p12.jpg",     RGB,  16, sRGB,   37,  23,  0x984C6751u },
-    { "ll-p16.jpg",     RGB,  16, sRGB,   37,  23,  0xF61675E3u },
-    { "ll-420.jpg",     RGB,  8,  sRGB,   37,  23,  0x03A59D62u },
-    { "ll-rst.jpg",     RGB,  8,  sRGB,   37,  23,  0x03A59D62u },
-    { "cmyk.jpg",       CMYK, 8,  CMYKCS, 37,  23,  0x9D19D764u }, /* Adobe's: un-inverted */
-    { "ycck.jpg",       CMYK, 8,  CMYKCS, 37,  23,  0x1FEDD2ACu },
-    { "cmyk-plain.jpg", CMYK, 8,  CMYKCS, 37,  23,  0x9EAC2000u },
-    { "420-cut.jpg",    RGB,  8,  sRGB,   37,  23,  0xE4B5AF76u }, /* the rest grey */
-    { "prog-cut.jpg",   RGB,  8,  sRGB,   37,  23,  0x86D88A7Du }, /* smoothed */
-    { "threads.jpg",    RGB,  8,  sRGB,   777, 777, 0x6AA49719u }, /* restarts on threads */
-    { "dnl.jpg",        RGB,  8,  sRGB,   37,  23,  0x82F94015u }, /* the height a DNL's */
-    { "dnl-prog.jpg",   RGB,  8,  sRGB,   37,  23,  0x82F94015u },
+    { "420.jpg",          RGB,  8,  sRGB,   37,  23,  0x82F94015u }, /* fancy h2v2 */
+    { "444.jpg",          RGB,  8,  sRGB,   37,  23,  0xF8F67F35u },
+    { "422.jpg",          RGB,  8,  sRGB,   37,  23,  0x72B0C4F5u }, /* fancy h2v1 */
+    { "440.jpg",          RGB,  8,  sRGB,   37,  23,  0x485F8039u }, /* fancy h1v2 */
+    { "411.jpg",          RGB,  8,  sRGB,   37,  23,  0xDD0E7CD7u }, /* each sample four times */
+    { "311.jpg",          RGB,  8,  sRGB,   37,  23,  0x726867A6u }, /* three times */
+    { "mixed.jpg",        RGB,  8,  sRGB,   37,  23,  0xB4DD8811u }, /* 2x2, 1x2, 2x1 */
+    { "tiny.jpg",         RGB,  8,  sRGB,   7,   5,   0x0DEFE61Du }, /* chroma two wide: repeated */
+    { "prog.jpg",         RGB,  8,  sRGB,   37,  23,  0x82F94015u }, /* 420.jpg's coefficients */
+    { "prog-rst.jpg",     RGB,  8,  sRGB,   37,  23,  0x82F94015u },
+    { "opt.jpg",          RGB,  8,  sRGB,   37,  23,  0x82F94015u },
+    { "rst.jpg",          RGB,  8,  sRGB,   37,  23,  0xF8F67F35u }, /* a restart a block */
+    { "gray.jpg",         GRAY, 8,  GRAYCS, 37,  23,  0xC7FB2BA7u },
+    { "rgb.jpg",          RGB,  8,  sRGB,   37,  23,  0x5A75988Au }, /* RGB, no transform */
+    { "p12.jpg",          RGB,  16, sRGB,   37,  23,  0x77EEB558u },
+    { "p12-prog.jpg",     RGB,  16, sRGB,   37,  23,  0xAFD76F1Au },
+    { "arith.jpg",        RGB,  8,  sRGB,   37,  23,  0x82F94015u },
+    { "arith-prog.jpg",   RGB,  8,  sRGB,   37,  23,  0x82F94015u },
+    { "arith-rst.jpg",    RGB,  8,  sRGB,   37,  23,  0x82F94015u },
+    { "arith-p12.jpg",    RGB,  16, sRGB,   37,  23,  0x77EEB558u },
+    { "ll1.jpg",          RGB,  8,  sRGB,   37,  23,  0x03A59D62u }, /* lossless */
+    { "ll7-pt4.jpg",      RGB,  8,  sRGB,   37,  23,  0x015A688Fu },
+    { "ll-p2.jpg",        RGB,  8,  sRGB,   37,  23,  0x36BC0E05u }, /* 2 bits, spread */
+    { "ll-p12.jpg",       RGB,  16, sRGB,   37,  23,  0x984C6751u },
+    { "ll-p16.jpg",       RGB,  16, sRGB,   37,  23,  0xF61675E3u },
+    { "ll-420.jpg",       RGB,  8,  sRGB,   37,  23,  0x03A59D62u },
+    { "ll-rst.jpg",       RGB,  8,  sRGB,   37,  23,  0x03A59D62u },
+    { "ll-arith.jpg",     RGB,  8,  sRGB,   37,  23,  0x03A59D62u }, /* lossless, arithmetic: the picture */
+    { "ll-arith-rst.jpg", RGB,  8,  sRGB,   37,  23,  0x03A59D62u },
+    { "ll-arith-420.jpg", RGB,  8,  sRGB,   37,  23,  0x133624F4u }, /* its Huffman twin's */
+    { "cmyk.jpg",         CMYK, 8,  CMYKCS, 37,  23,  0x9D19D764u }, /* Adobe's: un-inverted */
+    { "ycck.jpg",         CMYK, 8,  CMYKCS, 37,  23,  0x1FEDD2ACu },
+    { "cmyk-plain.jpg",   CMYK, 8,  CMYKCS, 37,  23,  0x9EAC2000u },
+    { "420-cut.jpg",      RGB,  8,  sRGB,   37,  23,  0xE4B5AF76u }, /* the rest grey */
+    { "prog-cut.jpg",     RGB,  8,  sRGB,   37,  23,  0x86D88A7Du }, /* smoothed */
+    { "threads.jpg",      RGB,  8,  sRGB,   777, 777, 0x6AA49719u }, /* restarts on threads */
+    { "dnl.jpg",          RGB,  8,  sRGB,   37,  23,  0x82F94015u }, /* the height a DNL's */
+    { "dnl-prog.jpg",     RGB,  8,  sRGB,   37,  23,  0x82F94015u },
   };
   size_t i;
 
