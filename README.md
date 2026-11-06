@@ -44,7 +44,8 @@ TODO
   - [x] NEON, SSE4.1/AVX2 and WebAssembly SIMD128 IDCT, upsampling, colour
   - [x] on threads: restart intervals, speculative Huffman, progressive scans row by row
   - [x] DNL (the height after the first scan; libjpeg refuses it)
-  - [ ] hierarchical
+  - [x] hierarchical: DHP's frames one after another, differential frames (DCT, progressive, lossless;
+        either coding) on the references grown as EXP says (J.1.1.2's filter)
   - [x] decoded smaller (`IM_OPTION_SCALE`): ½, ¼, ⅛ by a smaller IDCT, libjpeg's scaled decode to the byte
 - [x] PNG (In Progress)
   - [x] palette
