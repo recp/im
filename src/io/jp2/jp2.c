@@ -2504,18 +2504,143 @@ idwt_rows(jpx_t *j, xscratch_t *s, void *ctx, uint32_t item) {
     uint8_t *row = (uint8_t *)tc->data + (size_t)y * stride * 4u;
 
     lift_apart(row, row + (size_t)sw * 4u, sw, w - sw, cx, 1u, 1u, tc->cc->reversible);
-    /* lows to cx, cx + 2, …; highs between (32 bits either way) */
+    /* lows to cx, cx + 2, …; highs between (32 bits either way): pairs of
+       them (a high then a low where the row starts with a high) together */
     {
       const uint32_t *l = (const uint32_t *)row, *hh = l + sw;
       uint32_t       *t = (uint32_t *)tmp;
+      uint32_t        done = 0;
 
-      for (i = 0; i < sw; i++) t[cx + 2u * i] = l[i];
-      for (i = 0; i < w - sw; i++) t[1u - cx + 2u * i] = hh[i];
+#if X_NEON
+      uint32_t        np = sw < w - sw ? sw : w - sw; /* whole pairs */
+
+      for (; done + 4u <= np; done += 4u) {
+        uint32x4x2_t v;
+
+        v.val[cx]      = vld1q_u32(l + done);
+        v.val[1u - cx] = vld1q_u32(hh + done);
+        vst2q_u32(t + 2u * done, v);
+      }
+#endif
+      for (i = done; i < sw; i++) t[cx + 2u * i] = l[i];
+      for (i = done; i < w - sw; i++) t[1u - cx + 2u * i] = hh[i];
     }
     memcpy(row, tmp, (size_t)w * 4u);
   }
   return true;
 }
+
+/* A strip's columns, a level's whole lifting in one pass down them: at
+   step t the first step's sample t, then each later step's sample as soon
+   as those it reads are final (its high neighbour's, then the low one's
+   after that), each overwriting a value no step after reads. A sample's
+   arithmetic is lift_apart's, its order kept; the results interleaved
+   into `tmp` (n a row), lows at cas + 2i, highs at 1 - cas + 2j. Both
+   bands there. L and H the lows and highs, `stride` apart */
+#define MIRROR(a, b, m)                                                        \
+  do {                                                                         \
+    if ((a) < 0) (a) = (b);                                                    \
+    if ((b) >= (int64_t)(m)) (b) = (a);                                        \
+  } while (0)
+
+static void
+cols97(float *L, float *H, uint32_t sn, uint32_t dn, uint32_t cas, size_t stride, size_t n, float *tmp) {
+  int64_t t, tend = (int64_t)sn > (int64_t)dn + 1 - (int64_t)cas ? (int64_t)sn : (int64_t)dn + 1 - (int64_t)cas;
+  size_t  k;
+
+  for (t = 0; t <= tend; t++) {
+    int64_t i = t, jj = t + (int64_t)cas - 1, a, b;
+
+    /* the lows' first step (KL, KH folded in) */
+    if (i < (int64_t)sn) {
+      float       *x = L + (size_t)i * stride;
+      const float *ya, *yb;
+
+      a = i + (int64_t)cas - 1;
+      b = a + 1;
+      MIRROR(a, b, dn);
+      ya = H + (size_t)a * stride;
+      yb = H + (size_t)b * stride;
+      for (k = 0; k < n; k++) x[k] = x[k] * KL + (ya[k] * KH + yb[k] * KH) * -0.443506852f;
+    }
+    /* the highs' first, from the lows just made */
+    if (jj >= 0 && jj < (int64_t)dn) {
+      float       *x = H + (size_t)jj * stride;
+      const float *ya, *yb;
+
+      a = jj - (int64_t)cas;
+      b = a + 1;
+      MIRROR(a, b, sn);
+      ya = L + (size_t)a * stride;
+      yb = L + (size_t)b * stride;
+      for (k = 0; k < n; k++) x[k] = x[k] * KH + (ya[k] + yb[k]) * -0.882911075f;
+    }
+    /* the lows' second: final, to tmp too */
+    i = t - 1;
+    if (i >= 0 && i < (int64_t)sn) {
+      float       *x = L + (size_t)i * stride, *o = tmp + (size_t)(cas + 2u * (uint32_t)i) * n;
+      const float *ya, *yb;
+
+      a = i + (int64_t)cas - 1;
+      b = a + 1;
+      MIRROR(a, b, dn);
+      ya = H + (size_t)a * stride;
+      yb = H + (size_t)b * stride;
+      for (k = 0; k < n; k++) o[k] = x[k] = x[k] + (ya[k] + yb[k]) * 0.052980118f;
+    }
+    /* the highs' second: final */
+    jj = t + (int64_t)cas - 2;
+    if (jj >= 0 && jj < (int64_t)dn) {
+      const float *x = H + (size_t)jj * stride, *ya, *yb;
+      float       *o = tmp + (size_t)(1u - cas + 2u * (uint32_t)jj) * n;
+
+      a = jj - (int64_t)cas;
+      b = a + 1;
+      MIRROR(a, b, sn);
+      ya = L + (size_t)a * stride;
+      yb = L + (size_t)b * stride;
+      for (k = 0; k < n; k++) o[k] = x[k] + (ya[k] + yb[k]) * 1.586134342f;
+    }
+  }
+}
+
+/* the 5/3's two steps the same way */
+static void
+cols53(int32_t *L, int32_t *H, uint32_t sn, uint32_t dn, uint32_t cas, size_t stride, size_t n, int32_t *tmp) {
+  int64_t t, tend = (int64_t)sn - 1 > (int64_t)dn - (int64_t)cas ? (int64_t)sn - 1 : (int64_t)dn - (int64_t)cas;
+  size_t  k;
+
+  for (t = 0; t <= tend; t++) {
+    int64_t i = t, jj = t + (int64_t)cas - 1, a, b;
+
+    if (i < (int64_t)sn) {
+      int32_t       *x = L + (size_t)i * stride, *o = tmp + (size_t)(cas + 2u * (uint32_t)i) * n;
+      const int32_t *ya, *yb;
+
+      a = i + (int64_t)cas - 1;
+      b = a + 1;
+      MIRROR(a, b, dn);
+      ya = H + (size_t)a * stride;
+      yb = H + (size_t)b * stride;
+      for (k = 0; k < n; k++) {
+        o[k] = x[k] = (int32_t)((uint32_t)x[k] - (uint32_t)((int32_t)((uint32_t)ya[k] + (uint32_t)yb[k] + 2u) >> 2));
+      }
+    }
+    if (jj >= 0 && jj < (int64_t)dn) {
+      const int32_t *x = H + (size_t)jj * stride, *ya, *yb;
+      int32_t       *o = tmp + (size_t)(1u - cas + 2u * (uint32_t)jj) * n;
+
+      a = jj - (int64_t)cas;
+      b = a + 1;
+      MIRROR(a, b, sn);
+      ya = L + (size_t)a * stride;
+      yb = L + (size_t)b * stride;
+      for (k = 0; k < n; k++) o[k] = (int32_t)((uint32_t)x[k] + (uint32_t)((int32_t)((uint32_t)ya[k] + (uint32_t)yb[k]) >> 1));
+    }
+  }
+}
+
+#undef MIRROR
 
 /* level r's columns from `item` × STRIP: the strip's rows lifted where its
    halves lie, a row's STRIP samples at a time, then interleaved */
@@ -2533,9 +2658,15 @@ idwt_cols(jpx_t *j, xscratch_t *s, void *ctx, uint32_t item) {
   if (!tmp) return false;
   n   = w - x < STRIP ? w - x : STRIP;
   col = (uint32_t *)tc->data + x;
-  lift_apart(col, col + (size_t)sh * stride, sh, h - sh, cy, stride, n, tc->cc->reversible);
-  for (i = 0; i < sh; i++) memcpy(tmp + (size_t)(cy + 2u * i) * n, col + (size_t)i * stride, n * 4u);
-  for (i = 0; i < h - sh; i++) memcpy(tmp + (size_t)(1u - cy + 2u * i) * n, col + (size_t)(sh + i) * stride, n * 4u);
+  if (sh && h - sh && h >= 2u) {
+    /* both bands: one pass, straight into tmp interleaved */
+    if (tc->cc->reversible) cols53((int32_t *)col, (int32_t *)col + (size_t)sh * stride, sh, h - sh, cy, stride, n, (int32_t *)tmp);
+    else cols97((float *)col, (float *)col + (size_t)sh * stride, sh, h - sh, cy, stride, n, (float *)tmp);
+  } else {
+    lift_apart(col, col + (size_t)sh * stride, sh, h - sh, cy, stride, n, tc->cc->reversible);
+    for (i = 0; i < sh; i++) memcpy(tmp + (size_t)(cy + 2u * i) * n, col + (size_t)i * stride, n * 4u);
+    for (i = 0; i < h - sh; i++) memcpy(tmp + (size_t)(1u - cy + 2u * i) * n, col + (size_t)(sh + i) * stride, n * 4u);
+  }
   for (i = 0; i < h; i++) memcpy(col + (size_t)i * stride, tmp + (size_t)i * n, n * 4u);
   return true;
 }
