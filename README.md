@@ -38,13 +38,13 @@ TODO
 - [x] Into the caller's memory (`im_option_dest`): rows at its stride, no allocation for the pixels
 - [x] JPEG (libjpeg-turbo's pixels, to the byte)
   - [x] baseline, extended (8 and 12 bits), progressive; Huffman and arithmetic coding
-  - [x] lossless, 2 to 16 bits
+  - [x] lossless, 2 to 16 bits; Huffman and arithmetic coding
   - [x] every sampling, restarts, Adobe/JFIF, CMYK and YCCK, ICC profile
   - [x] cut streams and damage as libjpeg reads them, block smoothing
   - [x] NEON, SSE4.1/AVX2 and WebAssembly SIMD128 IDCT, upsampling, colour
   - [x] on threads: restart intervals, speculative Huffman, progressive scans row by row
   - [x] DNL (the height after the first scan; libjpeg refuses it)
-  - [ ] hierarchical, lossless arithmetic
+  - [ ] hierarchical
   - [x] decoded smaller (`IM_OPTION_SCALE`): ½, ¼, ⅛ by a smaller IDCT, libjpeg's scaled decode to the byte
 - [x] PNG (In Progress)
   - [x] palette
