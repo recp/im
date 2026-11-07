@@ -148,63 +148,119 @@ static const uint32_t aritab[114] = {
 
 #undef V
 
-/* the coder: the segment's bytes (zeros past), its registers; ct -1:
+/* the coder: the segment's bytes (zeros past), its registers; `dead`:
    damage, nothing read to the next restart. Its own struct so a decoder
    can keep it in locals (copied in and back): the statistics' bytes
    written through uint8_t pointers could be any memory, so a coder read
-   through a pointer would go back to memory at each decision */
+   through a pointer would go back to memory at each decision.
+
+   libjpeg's C is `c >> ct`; here x holds it at bits 48–63 and the stream's
+   next n bits under it (16 or more at a decision), filled four bytes at a
+   time (the data's unstuffed: no 0xFF to watch). A renormalises at the end
+   of a decision, all its shifts at once (libjpeg's at the start of the
+   next, a bit at a time: the same bits, past the data zeros either way) */
 typedef struct jacs {
   const uint8_t *p, *end;
-  int64_t        c, a;
-  int32_t        ct;
+  uint64_t       x;
+  uint32_t       a;
+  int32_t        n;
+  bool           dead;
 } jacs_t;
+
+IM_INLINE void
+fill(jacs_t *e) {
+  uint32_t v;
+
+  if (e->end - e->p >= 4) {
+    v = (uint32_t)e->p[0] << 24 | (uint32_t)e->p[1] << 16 | (uint32_t)e->p[2] << 8 | e->p[3];
+    e->p += 4;
+  } else {
+    uint32_t i;
+
+    for (v = 0, i = 0; i < 4u; i++) v = v << 8 | (e->p < e->end ? *e->p++ : 0u);
+  }
+  e->x |= (uint64_t)v << (16 - e->n);
+  e->n += 32;
+}
+
+/* the coder at the segment's start: libjpeg's first decision reads two
+   bytes and starts from A = 0x10000 */
+IM_INLINE void
+start(jacs_t *e) {
+  e->x    = 0;
+  e->n    = -16;
+  e->a    = 0x10000u;
+  e->dead = false;
+  fill(e);
+  fill(e);
+}
+
+IM_INLINE uint32_t
+lead(uint32_t v) {
+#if defined(_MSC_VER) && !defined(__clang__)
+  unsigned long i;
+
+  _BitScanReverse(&i, v);
+  return 31u - (uint32_t)i;
+#else
+  return (uint32_t)__builtin_clz(v);
+#endif
+}
 
 /* a decision (libjpeg's arith_decode) */
 IM_INLINE int
 dec_bit(jacs_t *e, uint8_t *st) {
-  int64_t  qe, temp;
-  uint32_t nl, nm;
-  int      sv;
+  uint32_t sv = *st, qe = aritab[sv & 0x7F], nl = qe & 0xFFu, nm = (qe >> 8) & 0xFFu, a;
 
-  while (e->a < 0x8000) {
-    if (--e->ct < 0) {
-      uint32_t data = e->p < e->end ? *e->p++ : 0u;
-
-      e->c = (e->c << 8) | data;
-      if ((e->ct += 8) < 0) {
-        if (++e->ct == 0) e->a = 0x8000;
-      }
-    }
-    e->a <<= 1;
-  }
-  sv   = *st;
-  qe   = aritab[sv & 0x7F];
-  nl   = (uint32_t)(qe & 0xFF);
-  qe >>= 8;
-  nm   = (uint32_t)(qe & 0xFF);
-  qe >>= 8;
-  temp = e->a - qe;
-  e->a = temp;
-  temp <<= e->ct;
-  if (e->c >= temp) {
-    e->c -= temp;
-    if (e->a < qe) {
-      e->a = qe;
-      *st  = (uint8_t)((sv & 0x80) ^ nm);
+  qe >>= 16;
+  a = e->a - qe;
+  if ((uint32_t)(e->x >> 48) >= a) {
+    e->x -= (uint64_t)a << 48;
+    if (a < qe) {
+      *st = (uint8_t)((sv & 0x80u) ^ nm);
     } else {
-      e->a = qe;
-      *st  = (uint8_t)((sv & 0x80) ^ nl);
-      sv ^= 0x80;
+      *st = (uint8_t)((sv & 0x80u) ^ nl);
+      sv ^= 0x80u;
     }
-  } else if (e->a < 0x8000) {
-    if (e->a < qe) {
-      *st = (uint8_t)((sv & 0x80) ^ nl);
-      sv ^= 0x80;
+    a = qe;
+  } else if (a < 0x8000u) {
+    if (a < qe) {
+      *st = (uint8_t)((sv & 0x80u) ^ nl);
+      sv ^= 0x80u;
     } else {
-      *st = (uint8_t)((sv & 0x80) ^ nm);
+      *st = (uint8_t)((sv & 0x80u) ^ nm);
     }
   }
-  return sv >> 7;
+  if (a < 0x8000u) {
+    uint32_t k = lead(a) - 16u;
+
+    a <<= k;
+    e->x <<= k;
+    if ((e->n -= (int32_t)k) < 16) fill(e);
+  }
+  e->a = a;
+  return (int)(sv >> 7);
+}
+
+/* the same decision without a branch on it: an LPS where "C at or past
+   A - Qe" and A < Qe disagree (the conditional exchange), the rest by
+   selects; the state moves whenever A renormalises. A block's decisions
+   all this way (what mispredictions cost is more than the selects), a
+   lossless difference's sign and magnitude bits */
+IM_INLINE int
+dec_even(jacs_t *e, uint8_t *st) {
+  uint32_t sv = *st, w = aritab[sv & 0x7F], qe = w >> 16, a = e->a - qe, up, lps, k;
+
+  up   = (uint32_t)(e->x >> 48) >= a;
+  lps  = up ^ (uint32_t)(a < qe);
+  e->x = up ? e->x - ((uint64_t)a << 48) : e->x;
+  a    = up ? qe : a;
+  k    = lead(a) - 16u;
+  *st  = (uint8_t)(k ? (sv & 0x80u) ^ (lps ? w & 0xFFu : (w >> 8) & 0xFFu) : sv);
+  e->a = a << k;
+  e->x <<= k;
+  if ((e->n -= (int32_t)k) < 16) fill(e);
+  return (int)((sv >> 7) ^ lps);
 }
 
 typedef struct jac {
@@ -222,16 +278,16 @@ dc_diff(jac_t *e, jacs_t *s, uint32_t ci, uint32_t tbl, int32_t *out) {
   uint8_t *st = e->dc_stats[tbl] + e->dc_ctx[ci];
   int      sign, m, v;
 
-  if (dec_bit(s, st) == 0) {
+  if (dec_even(s, st) == 0) {
     e->dc_ctx[ci] = 0;
     *out          = 0;
     return true;
   }
-  sign = dec_bit(s, st + 1);
+  sign = dec_even(s, st + 1);
   st += 2 + sign;
-  if ((m = dec_bit(s, st)) != 0) {
+  if ((m = dec_even(s, st)) != 0) {
     st = e->dc_stats[tbl] + 20;
-    while (dec_bit(s, st)) {
+    while (dec_even(s, st)) {
       if ((m <<= 1) == 0x8000) return false;
       st += 1;
     }
@@ -242,7 +298,7 @@ dc_diff(jac_t *e, jacs_t *s, uint32_t ci, uint32_t tbl, int32_t *out) {
   v = m;
   st += 14;
   while (m >>= 1) {
-    if (dec_bit(s, st)) v |= m;
+    if (dec_even(s, st)) v |= m;
   }
   v += 1;
   *out = sign ? -v : v;
@@ -254,11 +310,11 @@ IM_INLINE bool
 ac_value(jac_t *e, jacs_t *s, uint8_t *st, uint32_t tbl, uint32_t k, int *out) {
   int m, v;
 
-  if ((m = dec_bit(s, st)) != 0) {
-    if (dec_bit(s, st)) {
+  if ((m = dec_even(s, st)) != 0) {
+    if (dec_even(s, st)) {
       m <<= 1;
       st = e->ac_stats[tbl] + (k <= e->j->ac_k[tbl] ? 189 : 217);
-      while (dec_bit(s, st)) {
+      while (dec_even(s, st)) {
         if ((m <<= 1) == 0x8000) return false;
         st += 1;
       }
@@ -267,7 +323,7 @@ ac_value(jac_t *e, jacs_t *s, uint8_t *st, uint32_t tbl, uint32_t k, int *out) {
   v = m;
   st += 14;
   while (m >>= 1) {
-    if (dec_bit(s, st)) v |= m;
+    if (dec_even(s, st)) v |= m;
   }
   *out = v + 1;
   return true;
@@ -289,12 +345,12 @@ block_seq_(jac_t *e, jacs_t *s, uint32_t ci, int16_t *blk) {
     uint8_t *st = e->ac_stats[c->ta] + 3u * (k - 1u);
     int      sign, v;
 
-    if (dec_bit(s, st)) break; /* EOB */
-    while (dec_bit(s, st + 1) == 0) {
+    if (dec_even(s, st)) break; /* EOB */
+    while (dec_even(s, st + 1) == 0) {
       st += 3;
       if (++k > 63u) return false;
     }
-    sign = dec_bit(s, e->fixed);
+    sign = dec_even(s, e->fixed);
     if (!ac_value(e, s, st + 2, c->ta, k, &v)) return false;
     blk[jpg_natural[k]] = (int16_t)(sign ? -v : v);
   }
@@ -321,12 +377,12 @@ block_ac_first_(jac_t *e, jacs_t *s, uint32_t ci, int16_t *blk) {
     uint8_t *st = e->ac_stats[tbl] + 3u * (k - 1u);
     int      sign, v;
 
-    if (dec_bit(s, st)) break; /* EOB */
-    while (dec_bit(s, st + 1) == 0) {
+    if (dec_even(s, st)) break; /* EOB */
+    while (dec_even(s, st + 1) == 0) {
       st += 3;
       if (++k > j->se) return false;
     }
-    sign = dec_bit(s, e->fixed);
+    sign = dec_even(s, e->fixed);
     if (!ac_value(e, s, st + 2, tbl, k, &v)) return false;
     blk[jpg_natural[k]] = (int16_t)((uint32_t)(sign ? -v : v) << j->al);
   }
@@ -345,16 +401,16 @@ block_ac_refine_(jac_t *e, jacs_t *s, uint32_t ci, int16_t *blk) {
   for (k = j->ss; k <= j->se; k++) {
     uint8_t *st = e->ac_stats[tbl] + 3u * (k - 1u);
 
-    if (k > kex && dec_bit(s, st)) break; /* EOB */
+    if (k > kex && dec_even(s, st)) break; /* EOB */
     for (;;) {
       int16_t *coef = &blk[jpg_natural[k]];
 
       if (*coef) {
-        if (dec_bit(s, st + 2)) *coef = (int16_t)(*coef < 0 ? *coef + m1 : *coef + p1);
+        if (dec_even(s, st + 2)) *coef = (int16_t)(*coef < 0 ? *coef + m1 : *coef + p1);
         break;
       }
-      if (dec_bit(s, st + 1)) {
-        *coef = (int16_t)(dec_bit(s, e->fixed) ? m1 : p1);
+      if (dec_even(s, st + 1)) {
+        *coef = (int16_t)(dec_even(s, e->fixed) ? m1 : p1);
         break;
       }
       st += 3;
@@ -403,7 +459,7 @@ block_ac_refine(jac_t *e, uint32_t ci, int16_t *blk) {
 
 /* -- a scan -------------------------------------------------------------------- */
 
-/* the statistics, predictions and coder as a scan (or a restart) starts */
+/* the statistics and predictions as a scan (or a restart) starts */
 static void
 reset(jac_t *e) {
   const jpg_t *j = e->j;
@@ -420,11 +476,9 @@ reset(jac_t *e) {
     }
     if (j->process != J_PROGRESSIVE || j->ss) memset(e->ac_stats[c->ta], 0, sizeof(e->ac_stats[0]));
   }
-  e->s.c  = 0;
-  e->s.a  = 0;
-  e->s.ct = -16;
 }
 
+/* the coder from segment s's start */
 static void
 seg_at(jac_t *e, uint32_t s) {
   const jdata_t *d = &e->j->sd;
@@ -435,6 +489,7 @@ seg_at(jac_t *e, uint32_t s) {
   } else {
     e->s.p = e->s.end = d->buf; /* at a marker: zeros */
   }
+  start(&e->s);
 }
 
 IM_HIDE bool
@@ -495,14 +550,14 @@ jpg_scan_arith(jpg_t *j) {
             memset(scratch, 0, sizeof(scratch));
           }
           if (refine_dc) {
-            if (dec_bit(&e->s, e->fixed)) blk[0] = (int16_t)(blk[0] | (1 << j->al));
-          } else if (e->s.ct != -1) {
+            if (dec_even(&e->s, e->fixed)) blk[0] = (int16_t)(blk[0] | (1 << j->al));
+          } else if (!e->s.dead) {
             if (j->process != J_PROGRESSIVE) ok = block_seq(e, ci, blk);
             else if (j->ss == 0u) ok = block_dc_first(e, ci, blk);
             else if (!j->ah) ok = block_ac_first(e, ci, blk);
             else ok = block_ac_refine(e, ci, blk);
           }
-          if (!ok) e->s.ct = -1; /* the rest of the MCU and those after: left */
+          if (!ok) e->s.dead = true; /* the rest of the MCU and those after: left */
           if (!j->multiscan) jpg_put(j, c, blk, bx, by);
         }
       }
@@ -539,7 +594,7 @@ ll_diff(jacs_t *e, uint8_t *stats, uint32_t ca, uint32_t cb, int32_t *out) {
     *out = 0;
     return true;
   }
-  sign = dec_bit(e, st + 1);
+  sign = dec_even(e, st + 1);
   st += 2 + sign;
   if ((m = dec_bit(e, st)) != 0) {
     st = stats + (cb >= 3u ? 129 : 100);
@@ -551,7 +606,7 @@ ll_diff(jacs_t *e, uint8_t *stats, uint32_t ca, uint32_t cb, int32_t *out) {
   v = m;
   st += 14;
   while (m >>= 1) {
-    if (dec_bit(e, st)) v |= m;
+    if (dec_even(e, st)) v |= m;
   }
   v += 1;
   *out = sign ? -v : v;
@@ -581,7 +636,6 @@ jpg_scan_arith_lossless(jpg_t *j) {
   for (i = 0; i < j->nscomp; i++) {
     if (!(above[j->scomp[i]] = calloc(j->comp[j->scomp[i]].bw, 1))) goto done;
   }
-  e->s.ct = -16;
   seg_at(e, 0u);
   rows_to_go = j->restart / per_row;
 
@@ -601,9 +655,6 @@ jpg_scan_arith_lossless(jpg_t *j) {
         bool at_marker = jpg_resync(&j->sd, &next_rst, &cur);
 
         memset(e->ll_stats, 0, sizeof(e->ll_stats));
-        e->s.c  = 0;
-        e->s.a  = 0;
-        e->s.ct = -16;
         seg_at(e, at_marker ? UINT32_MAX : cur);
         for (i = 0; i < J_COMPS; i++) L.first[i] = true;
         for (i = 0; i < j->nscomp; i++) memset(above[j->scomp[i]], 0, j->comp[j->scomp[i]].bw);
@@ -631,8 +682,8 @@ jpg_scan_arith_lossless(jpg_t *j) {
           for (i = 0; i < n; i++) {
             int32_t d = 0;
 
-            if (s.ct != -1 && !ll_diff(&s, stt[i], ca[i], ab[i][mx], &d)) {
-              s.ct = -1;
+            if (!s.dead && !ll_diff(&s, stt[i], ca[i], ab[i][mx], &d)) {
+              s.dead = true;
               d    = 0;
             }
             row[i][mx] = d;
@@ -656,8 +707,8 @@ jpg_scan_arith_lossless(jpg_t *j) {
 
                 ca = x ? ll_class(j, tbl, row[x - 1u]) : 0u;
                 cb = !b ? above[ci][x] : ll_class(j, tbl, L.diff[ci][(size_t)(b - 1u) * c->bw + x]);
-                if (s.ct != -1 && !ll_diff(&s, e->ll_stats[tbl], ca, cb, &d)) {
-                  s.ct = -1;
+                if (!s.dead && !ll_diff(&s, e->ll_stats[tbl], ca, cb, &d)) {
+                  s.dead = true;
                   d    = 0;
                 }
                 row[x] = d;
