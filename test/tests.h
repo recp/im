@@ -53,6 +53,8 @@ TEST_DECLARE(info_mem)
 TEST_DECLARE(runner)
 TEST_DECLARE(dest)
 TEST_DECLARE(scale)
+TEST_DECLARE(region)
+TEST_DECLARE(memory_limit)
 #endif
 
 /*****************************************************************************/
@@ -86,6 +88,8 @@ TEST_LIST {
   TEST_ENTRY(runner)
   TEST_ENTRY(dest)
   TEST_ENTRY(scale)
+  TEST_ENTRY(region)
+  TEST_ENTRY(memory_limit)
 #endif
 };
 

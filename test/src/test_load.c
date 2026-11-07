@@ -717,3 +717,99 @@ TEST_IMPL(scale) {
 
   TEST_SUCCESS
 }
+
+/* `data` with the options given (NULL ended), the result */
+static ImResult
+load_with(const uint8_t *data, size_t len, im_option_base_t **opts, ImImage **im) {
+  *im = NULL;
+  return im_load_mem(im, data, len, opts, IM_OPEN_INTENT_READONLY);
+}
+
+TEST_IMPL(region) {
+  static const char *names[] = {
+    "420.jpg", "422.jpg", "440.jpg", "411.jpg", "311.jpg", "mixed.jpg", "444.jpg", "gray.jpg", "prog.jpg",
+    "prog-cut.jpg", "prog-rst.jpg", "rst.jpg", "p12.jpg", "arith.jpg", "arith-prog.jpg", "arith-rst.jpg",
+    "ycck.jpg", "cmyk.jpg", "ll1.jpg", "ll-420.jpg", "hier.jpg", "hier-prog.jpg", "dnl.jpg", "threads.jpg"
+  };
+  size_t i;
+
+  for (i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+    size_t   len = 0;
+    uint8_t *data = read_all("jpg", names[i], &len);
+    int32_t  scale;
+
+    ASSERT(data);
+    for (scale = 1; scale <= 2; scale++) {
+      im_option_int_t   sc = im_option_int(IM_OPTION_SCALE, scale);
+      im_option_base_t *o[4] = { &sc.base, NULL, NULL, NULL };
+      ImImage          *full, *r;
+      uint32_t          W, H, bpp, k;
+
+      ASSERT(load_with(data, len, o, &full) == IM_OK && full);
+      W   = full->width;
+      H   = full->height;
+      bpp = full->bytesPerPixel;
+      /* corners, a pixel, odd places, one past the edges (cut), one outside */
+      for (k = 0; k < 7u; k++) {
+        static const uint32_t f[7][4] = { { 0, 0, 1, 1 }, { 1, 1, 0, 0 }, { 3, 5, 7, 9 }, { 1, 0, 2, 3 },
+                                          { 0, 1, 1, 0 }, { 2, 2, 100000, 100000 }, { 0, 0, 1, 1 } };
+        uint32_t x = k == 1u ? W - 1u : k == 3u ? W / 3u : k == 4u ? 0u : f[k][0] % W;
+        uint32_t y = k == 1u ? H - 1u : k == 3u ? H / 2u : f[k][1] % H;
+        uint32_t w = k == 1u ? 1u : k == 3u ? W - W / 3u : k == 4u ? W : f[k][2], h = k == 1u ? 1u : k == 3u ? 1u : k == 4u ? H : f[k][3];
+        uint32_t cw = w < W - x ? w : W - x, ch = h < H - y ? h : H - y, yy;
+        size_t   pitch = (size_t)cw * bpp + 2u;
+        uint8_t *buf = malloc(pitch * ch);
+        im_option_region_t rg = im_option_region(x, y, w, h);
+        im_option_dest_t   d  = im_option_dest(buf, pitch, pitch * ch);
+
+        ASSERT(buf);
+        o[1] = &rg.base;
+        o[2] = k == 6u ? &d.base : NULL; /* the caller's memory, the region's size */
+        ASSERT(load_with(data, len, o, &r) == IM_OK && r && r->width == cw && r->height == ch);
+        for (yy = 0; yy < ch; yy++) {
+          const uint8_t *got = k == 6u ? buf + yy * pitch : (const uint8_t *)r->data.data + (size_t)yy * cw * bpp;
+
+          ASSERT(!memcmp(got, (const uint8_t *)full->data.data + ((size_t)(y + yy) * W + x) * bpp, (size_t)cw * bpp));
+        }
+        im_free(r);
+        free(buf);
+      }
+      {
+        im_option_region_t out = im_option_region(W, 0, 4, 4);
+
+        o[1] = &out.base;
+        o[2] = NULL;
+        ASSERT(load_with(data, len, o, &r) != IM_OK && !r); /* none of it inside */
+      }
+      im_free(full);
+    }
+    free(data);
+  }
+
+  TEST_SUCCESS
+}
+
+TEST_IMPL(memory_limit) {
+  static const char *names[] = { "420.jpg", "prog.jpg", "threads.jpg", "ll1.jpg", "hier.jpg" };
+  size_t i;
+
+  for (i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+    size_t           len = 0;
+    uint8_t         *data = read_all("jpg", names[i], &len);
+    im_option_size_t tiny = im_option_memory(1u), lots = im_option_memory((size_t)1 << 30);
+    im_option_base_t *o[2] = { NULL, NULL };
+    ImImage          *a, *b;
+
+    ASSERT(data);
+    ASSERT(load_with(data, len, o, &a) == IM_OK && a);
+    o[0] = &tiny.base;
+    ASSERT(load_with(data, len, o, &b) == IM_ENOMEM && !b); /* refused, nothing made */
+    o[0] = &lots.base;
+    ASSERT(load_with(data, len, o, &b) == IM_OK && same(a, b));
+    im_free(a);
+    im_free(b);
+    free(data);
+  }
+
+  TEST_SUCCESS
+}
