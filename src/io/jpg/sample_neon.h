@@ -204,6 +204,47 @@ jn_ycc_h2v2(const uint8_t *y, const uint16_t *sb, const uint16_t *sr, uint32_t w
   return x;
 }
 
+/* h2v1's chroma rows straight into YCbCr to RGB: b, r their samples (b[-1]
+   and b[n] the edges'), w pixels from y. A sample's even output
+   (3c + l + 1) >> 2 and odd (3c + r + 2) >> 2, less 128 for the colour.
+   32 pixels a step (Y as even and odd ones, zipped back at the end); those
+   done back */
+IM_INLINE uint32_t
+jn_ycc_h2v1(const uint8_t *y, const uint8_t *b, const uint8_t *r, uint32_t w, uint8_t *o) {
+  const int16x8_t c128 = vdupq_n_s16(128);
+  uint32_t        x = 0;
+
+  for (; x + 32u <= w; x += 32u) {
+    const uint8_t *cb = b + x / 2u, *cr = r + x / 2u;
+    uint8x16x2_t   yy = vld2q_u8(y + x);
+    uint8x16_t     c[2] = { vld1q_u8(cb), vld1q_u8(cr) }, l[2] = { vld1q_u8(cb - 1), vld1q_u8(cr - 1) };
+    uint8x16_t     n1[2] = { vld1q_u8(cb + 1), vld1q_u8(cr + 1) };
+    int16x8_t      ev[2][2], od[2][2];
+    uint8x16x3_t   pe, po, p0, p1;
+    uint32_t       k, h;
+
+    for (k = 0; k < 2u; k++) {
+      uint16x8_t t[2] = { vmull_u8(vget_low_u8(c[k]), vdup_n_u8(3)), vmull_high_u8(c[k], vdupq_n_u8(3)) };
+
+      for (h = 0; h < 2u; h++) {
+        uint8x8_t lh = h ? vget_high_u8(l[k]) : vget_low_u8(l[k]), rh = h ? vget_high_u8(n1[k]) : vget_low_u8(n1[k]);
+
+        ev[k][h] = vsubq_s16(vreinterpretq_s16_u16(vshrq_n_u16(vaddq_u16(vaddw_u8(t[h], lh), vdupq_n_u16(1)), 2)), c128);
+        od[k][h] = vsubq_s16(vreinterpretq_s16_u16(vshrq_n_u16(vaddq_u16(vaddw_u8(t[h], rh), vdupq_n_u16(2)), 2)), c128);
+      }
+    }
+    jn_rgb16(yy.val[0], ev[0], ev[1], &pe);
+    jn_rgb16(yy.val[1], od[0], od[1], &po);
+    for (h = 0; h < 3u; h++) {
+      p0.val[h] = vzip1q_u8(pe.val[h], po.val[h]);
+      p1.val[h] = vzip2q_u8(pe.val[h], po.val[h]);
+    }
+    vst3q_u8(o + 3u * x, p0);
+    vst3q_u8(o + 3u * x + 48u, p1);
+  }
+  return x;
+}
+
 /* components side by side: 3 or 4 rows interleaved */
 IM_INLINE uint32_t
 jn_interleave(const uint8_t *const *row, uint32_t ncomp, uint8_t *o, uint32_t n) {

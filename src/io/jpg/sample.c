@@ -420,6 +420,7 @@ struct jsout {
   bool     pad;      /* RGB as RGB0: a row made, then spread to four */
   bool     h2v2;     /* YCbCr 4:2:0, 8 bits, fancy: chroma upsampled in
                         the colour conversion (NEON) */
+  bool     h2v1;     /* and 4:2:2 */
   /* the region's columns: each component as a view of its plane from the
      first sample they need (a real neighbour either side kept, so the
      upsampling's edge copies fall outside), the region's first pixel
@@ -507,6 +508,42 @@ h2v2_row(const jsout_t *o, const jpg_t *j, uint32_t y, uint16_t *sums, uint8_t *
     pixels8_plain(row, 3u, J_YCC, &o->t, 255, false, w - done, dst + (size_t)done * 3u);
   }
 }
+
+/* a 4:2:2 row (o->h2v1): the chroma rows with their edges, upsampled in
+   the colour conversion; the last pixels (under 32) upsampled here and
+   converted as pixels8_plain does */
+static void
+h2v1_row(const jsout_t *o, const jpg_t *j, uint32_t y, uint8_t *pad, uint8_t *dst) {
+  const uint8_t *yr = (const uint8_t *)j->comp[0].plane + (size_t)y * j->comp[0].stride;
+  uint32_t       n = j->comp[1].ow, w = j->ow, done, i, x;
+  uint8_t       *c[2] = { pad + 1, pad + 1 + n + 2u };
+
+  for (i = 0; i < 2u; i++) {
+    const uint8_t *in = (const uint8_t *)j->comp[1u + i].plane + (size_t)y * j->comp[1u + i].stride;
+
+    memcpy(c[i], in, n);
+    c[i][-1] = in[0];
+    c[i][n]  = in[n - 1u];
+  }
+  done = jn_ycc_h2v1(yr, c[0], c[1], w, dst);
+  if (done < w) {
+    uint8_t        tb[32], tr[32];
+    const uint8_t *row[4] = { yr + done, tb, tr, NULL }; /* pixels8_plain reads all four */
+
+    for (x = done; x < w; x++) {
+      const uint8_t *b = c[0] + (x >> 1), *r = c[1] + (x >> 1);
+
+      if (x & 1u) {
+        tb[x - done] = (uint8_t)((b[0] * 3u + b[1] + 2u) >> 2);
+        tr[x - done] = (uint8_t)((r[0] * 3u + r[1] + 2u) >> 2);
+      } else {
+        tb[x - done] = (uint8_t)((b[0] * 3u + b[-1] + 1u) >> 2);
+        tr[x - done] = (uint8_t)((r[0] * 3u + r[-1] + 1u) >> 2);
+      }
+    }
+    pixels8_plain(row, 3u, J_YCC, &o->t, 255, false, w - done, dst + (size_t)done * 3u);
+  }
+}
 #endif
 
 /* component i's view for the region's columns (jsout's vc, voff, vow):
@@ -572,6 +609,11 @@ jpg_out_rows(jsout_t *o, uint32_t worker, uint32_t y0, uint32_t y1) {
 #if J_NEON
       if (o->h2v2) {
         h2v2_row(o, j, y, o->scratch[worker].sums, dst);
+        if (o->pad) pad8(dst, w, o->px + at);
+        continue;
+      }
+      if (o->h2v1) {
+        h2v1_row(o, j, y, o->scratch[worker].pad, dst);
         if (o->pad) pad8(dst, w, o->px + at);
         continue;
       }
@@ -701,6 +743,9 @@ jpg_out_begin(jpg_t *j, jspace_t space, ImByteOrder order) {
 #if J_NEON
   o->h2v2 = n == 3u && space == J_YCC && !o->wide && o->max == 255u && o->up[0].how == UP_FULL
             && o->up[1].how == UP_H2V2_FANCY && o->up[2].how == UP_H2V2_FANCY && j->comp[1].ow == j->comp[2].ow
+            && j->comp[1].oh == j->comp[2].oh && j->reg_x == 0u && j->reg_w == j->ow;
+  o->h2v1 = n == 3u && space == J_YCC && !o->wide && o->max == 255u && o->up[0].how == UP_FULL
+            && o->up[1].how == UP_H2V1_FANCY && o->up[2].how == UP_H2V1_FANCY && j->comp[1].ow == j->comp[2].ow
             && j->comp[1].oh == j->comp[2].oh && j->reg_x == 0u && j->reg_w == j->ow;
 #endif
   if ((space == J_YCC || space == J_YCCK) && !ycc_tables(&o->t, o->max, o->wide ? 65536u : 256u)) goto done;
