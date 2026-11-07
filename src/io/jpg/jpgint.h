@@ -48,6 +48,14 @@
 #  define J_DRY 64u
 #endif
 
+/* a cold path kept out of its caller (whose fast path then saves no
+   registers for it) */
+#if defined(_MSC_VER)
+#  define J_NOINLINE __declspec(noinline)
+#else
+#  define J_NOINLINE __attribute__((noinline))
+#endif
+
 enum {
   J_COMPS   = 4,         /* components a frame; more aren't decoded */
   J_HBITS   = 11,        /* bits a Huffman table's one look takes */
@@ -132,7 +140,8 @@ typedef struct jcomp {
   size_t    stride;           /* samples a plane row */
   size_t    plane_size;       /* its bytes */
   int16_t  *coefs;            /* multi-scan: 64 a block, natural order */
-  uint16_t  q[64];            /* its quantization table, as at its first scan */
+  uint16_t  q[128];           /* its quantization table, as at its first scan;
+                                 then each coefficient's bound (jpg_qlim) */
   bool      latched;
   int8_t    bits[64];         /* progressive: a coefficient's last Al; -1 none */
   int8_t    prev[10];         /* bits[1–9] before the last scan of it */
@@ -268,6 +277,7 @@ IM_HIDE bool jpg_scan_arith_lossless(jpg_t *j);
 
 /* a block with only its DC: its every sample */
 IM_HIDE uint8_t jpg_dc8(int16_t dc, uint16_t q);
+IM_HIDE void jpg_qlim(uint16_t q[128]);
 IM_HIDE void jpg_idct8(const int16_t *in, const uint16_t *q, void *out, size_t stride);
 IM_HIDE jpg_idct_fn jpg_idct8_best(void);
 IM_HIDE void jpg_idct12(const int16_t *in, const uint16_t *q, void *out, size_t stride);

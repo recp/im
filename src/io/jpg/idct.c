@@ -185,7 +185,7 @@ limit(int64_t x, int32_t centre, int32_t max) {
   return v < 0 ? 0 : v > max ? max : v;
 }
 
-static void
+static J_NOINLINE void
 idct8_plain(const int16_t *in, const uint16_t *q, void *out, size_t stride) {
   IDCT_BODY(uint8_t, 2, 128, 255)
 }
@@ -197,6 +197,21 @@ jpg_dc8(int16_t dc, uint16_t q) {
   int32_t ws = (int32_t)LSHIFT((int32_t)dc * (int16_t)q, 2);
 
   return (uint8_t)LIMIT(DESCALE((int64_t)ws, 5), 128, 255);
+}
+
+/* q[64 + k]: the most coefficient k may be for the NEON IDCT's 16-bit
+   arithmetic, 1096 over its quantizer (a 16-bit signed one, as DQ's);
+   none where it's 0. In float, which vectorizes: truncated, it's the
+   integer quotient for every quantizer (each of 1 to 32768 checked) */
+IM_HIDE void
+jpg_qlim(uint16_t q[128]) {
+  uint32_t k;
+
+  for (k = 0; k < 64u; k++) {
+    int32_t v = (int16_t)q[k], a = v < 0 ? -v : v;
+
+    q[64u + k] = a ? (uint16_t)(uint32_t)(1096.0f / (float)a) : 0xFFFFu;
+  }
 }
 
 IM_HIDE void

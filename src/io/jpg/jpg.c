@@ -735,7 +735,8 @@ read_sos(jpg_t *j, const uint8_t *s, uint32_t len) {
       /* its table there by the first scan it's in, as libjpeg wants
          (lossless has none) */
       if (j->process != J_LOSSLESS && !(j->qdef >> c->tq & 1u)) return false;
-      memcpy(c->q, j->quant[c->tq], sizeof(c->q));
+      memcpy(c->q, j->quant[c->tq], sizeof(j->quant[0]));
+      jpg_qlim(c->q);
       c->latched = true;
     }
   }
