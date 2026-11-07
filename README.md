@@ -18,7 +18,7 @@ TODO
       upsampling and colour; JPEG 2000's wavelet and colour), on the GPU for big images; the Huffman and MQ
       decoding stays on the CPU's threads
 - [x] Cocoa and Win32 helpers
-- [x] From memory (`im_load_mem`, `im_info_mem`: JPEG, JPEG 2000; raw CCITT fax), with options: threads,
+- [x] From memory (`im_load_mem`, `im_info_mem`: JPEG, JPEG 2000, JBIG2; raw CCITT fax), with options: threads,
       a JPEG's colour transform said by its container, CMYK as stored, RGB padded to RGB0, a palette's
       indexes, 8 bits by OpenJPEG's rounding, the opacity apart (or not decoded), decoded ½, ¼ or ⅛ the
       size, a region alone (`im_option_region`), a memory limit (`im_option_memory`: `IM_ENOMEM` before
@@ -27,11 +27,11 @@ TODO
       defl and huff submodules
 - [x] WebAssembly (WASI): wasi-sdk's toolchain file, `-DIM_STATIC=ON` (`-msimd128` for SIMD128);
       one thread, files read (no mmap)
-- [x] The codecs alone (`-DIM_CODECS_ONLY=ON`): JPEG, JPEG 2000 and CCITT fax from memory (`im_load_mem`,
+- [x] The codecs alone (`-DIM_CODECS_ONLY=ON`): JPEG, JPEG 2000, CCITT fax and JBIG2 from memory (`im_load_mem`,
       `im_info_mem`, `im_free`), no file layer, other formats, submodules or frameworks; `-DIM_NO_THREADS=ON`
       (WASI without `-pthread` on its own) leaves the thread layer out, decoders on the caller's thread.
       Built by hand: `src/load.c`, `src/io/jpg/{jpg,arith,huff,idct,sample}.c`, `src/io/jp2/jp2.c`,
-      `src/io/ccitt/ccitt.c`, `src/thread/pool.c`, and `src/posix/thread.c` or `src/win/thread.c` (none without threads), with
+      `src/io/ccitt/ccitt.c`, `src/io/jbig2/jbig2.c`, `src/thread/pool.c`, and `src/posix/thread.c` or `src/win/thread.c` (none without threads), with
       `IM_CODECS_ONLY=1`, `IM_STATIC`, `include/` and `src/` on the include path
 - [x] `-DIM_PREFIX=app_`: a codec-only build's every symbol under that prefix (callers' names unchanged,
       `im.h` renames them too; the same define for im's sources and the caller's), so it links beside
@@ -74,6 +74,13 @@ TODO
   - [x] T.4 Group 3, one- and two-dimensional (K), T.6 Group 4; EOLs, byte alignment, RTC and EOFB
   - [x] rows given or as many as the data has; damaged rows (the row before again, to the next EOL)
   - [x] a bit a pixel (1 white unless `black_is_1`) or a byte a pixel (`IM_OPTION_EIGHT_BITS`); a region
+- [x] JBIG2: a file (its first page), or a stream's embedded segments (`IM_OPTION_FORMAT`
+      `IM_FILEFORMATTYPE_JBIG2`, the globals' by `im_option_jbig2_globals`)
+  - [x] generic regions: the four templates, adaptive pixels, typical prediction, MMR, unknown length
+  - [x] symbol dictionaries and text regions: arithmetic and Huffman (custom tables too), refinement and
+        aggregation, contexts kept from one dictionary for the next
+  - [x] pattern dictionaries and halftones; refinement of the page or of an intermediate region; striped pages
+  - [x] a bit a pixel (0 black) or a byte a pixel; a region (regions off it not decoded); a memory limit
 - [ ] JXL
   - [x] Apple platform
 - [ ] TIFF
