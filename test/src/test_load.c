@@ -816,3 +816,103 @@ TEST_IMPL(memory_limit) {
 
   TEST_SUCCESS
 }
+
+/* raw CCITT fax (data/ccitt, make.sh): each stream's bits as decoded,
+   with its rows given and not; a byte a pixel; a region; refusals */
+static ImResult
+fax_load(const uint8_t *data, size_t len, int32_t k, uint32_t w, uint32_t h, const bool f[4], im_option_base_t *more,
+         ImImage **im) {
+  im_option_int_t   fm = im_option_int(IM_OPTION_FORMAT, IM_FILEFORMATTYPE_CCITT);
+  im_option_ccitt_t cc = im_option_ccitt(k, w, h);
+  im_option_base_t *o[4] = { &fm.base, &cc.base, more, NULL };
+
+  cc.params.end_of_line  = f[0];
+  cc.params.byte_align   = f[1];
+  cc.params.end_of_block = f[2];
+  cc.params.black_is_1   = f[3];
+  return load_with(data, len, o, im);
+}
+
+static int
+fax_bit(const ImImage *im, uint32_t x, uint32_t y) {
+  const uint8_t *d = im->data.data;
+
+  if (im->bitsPerComponent == 8u) return d[(size_t)y * im->width + x] != 0u;
+  return d[(size_t)y * ((im->width + 7u) / 8u) + x / 8u] >> (7u - x % 8u) & 1;
+}
+
+TEST_IMPL(ccitt) {
+  static const struct {
+    const char *name;
+    int32_t     k;
+    uint32_t    w, h;
+    bool        f[4]; /* EOLs, byte-aligned, an end of block, black is 1 */
+    uint32_t    hash;
+  } cases[] = {
+    { "g4.fax",          -1,  257,  11, { 0, 0, 1, 0 }, 0x699138E1u },
+    { "g4-align.fax",    -1,  100,  17, { 0, 1, 1, 1 }, 0x818840BEu },
+    { "g3-1d-eol.fax",    0,   31,  17, { 1, 0, 1, 0 }, 0x01F50945u },
+    { "g3-1d.fax",        0,   64,  17, { 0, 0, 0, 0 }, 0xB2CD96B3u },
+    { "g3-2d.fax",        4,  100,  17, { 1, 1, 1, 0 }, 0xDA5962C1u },
+    { "g3-2d-align.fax", 1000,  1, 116, { 1, 1, 0, 0 }, 0x5B0A8101u },
+    { "black1.fax",       4, 1378,  17, { 0, 0, 0, 1 }, 0x636CBF8Fu },
+    { "fax.fax",         -1, 1728,  17, { 0, 0, 1, 0 }, 0xB6CF6D97u },
+    { "wide.fax",         2, 3000,   9, { 1, 0, 1, 0 }, 0x331F025Au },
+  };
+  size_t i;
+
+  for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+    size_t   len = 0;
+    uint8_t *data = read_all("ccitt", cases[i].name, &len);
+    ImImage *a, *b;
+    uint32_t x, y, h;
+
+    ASSERT(data);
+    ASSERT(fax_load(data, len, cases[i].k, cases[i].w, cases[i].h, cases[i].f, NULL, &a) == IM_OK && a);
+    ASSERT(a->width == cases[i].w && a->height == cases[i].h && a->bitsPerComponent == 1u);
+    ASSERT(a->len == (size_t)(a->width + 7u) / 8u * a->height && a->fileFormatType == IM_FILEFORMATTYPE_CCITT);
+    h = fnv1a(a->data.data, a->len);
+    if (h != cases[i].hash) fprintf(stderr, "  %s: 0x%08X\n", cases[i].name, h);
+    ASSERT(h == cases[i].hash);
+    /* its rows not given: the same, as many as the data has */
+    ASSERT(fax_load(data, len, cases[i].k, cases[i].w, 0u, cases[i].f, NULL, &b) == IM_OK && b);
+    ASSERT(b->height == a->height && b->len == a->len && !memcmp(a->data.data, b->data.data, a->len));
+    im_free(b);
+    /* a byte a pixel */
+    {
+      im_option_bool_t e8 = im_option_bool(IM_OPTION_EIGHT_BITS, true);
+
+      ASSERT(fax_load(data, len, cases[i].k, cases[i].w, cases[i].h, cases[i].f, &e8.base, &b) == IM_OK && b);
+      ASSERT(b->bitsPerComponent == 8u && b->len == (size_t)a->width * a->height);
+      for (y = 0; y < a->height; y++) {
+        for (x = 0; x < a->width; x++) ASSERT(fax_bit(b, x, y) == fax_bit(a, x, y));
+      }
+      im_free(b);
+    }
+    /* a region: the whole one's bits there */
+    {
+      uint32_t           rx = a->width / 3u, ry = a->height / 4u, rw = a->width / 2u + 1u, rh = a->height / 2u + 1u;
+      im_option_region_t rg = im_option_region(rx, ry, rw, rh);
+
+      if (rx + rw > a->width) rw = a->width - rx;
+      ASSERT(fax_load(data, len, cases[i].k, cases[i].w, cases[i].h, cases[i].f, &rg.base, &b) == IM_OK && b);
+      ASSERT(b->width == rw && b->height == rh);
+      for (y = 0; y < rh; y++) {
+        for (x = 0; x < rw; x++) ASSERT(fax_bit(b, x, y) == fax_bit(a, rx + x, ry + y));
+      }
+      im_free(b);
+    }
+    /* refused: no columns; a limit it doesn't fit */
+    {
+      im_option_size_t tiny = im_option_memory(1u);
+
+      ASSERT(fax_load(data, len, cases[i].k, 0u, cases[i].h, cases[i].f, NULL, &b) != IM_OK && !b);
+      ASSERT(fax_load(data, len, cases[i].k, cases[i].w, cases[i].h, cases[i].f, &tiny.base, &b) == IM_ENOMEM && !b);
+    }
+    im_free(a);
+    free(data);
+  }
+
+  TEST_SUCCESS
+}
+

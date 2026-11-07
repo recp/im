@@ -55,6 +55,7 @@ TEST_DECLARE(dest)
 TEST_DECLARE(scale)
 TEST_DECLARE(region)
 TEST_DECLARE(memory_limit)
+TEST_DECLARE(ccitt)
 #endif
 
 /*****************************************************************************/
@@ -90,6 +91,7 @@ TEST_LIST {
   TEST_ENTRY(scale)
   TEST_ENTRY(region)
   TEST_ENTRY(memory_limit)
+  TEST_ENTRY(ccitt)
 #endif
 };
 
