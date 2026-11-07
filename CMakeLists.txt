@@ -28,10 +28,10 @@ set(IM_PREFIX "" CACHE STRING "A prefix for im's symbols (codec-only builds)")
 
 # The formats built in: all, or some of these (png alone needs the defl
 # and huff submodules)
-set(IM_ALL_FORMATS png bmp ppm qoi tga jpg jp2 jxl heic)
+set(IM_ALL_FORMATS png bmp ppm qoi tga jpg jp2 ccitt jxl heic)
 set(IM_FORMATS "all" CACHE STRING "Formats built in: all, or a list of ${IM_ALL_FORMATS}")
 if(IM_CODECS_ONLY)
-  set(IM_ON jpg jp2)
+  set(IM_ON jpg jp2 ccitt)
 elseif(IM_FORMATS STREQUAL "all")
   set(IM_ON ${IM_ALL_FORMATS})
 else()
@@ -128,6 +128,7 @@ if(IM_CODECS_ONLY)
     src/load.c
     src/io/jpg/jpg.c src/io/jpg/arith.c src/io/jpg/huff.c src/io/jpg/idct.c src/io/jpg/sample.c
     src/io/jp2/jp2.c
+    src/io/ccitt/ccitt.c
     src/thread/pool.c)
   if(NOT IM_NO_THREADS)
     if(WIN32)

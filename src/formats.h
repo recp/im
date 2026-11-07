@@ -24,11 +24,12 @@
 #ifndef src_formats_h
 #define src_formats_h
 
-/* codecs alone: JPEG and JPEG 2000 */
+/* codecs alone: JPEG, JPEG 2000 and CCITT fax */
 #if IM_CODECS_ONLY && !defined(IM_SELECTED_FORMATS)
 #  define IM_SELECTED_FORMATS 1
 #  define IM_WITH_JPG 1
 #  define IM_WITH_JP2 1
+#  define IM_WITH_CCITT 1
 #endif
 
 #ifndef IM_SELECTED_FORMATS
@@ -39,6 +40,7 @@
 #  define IM_WITH_TGA 1
 #  define IM_WITH_JPG 1
 #  define IM_WITH_JP2 1
+#  define IM_WITH_CCITT 1
 #  ifdef __APPLE__
 #    define IM_WITH_JXL  1
 #    define IM_WITH_HEIC 1

@@ -15,8 +15,9 @@
  */
 
 /*
- * From memory: im_load_mem and im_info_mem (JPEG, JPEG 2000), im_free, and
- * the options as decoders read them. All a codec-only build has
+ * From memory: im_load_mem (JPEG, JPEG 2000; raw CCITT fax where the caller
+ * says so), im_info_mem (JPEG, JPEG 2000), im_free, and the options as
+ * decoders read them. All a codec-only build has
  * (IM_CODECS_ONLY: no file layer, no Core Image, no other formats).
  */
 
@@ -27,6 +28,9 @@
 #endif
 #if IM_WITH_JP2
 #  include "io/jp2/jp2.h"
+#endif
+#if IM_WITH_CCITT
+#  include "io/ccitt/ccitt.h"
 #endif
 
 /* the options as a decoder reads them */
@@ -67,6 +71,8 @@ im_config(im_option_base_t *options[], ImOpenIntent openIntent) {
           conf.regionH = ((im_option_region_t*)opt)->height;
           break;
         case IM_OPTION_MEMORY_LIMIT:         conf.memoryLimit    = ((im_option_size_t*)opt)->value;      break;
+        case IM_OPTION_FORMAT:               conf.format         = ((im_option_int_t*)opt)->value;       break;
+        case IM_OPTION_CCITT:                conf.ccitt          = ((im_option_ccitt_t*)opt)->params;    break;
         case IM_OPTION_DEST:
           conf.dest       = ((im_option_dest_t*)opt)->pixels;
           conf.destStride = ((im_option_dest_t*)opt)->stride;
@@ -113,8 +119,15 @@ im_load_mem(ImImage         ** __restrict dest,
 
   if (!dest) return IM_EBADF;
   *dest = NULL;
-  if (!p || len < 4u) return IM_EBADF;
+  if (!p || !len) return IM_EBADF;
   conf = im_config(options, openIntent);
+
+  /* where the caller says what it is (no signature to tell it by; a
+     stream of a byte or two can be a whole image) */
+#if IM_WITH_CCITT
+  if (conf.format == IM_FILEFORMATTYPE_CCITT) return ccitt_dec_mem(dest, p, len, &conf);
+#endif
+  if (len < 4u) return IM_EBADF;
 
   /* by its first bytes */
 #if IM_WITH_JPG

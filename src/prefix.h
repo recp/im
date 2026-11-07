@@ -24,6 +24,7 @@
 #define src_prefix_h
 
 #ifdef IM_PREFIX
+#  define ccitt_dec_mem         IM_PFX(ccitt_dec_mem)
 #  define im_config             IM_PFX(im_config)
 #  define im_pool_free          IM_PFX(im_pool_free)
 #  define im_pool_new           IM_PFX(im_pool_new)

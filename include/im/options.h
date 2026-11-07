@@ -111,6 +111,16 @@ typedef enum im_option_type_t {
      image-sized is made, past it refused with IM_ENOMEM: a bigger
      IM_OPTION_SCALE, or a smaller IM_OPTION_REGION, may fit */
   IM_OPTION_MEMORY_LIMIT,
+
+  /* the data's format where it has no signature to tell it by (int,
+     ImFileFormatType): IM_FILEFORMATTYPE_CCITT (its parameters by
+     IM_OPTION_CCITT) */
+  IM_OPTION_FORMAT,
+
+  /* a CCITT fax stream's parameters (im_option_ccitt). The image a bit a
+     pixel (rows (width + 7) / 8 bytes, first pixel the top bit), 1 white
+     unless black_is_1; IM_OPTION_EIGHT_BITS: a byte a pixel, 255 for a 1 */
+  IM_OPTION_CCITT,
 } im_option_type_t;
 
 
@@ -150,6 +160,25 @@ typedef struct im_option_dest_t {
   void            *pixels;
   size_t           stride, size;
 } im_option_dest_t;
+
+/* CCITT fax: T.4's Group 3 (k 0 one-dimensional, k > 0 two-dimensional,
+   each row tagged), T.6's Group 4 (k < 0) */
+typedef struct im_ccitt_t {
+  int32_t  k;
+  uint32_t columns;      /* a row's pixels */
+  uint32_t rows;         /* 0: as many as the data has */
+  bool     byte_align;   /* each row starts on a byte */
+  bool     end_of_line;  /* Group 3's rows each after an EOL */
+  bool     end_of_block; /* RTC or EOFB ends it (the default) */
+  bool     black_is_1;   /* 1 a black pixel (0 by default) */
+  uint32_t damaged_rows; /* rows with EOLs: damaged ones taken (each the
+                            row before again) before the rows so far end */
+} im_ccitt_t;
+
+typedef struct im_option_ccitt_t {
+  im_option_base_t base;
+  im_ccitt_t       params;
+} im_option_ccitt_t;
 
 typedef struct im_option_size_t {
   im_option_base_t base;
@@ -252,6 +281,26 @@ im_option_region(uint32_t x, uint32_t y, uint32_t width, uint32_t height) {
   opt.y         = y;
   opt.width     = width;
   opt.height    = height;
+
+  return opt;
+}
+
+/* k, columns and rows; the rest as a fax stream mostly has them (an end of
+   block, no EOLs, unaligned, black 0, no damaged rows) */
+IM_INLINE
+im_option_ccitt_t
+im_option_ccitt(int32_t k, uint32_t columns, uint32_t rows) {
+  im_option_ccitt_t opt;
+
+  opt.base.type           = IM_OPTION_CCITT;
+  opt.params.k            = k;
+  opt.params.columns      = columns;
+  opt.params.rows         = rows;
+  opt.params.byte_align   = false;
+  opt.params.end_of_line  = false;
+  opt.params.end_of_block = true;
+  opt.params.black_is_1   = false;
+  opt.params.damaged_rows = 0u;
 
   return opt;
 }
