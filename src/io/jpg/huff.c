@@ -1539,23 +1539,24 @@ jpg_undiff(jpg_t *j, jloss_t *L, uint32_t ci, const int32_t *d) {
     rb = prev[0];
     ra = (d[0] + rb) & 0xFFFF;
     prev[0] = (uint16_t)ra;
-    for (x = 1; x < w; x++) {
-      int32_t p;
-
-      rc = rb;
-      rb = prev[x];
-      switch (psv) {
-      case 1:  p = ra; break;
-      case 2:  p = rb; break;
-      case 3:  p = rc; break;
-      case 4:  p = ra + rb - rc; break;
-      case 5:  p = ra + ((rb - rc) >> 1); break;
-      case 6:  p = rb + ((ra - rc) >> 1); break;
-      default: p = (ra + rb) >> 1; break;
-      }
-      ra      = (d[x] + p) & 0xFFFF;
-      prev[x] = (uint16_t)ra;
+    /* a loop a predictor (the choice not made each sample) */
+#define UNDIFF(P)                                                              \
+    for (x = 1; x < w; x++) {                                                  \
+      rc      = rb;                                                            \
+      rb      = prev[x];                                                       \
+      ra      = (d[x] + (P)) & 0xFFFF;                                         \
+      prev[x] = (uint16_t)ra;                                                  \
     }
+    switch (psv) {
+    case 1:  UNDIFF(ra) break;
+    case 2:  UNDIFF(rb) break;
+    case 3:  UNDIFF(rc) break;
+    case 4:  UNDIFF(ra + rb - rc) break;
+    case 5:  UNDIFF(ra + ((rb - rc) >> 1)) break;
+    case 6:  UNDIFF(rb + ((ra - rc) >> 1)) break;
+    default: UNDIFF((ra + rb) >> 1) break;
+    }
+#undef UNDIFF
   }
   /* to the plane, shifted (and cut to the sample's type, as libjpeg) */
   if (j->prec <= 8u) {
@@ -1570,11 +1571,24 @@ jpg_undiff(jpg_t *j, jloss_t *L, uint32_t ci, const int32_t *d) {
   L->y[ci]++;
 }
 
-/* a difference (F.1.2.1 with H.1.2.2's 16: 32768, no bits) */
+/* a difference (F.1.2.1 with H.1.2.2's 16: 32768, no bits): code and
+   value in one look-up where they fit */
 IM_INLINE int32_t
 loss_diff(jbits_t *b, const jhuff_t *h) {
-  uint32_t s = huff_sym(b, h);
+  uint32_t e, s;
 
+  if (b->n < 32u) refill(b);
+  e = h->fast[PEEK(b, J_HBITS)];
+  if (likely(e & J_FUSED)) {
+    DROP(b, e & 63u);
+    return (int32_t)e >> 16;
+  }
+  if (e) {
+    DROP(b, e & 63u);
+    s = (e >> 8) & 0xFFu;
+  } else {
+    s = huff_slow(b, h);
+  }
   if (!s) return 0;
   if (s == 16u) return 32768;
   return extend(get_bits(b, s), s);
@@ -1586,13 +1600,14 @@ jpg_scan_lossless(jpg_t *j) {
   jctx_t   x;
   jloss_t  L;
   uint32_t i, nrows, per_row, rows_to_go = 0u, cur = 0u, next_rst = 0u, irow, nirows, blocks = 0u;
-  bool     at_marker = false, ok = false, single = j->nscomp == 1u;
+  bool     at_marker = false, ok = false, single = j->nscomp == 1u, full = true;
   size_t   margin;
 
   for (i = 0; i < j->nscomp; i++) {
     const jcomp_t *c = &j->comp[j->scomp[i]];
 
     blocks += single ? 1u : (uint32_t)c->h * c->v;
+    full = full && c->h == 1u && c->v == 1u; /* no component subsampled */
   }
   per_row = single ? j->comp[j->scomp[0]].cw : j->mcux;
   nrows   = single ? j->comp[j->scomp[0]].ch : j->mcuy;
@@ -1634,23 +1649,49 @@ jpg_scan_lossless(jpg_t *j) {
       } else {
         uint32_t mx;
 
-        if (!x.r.tail && x.r.b.p >= x.r.lim) rd_tail(&x);
-        for (mx = 0; mx < per_row; mx++) {
-          for (i = 0; i < j->nscomp; i++) {
-            uint32_t ci = j->scomp[i];
-            jcomp_t *c  = &j->comp[ci];
+        jbits_t bs;
 
-            if (single) {
-              L.diff[ci][(size_t)yo * c->bw + mx] = loss_diff(&x.r.b, j->dc[c->td]);
-            } else {
+        if (!x.r.tail && x.r.b.p >= x.r.lim) rd_tail(&x);
+        bs = x.r.b; /* here, so the compiler keeps it in registers */
+        if (single || full) {
+          /* a sample a component an MCU: each one's table and row once */
+          const jhuff_t *ht[J_COMPS];
+          int32_t       *dp[J_COMPS];
+          uint32_t       n = j->nscomp;
+
+          for (i = 0; i < n; i++) {
+            const jcomp_t *c = &j->comp[j->scomp[i]];
+
+            ht[i] = j->dc[c->td];
+            dp[i] = L.diff[j->scomp[i]] + (single ? (size_t)yo * c->bw : 0u);
+          }
+          if (n == 1u) {
+            for (mx = 0; mx < per_row; mx++) dp[0][mx] = loss_diff(&bs, ht[0]);
+          } else if (n == 3u) {
+            for (mx = 0; mx < per_row; mx++) {
+              dp[0][mx] = loss_diff(&bs, ht[0]);
+              dp[1][mx] = loss_diff(&bs, ht[1]);
+              dp[2][mx] = loss_diff(&bs, ht[2]);
+            }
+          } else {
+            for (mx = 0; mx < per_row; mx++) {
+              for (i = 0; i < n; i++) dp[i][mx] = loss_diff(&bs, ht[i]);
+            }
+          }
+        } else {
+          for (mx = 0; mx < per_row; mx++) {
+            for (i = 0; i < j->nscomp; i++) {
+              uint32_t ci = j->scomp[i];
+              jcomp_t *c  = &j->comp[ci];
               uint32_t a, b;
 
               for (b = 0; b < c->v; b++) {
-                for (a = 0; a < c->h; a++) L.diff[ci][(size_t)b * c->bw + mx * c->h + a] = loss_diff(&x.r.b, j->dc[c->td]);
+                for (a = 0; a < c->h; a++) L.diff[ci][(size_t)b * c->bw + mx * c->h + a] = loss_diff(&bs, j->dc[c->td]);
               }
             }
           }
         }
+        x.r.b = bs;
         if (rd_past(&x.r)) x.lacking = true;
       }
       if (j->restart) rows_to_go--;
