@@ -405,6 +405,8 @@ struct jsout {
   uint32_t band, max;
   bool     wide, invert, swap;
   bool     pad;      /* RGB as RGB0: a row made, then spread to four */
+  bool     h2v2;     /* YCbCr 4:2:0, 8 bits, fancy: chroma upsampled in
+                        the colour conversion (NEON) */
   ImByteOrder order;
   uint32_t on;       /* samples a pixel out */
   uint8_t *rows[IM_POOL_MAX];
@@ -447,6 +449,47 @@ pad16(const uint16_t *in, uint32_t w, uint16_t *out) {
   }
 }
 
+#if J_NEON
+/* a 4:2:0 row (o->h2v2): the chroma rows' column sums, then upsampled in
+   the colour conversion; the last pixels (under 32) upsampled here and
+   converted as pixels8_plain does */
+static void
+h2v2_row(const jsout_t *o, const jpg_t *j, uint32_t y, uint16_t *sums, uint8_t *dst) {
+  const jcomp_t *cb = &j->comp[1], *cr = &j->comp[2];
+  const uint8_t *yr = (const uint8_t *)j->comp[0].plane + (size_t)y * j->comp[0].stride;
+  uint16_t      *s[2] = { sums + 1, sums + 1 + o->rowlen + 2u };
+  uint32_t       n = cb->ow, cy = y >> 1, w = j->ow, done, i, x;
+
+  for (i = 0; i < 2u; i++) {
+    const jcomp_t *c = i ? cr : cb;
+    const uint8_t *rnear = (const uint8_t *)c->plane + (size_t)cy * c->stride, *rfar;
+
+    if (!(y & 1u)) rfar = cy ? rnear - c->stride : rnear;
+    else rfar = cy + 1u < c->oh ? rnear + c->stride : rnear;
+    jn_colsum(rnear, rfar, n, s[i]);
+  }
+  done = jn_ycc_h2v2(yr, s[0], s[1], w, dst);
+  if (done < w) {
+    uint8_t        tb[32], tr[32];
+    const uint8_t *row[4] = { yr + done, tb, tr, NULL }; /* pixels8_plain reads all four */
+
+    for (x = done; x < w; x++) {
+      const uint16_t *b = s[0] + (x >> 1), *r = s[1] + (x >> 1);
+
+      /* [-1] and [n]: the edges' copies */
+      if (x & 1u) {
+        tb[x - done] = (uint8_t)((b[0] * 3u + b[1] + 7u) >> 4);
+        tr[x - done] = (uint8_t)((r[0] * 3u + r[1] + 7u) >> 4);
+      } else {
+        tb[x - done] = (uint8_t)((b[0] * 3u + b[-1] + 8u) >> 4);
+        tr[x - done] = (uint8_t)((r[0] * 3u + r[-1] + 8u) >> 4);
+      }
+    }
+    pixels8_plain(row, 3u, J_YCC, &o->t, 255, false, w - done, dst + (size_t)done * 3u);
+  }
+}
+#endif
+
 /* rows y0 … y1 - 1 out, with worker `worker`'s rows */
 IM_HIDE void
 jpg_out_rows(jsout_t *o, uint32_t worker, uint32_t y0, uint32_t y1) {
@@ -460,6 +503,13 @@ jpg_out_rows(jsout_t *o, uint32_t worker, uint32_t y0, uint32_t y1) {
       const uint8_t *row[J_COMPS];
       uint8_t       *dst = o->pad ? o->rgb[worker] : o->px + (size_t)y * o->pitch;
 
+#if J_NEON
+      if (o->h2v2) {
+        h2v2_row(o, j, y, o->scratch[worker].sums, dst);
+        if (o->pad) pad8(dst, w, o->px + (size_t)y * o->pitch);
+        continue;
+      }
+#endif
       for (i = 0; i < n; i++) row[i] = up_row8(j, &j->comp[i], &o->up[i], y, rows + o->rowlen * i, &o->scratch[worker]);
       pixels8(row, n, o->space, &o->t, (int32_t)o->max, o->invert, w, dst, o->scratch[worker].x86);
       if (j->prec < 8u) {
@@ -572,6 +622,11 @@ jpg_out_begin(jpg_t *j, jspace_t space, ImByteOrder order) {
   o->order  = order;
   len       = (size_t)w * h * o->on * (o->wide ? 2u : 1u);
   for (i = 0; i < n; i++) o->up[i] = up_method(j, &j->comp[i]);
+#if J_NEON
+  o->h2v2 = n == 3u && space == J_YCC && !o->wide && o->max == 255u && o->up[0].how == UP_FULL
+            && o->up[1].how == UP_H2V2_FANCY && o->up[2].how == UP_H2V2_FANCY && j->comp[1].ow == j->comp[2].ow
+            && j->comp[1].oh == j->comp[2].oh;
+#endif
   if ((space == J_YCC || space == J_YCCK) && !ycc_tables(&o->t, o->max, o->wide ? 65536u : 256u)) goto done;
   /* the caller's memory, where given: its rows' stride, enough of it */
   o->pitch = (size_t)w * o->on * (o->wide ? 2u : 1u);
@@ -588,7 +643,7 @@ jpg_out_begin(jpg_t *j, jspace_t space, ImByteOrder order) {
     o->scratch[i].x86 = __builtin_cpu_supports("ssse3") && __builtin_cpu_supports("sse4.1");
 #endif
     if (!(o->rows[i] = malloc(o->rowlen * n * (o->wide ? 2u : 1u))) || !(o->scratch[i].pad = malloc(o->rowlen + 2u))
-        || !(o->scratch[i].sums = malloc((o->rowlen + 2u) * sizeof(uint16_t)))
+        || !(o->scratch[i].sums = malloc((o->rowlen + 2u) * 2u * sizeof(uint16_t)))
         || (o->pad && !(o->rgb[i] = malloc((size_t)w * 3u * (o->wide ? 2u : 1u))))) {
       goto done;
     }
