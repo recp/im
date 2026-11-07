@@ -328,6 +328,8 @@ typedef struct jpx {
                               reduced grid's, the tiles and code-blocks
                               outside it not decoded */
   uint32_t  rgx0, rgy0, rgx1, rgy1;
+  uint64_t  sbytes;        /* a one-tile image by bands: its rings' bytes */
+  size_t    cs_len;        /* the codestream's bytes */
   uint8_t   prec[X_COMPS], sgnd[X_COMPS], dx[X_COMPS], dy[X_COMPS];
   bool      skip[X_COMPS]; /* not wanted: its code-blocks, wavelet and samples left out */
   xcod_t    cod;
@@ -4466,6 +4468,7 @@ stream_open(jpx_t *j) {
         if (!ring_new(&lv->L, cap, lv->w, (uint32_t)res->band[0].y0) || !ring_new(&lv->H, cap, lv->w, (uint32_t)res->band[1].y0)) {
           return false;
         }
+        j->sbytes += (uint64_t)cap * lv->w * 4u * 2u;
         for (b = 0; b < 3u; b++) {
           lv->band[b].res  = res;
           lv->band[b].b    = b;
@@ -4477,6 +4480,7 @@ stream_open(jpx_t *j) {
       if (!sc->top) lead = 1u << tc->res[0].ycb; /* no level: its code-block rows ahead */
       cap = pow2_at_least((uint64_t)rows + lead + 8u);
       if (!ring_new(&sc->out, cap, (uint32_t)(tr->x1 - tr->x0), sc->top ? 0u : (uint32_t)tc->res[0].band[0].y0)) return false;
+      j->sbytes += (uint64_t)cap * (uint64_t)(tr->x1 - tr->x0) * 4u;
       if (sc->top) sc->lv[sc->top].D = &sc->out;
       sc->ll.res  = &tc->res[0];
       sc->ll.b    = 0u;
@@ -4494,6 +4498,7 @@ stream_open(jpx_t *j) {
     bytes = (size_t)cap * j->pw[c] * sizeof(uint16_t);
     if (!(j->plane[c] = im_big_alloc(bytes, true, false))) return false;
     j->psize[c] = bytes;
+    j->sbytes  += bytes;
   }
   st->mct = t && tile_mct(j, t) && st->c[0].on && st->c[1].on && st->c[2].on;
   return true;
@@ -4685,6 +4690,8 @@ typedef struct jxopts {
   uint32_t    scale;   /* 1 (or 0), 2, 4, 8: levels left out, as many as halve it */
   bool        region;  /* only x, y, w by h composed (the scaled image's) */
   uint32_t    rx, ry, rw, rh;
+  size_t      mem_limit; /* bytes the image may take; 0: no limit */
+  bool       *over;      /* set where refused for it (NULL: none) */
 } jxopts_t;
 
 /* which channel is which: through a palette where the JP2 maps one; the
@@ -5535,6 +5542,8 @@ made:
   return true;
 }
 
+static uint64_t image_bytes(const jpx_t *j, const jxopts_t *o, bool bands, uint64_t tile);
+
 /* `data`, a JP2 or a bare codestream, into `im` */
 static bool
 jpx_decode(const uint8_t *data, size_t len, ImImage *im, const jxopts_t *o) {
@@ -5561,6 +5570,7 @@ jpx_decode(const uint8_t *data, size_t len, ImImage *im, const jxopts_t *o) {
     im->fileFormatType = IM_FILEFORMATTYPE_J2K;
   }
   if (!read_codestream(j, cs, cs_len)) goto done;
+  j->cs_len = cs_len;
   /* the grid as SIZ has it: the tiles' (compose's made smaller below) */
   j->ox0 = j->x0;
   j->oy0 = j->y0;
@@ -5621,6 +5631,12 @@ jpx_decode(const uint8_t *data, size_t len, ImImage *im, const jxopts_t *o) {
           j->psize[c] = (size_t)cap * j->pw[c] * sizeof(uint16_t);
         }
       }
+    }
+    if (o->mem_limit && image_bytes(j, o, bands, tile) > o->mem_limit) {
+      if (o->over) *o->over = true; /* IM_OPTION_MEMORY_LIMIT: nothing made */
+      goto done;
+    }
+    for (c = 0; c < j->ncomp && !bands; c++) {
       if (!(j->plane[c] = im_big_alloc(j->psize[c], true, j->pmap))) goto done;
     }
   }
@@ -5641,6 +5657,11 @@ jpx_decode(const uint8_t *data, size_t len, ImImage *im, const jxopts_t *o) {
   pool_start(j);
   if (bands) {
     if (!stream_open(j)) goto done;
+    /* its rings now known (a band's rows each): the limit again */
+    if (o->mem_limit && image_bytes(j, o, true, 0u) > o->mem_limit) {
+      if (o->over) *o->over = true;
+      goto done;
+    }
   } else if (!j->rows) {
     for (tile = 0; tile < j->ntx * j->nty; tile++) {
       if (tile_wanted(j, tile) && !tile_decode(j, tile)) goto done;
@@ -5675,6 +5696,52 @@ done:
   arena_free_all(&j->arena);
   free(j);
   return ok;
+}
+
+/* what decoding the image touches (IM_OPTION_MEMORY_LIMIT's count): the
+   planes' places the tiles decoded are put (made zeroed, so the rest is
+   never touched), or rings a row of tiles tall whole; a tile's samples
+   (`tile`: the biggest one's, one at a time), or, made by bands, its
+   rings as stream_open makes them (a band and the code-block rows ahead
+   of it at each level; 0 before) and its packets' records (the
+   codestream's bytes at most); the pixels out where im makes them (a
+   palette's three channels at most from one); the threads' scratch and
+   the tables */
+static uint64_t
+image_bytes(const jpx_t *j, const jxopts_t *o, bool bands, uint64_t tile) {
+  uint64_t all = (4u << 20) + (uint64_t)(o->threads ? o->threads : X_THREADS) * (1u << 20), px;
+  uint32_t c, t, ch = (j->ncomp < 3u ? 3u : j->ncomp) + 1u, es = 1u;
+
+  px = j->region ? (uint64_t)(j->rgx1 - j->rgx0) * (j->rgy1 - j->rgy0)
+                 : (uint64_t)(ceil_pow2(j->x1, j->reduce) - ceil_pow2(j->x0, j->reduce)) * (ceil_pow2(j->y1, j->reduce) - ceil_pow2(j->y0, j->reduce));
+  if (bands) all += j->sbytes + j->cs_len; /* its rings (none before they're made); the tile's packets */
+  for (c = 0; c < j->ncomp; c++) {
+    if (bands) {
+      /* counted above */
+    } else if (j->rows) {
+      all += j->psize[c];
+    } else {
+      for (t = 0; t < j->ntx * j->nty; t++) {
+        int64_t X0, Y0, X1, Y1;
+
+        if (!tile_wanted(j, t)) continue;
+        tile_rect(j, t, c, &X0, &Y0, &X1, &Y1);
+        if (X1 > X0 && Y1 > Y0) all += (uint64_t)(X1 - X0) * (uint64_t)(Y1 - Y0) * sizeof(uint16_t);
+      }
+    }
+    if (j->prec[c] > 8u && !o->eight) es = 2u; /* 16 bits a sample */
+  }
+  if (!bands) all += tile;
+  /* a tile's code-blocks' records (a block, its segments, a job: 128 bytes
+     each) over its levels' samples (a third more than its own) */
+  for (c = 0; c < j->ncomp; c++) {
+    const xcc_t *cc = &j->cod.cc[c];
+    uint64_t     n  = ((uint64_t)j->tw / j->dx[c] + 1u) * ((uint64_t)j->th / j->dy[c] + 1u);
+
+    all += n * 4u / 3u / ((uint64_t)1 << (cc->xcb + cc->ycb)) * 128u;
+  }
+  if (!o->dest) all += px * ch * es;
+  return all;
 }
 
 /* the headers' word: the JP2's boxes, the codestream's SIZ and COD */
@@ -5753,16 +5820,22 @@ opts_of(const im_open_config_t *c) {
   o.ry          = c->regionY;
   o.rw          = c->regionW;
   o.rh          = c->regionH;
+  o.mem_limit   = c->memoryLimit;
+  o.over        = NULL;
   return o;
 }
 
 /* decoded into a new image; NULL where it won't */
 static ImImage*
-dec(const uint8_t *data, size_t len, const im_open_config_t *conf) {
+dec(const uint8_t *data, size_t len, const im_open_config_t *conf, ImResult *res) {
   jxopts_t o  = opts_of(conf);
   ImImage *im = calloc(1, sizeof(*im));
+  bool     over = false;
 
+  o.over = &over;
+  *res   = IM_EBADF;
   if (im && !jpx_decode(data, len, im, &o)) {
+    *res = over ? IM_ENOMEM : IM_EBADF;
     free(im);
     return NULL;
   }
@@ -5779,8 +5852,10 @@ jp2_dec_mem(ImImage               ** __restrict dest,
             const uint8_t          * __restrict data,
             size_t                              len,
             const im_open_config_t * __restrict open_config) {
-  *dest = dec(data, len, open_config);
-  return *dest ? IM_OK : IM_EBADF;
+  ImResult res;
+
+  *dest = dec(data, len, open_config, &res);
+  return *dest ? IM_OK : res;
 }
 
 #if !IM_CODECS_ONLY
@@ -5798,7 +5873,11 @@ jp2_dec(ImImage         ** __restrict dest,
     return IM_ERR;
   }
 
-  *dest = dec(fres.raw, fres.size, open_config);
+  {
+    ImResult res;
+
+    *dest = dec(fres.raw, fres.size, open_config, &res);
+  }
 
   /* the pixels don't point into the file: it goes now */
   if (fres.mmap) { im_unmap(fres.raw, fres.size); }
