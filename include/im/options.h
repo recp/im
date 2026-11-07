@@ -104,6 +104,13 @@ typedef enum im_option_type_t {
      colours made only inside, the rows below never decoded, restart
      intervals above passed over) */
   IM_OPTION_REGION,
+
+  /* the most memory a decode may make for the image (im_option_memory,
+     bytes; 0: no limit): what it would touch (its planes, coefficients,
+     the pixels out where im makes them) counted before anything
+     image-sized is made, past it refused with IM_ENOMEM: a bigger
+     IM_OPTION_SCALE, or a smaller IM_OPTION_REGION, may fit */
+  IM_OPTION_MEMORY_LIMIT,
 } im_option_type_t;
 
 
@@ -143,6 +150,11 @@ typedef struct im_option_dest_t {
   void            *pixels;
   size_t           stride, size;
 } im_option_dest_t;
+
+typedef struct im_option_size_t {
+  im_option_base_t base;
+  size_t           value;
+} im_option_size_t;
 
 typedef struct im_option_region_t {
   im_option_base_t base;
@@ -240,6 +252,17 @@ im_option_region(uint32_t x, uint32_t y, uint32_t width, uint32_t height) {
   opt.y         = y;
   opt.width     = width;
   opt.height    = height;
+
+  return opt;
+}
+
+IM_INLINE
+im_option_size_t
+im_option_memory(size_t bytes) {
+  im_option_size_t opt;
+
+  opt.base.type = IM_OPTION_MEMORY_LIMIT;
+  opt.value     = bytes;
 
   return opt;
 }

@@ -1797,6 +1797,8 @@ typedef struct jspec {
   jchunk_t *ch;
   uint32_t  n, w, total;   /* chunks, MCUs across, blocks */
   uint32_t  nblk;          /* blocks an MCU */
+  size_t    room;          /* int16s a chunk's records may take (an
+                              IM_OPTION_MEMORY_LIMIT's share; else all) */
   uint8_t   slot_ci[64], slot_h[64], slot_v[64];
 } jspec_t;
 
@@ -2069,7 +2071,8 @@ spec_pass1(void *arg, uint32_t worker, uint32_t item) {
          one past them), else dropped as they come, decoded again in (3) */
       if (ch->ncoef + 130u > ch->coefcap) {
         size_t   cap  = ch->coefcap * 2u;
-        int16_t *next = im_big_grow(ch->coef, ch->coefcap * sizeof(*next), cap * sizeof(*next), j->big);
+        int16_t *next = cap <= sp->room ? im_big_grow(ch->coef, ch->coefcap * sizeof(*next), cap * sizeof(*next), j->big)
+                                        : NULL; /* past its share: dropped */
 
         if (!next) {
           ch->coef = NULL;
@@ -2276,6 +2279,15 @@ scan_spec(jpg_t *j, im_pool_t *pool, uint32_t w, uint32_t h, size_t margin, bool
      bytes a block or more (less: the pages they'd take cost more than the
      decoding they'd save, most on many threads) */
   keep = J_KEEP && len >= (size_t)sp.total * 4u;
+  /* under a memory limit the records take what the frame leaves of it,
+     shared (too little: none kept, all decoded again) */
+  sp.room = SIZE_MAX;
+  if (j->mem_limit) {
+    uint64_t used = jpg_frame_bytes(j), left = used < j->mem_limit ? j->mem_limit - used : 0u;
+
+    sp.room = (size_t)(left / (sp.n - 1u) / sizeof(int16_t));
+    keep    = keep && sp.room >= (64u << 10);
+  }
   for (i = 0; i < sp.n; i++) {
     ch[i].start  = part * i;
     ch[i].end    = i + 1u < sp.n ? part * (i + 1u) : len;
@@ -2287,6 +2299,7 @@ scan_spec(jpg_t *j, im_pool_t *pool, uint32_t w, uint32_t h, size_t margin, bool
       uint64_t nblk = (uint64_t)sp.total * 3u / sp.n, a = nblk * 2u + ((uint64_t)part * 3u) * 2u, b = nblk * 128u;
 
       ch[i].coefcap = (size_t)(a < b ? a : b) + 1024u;
+      if (ch[i].coefcap > sp.room) ch[i].coefcap = sp.room;
       ch[i].coef    = im_big_alloc(ch[i].coefcap * sizeof(int16_t), false, j->big);
     }
   }

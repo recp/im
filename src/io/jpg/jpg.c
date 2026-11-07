@@ -448,6 +448,34 @@ coef_size(const jcomp_t *c) {
   return (size_t)c->bw * c->bh * 64u * sizeof(int16_t);
 }
 
+/* what decoding the frame touches (IM_OPTION_MEMORY_LIMIT's count): of
+   each plane the rows and columns its region's blocks are written to
+   (the rest, allocated, is never touched: no page of it made), their
+   pages a row; a multi-scan image's coefficients whole (every block's
+   are read); the pixels out where im makes them; the scans' data
+   unstuffed (the stream's bytes at most), each worker's rows out and
+   the tables (a megabyte for them all) */
+IM_HIDE uint64_t
+jpg_frame_bytes(const jpg_t *j) {
+  uint64_t all = 0u, es = j->diff ? 4u : j->prec > 8u ? 2u : 1u;
+  uint64_t rows = ((uint64_t)j->hmax * 8u * (j->mcux + 1u) + 16u) * (j->ncomp + 4u) * 2u;
+  uint32_t i, n = j->ncomp == 3u && j->rgb_pad ? 4u : j->ncomp;
+
+  all = (uint64_t)(j->end - j->data) + rows * (j->pool ? im_pool_size(j->pool) : 1u) + (4u << 20);
+
+  for (i = 0; i < j->ncomp; i++) {
+    const jcomp_t *c   = &j->comp[i];
+    uint64_t       row = (uint64_t)c->stride * es, span = (uint64_t)(c->rbx1 - c->rbx0) * c->ss * es;
+
+    if (j->region && !j->hier) span = (span + 2u * 16384u - 1u) / 16384u * 16384u; /* its pages (16K: arm64's), one more */
+    else span = row;
+    all += (span < row ? span : row) * (uint64_t)(c->rby1 - c->rby0) * c->ss;
+    if (j->multiscan) all += coef_size(c);
+  }
+  if (!j->dest) all += (uint64_t)j->reg_w * j->reg_h * n * (j->prec > 8u ? 2u : 1u);
+  return all;
+}
+
 /* the planes, and a multi-scan image's coefficients; J_BIG bytes of them
    or more (not a hierarchical frame's), given back as they're done with */
 static bool
@@ -460,6 +488,10 @@ frame_alloc(jpg_t *j) {
 
     c->plane_size = c->stride * c->bh * c->ss * (j->diff ? 4u : j->prec > 8u ? 2u : 1u);
     all += c->plane_size + (j->multiscan ? coef_size(c) : 0u);
+  }
+  if (j->mem_limit && jpg_frame_bytes(j) > j->mem_limit) {
+    j->over = true; /* IM_OPTION_MEMORY_LIMIT: nothing made */
+    return false;
   }
   j->big = !j->hier && all >= J_BIG;
   for (i = 0; i < j->ncomp; i++) {
@@ -1625,7 +1657,9 @@ jpg_decode_mem(const uint8_t *data, size_t len, ImImage *im, const jopts_t *o) {
   j->reg_y            = o->ry;
   j->reg_w            = o->rw;
   j->reg_h            = o->rh;
+  j->mem_limit        = o->mem_limit;
   ok                = decode(j, im, o->order);
+  if (o->over) *o->over = j->over;
   im_pool_free(j->pool);
   jpg_free(j);
   free(j);
@@ -1651,16 +1685,22 @@ opts_of(const im_open_config_t *c) {
   o.ry          = c->regionY;
   o.rw          = c->regionW;
   o.rh          = c->regionH;
+  o.mem_limit   = c->memoryLimit;
+  o.over        = NULL;
   return o;
 }
 
 /* decoded into a new image; NULL where it won't */
 static ImImage*
-dec(const uint8_t *data, size_t len, const im_open_config_t *conf) {
+dec(const uint8_t *data, size_t len, const im_open_config_t *conf, ImResult *res) {
   jopts_t  o  = opts_of(conf);
   ImImage *im = calloc(1, sizeof(*im));
+  bool     over = false;
 
+  o.over = &over;
+  *res   = IM_EBADF;
   if (im && !jpg_decode_mem(data, len, im, &o)) {
+    *res = over ? IM_ENOMEM : IM_EBADF;
     free(im->data.data);
     free(im->iccProfile);
     free(im->physicalDim);
@@ -1681,8 +1721,10 @@ jpg_dec_mem(ImImage               ** __restrict dest,
             const uint8_t          * __restrict data,
             size_t                              len,
             const im_open_config_t * __restrict open_config) {
-  *dest = dec(data, len, open_config);
-  return *dest ? IM_OK : IM_EBADF;
+  ImResult res;
+
+  *dest = dec(data, len, open_config, &res);
+  return *dest ? IM_OK : res;
 }
 
 #if !IM_CODECS_ONLY
@@ -1700,7 +1742,11 @@ jpg_dec(ImImage         ** __restrict dest,
     return IM_ERR;
   }
 
-  *dest = dec(fres.raw, fres.size, open_config);
+  {
+    ImResult res;
+
+    *dest = dec(fres.raw, fres.size, open_config, &res);
+  }
 
   /* the pixels don't point into the file: it goes now */
   if (fres.mmap) { im_unmap(fres.raw, fres.size); }

@@ -175,6 +175,8 @@ typedef struct jpg {
                                  out (IM_OPTION_REGION; cut to the frame;
                                  without one, all of it) */
   uint32_t  reg_x, reg_y, reg_w, reg_h;
+  size_t    mem_limit;        /* IM_OPTION_MEMORY_LIMIT's bytes; 0: none */
+  bool      over;             /* refused for it */
   uint32_t  hmax, vmax, mcux, mcuy;
   uint32_t  process;          /* J_SEQUENTIAL, J_PROGRESSIVE, J_LOSSLESS */
   bool      arith, frame, multiscan;
@@ -259,10 +261,13 @@ typedef struct jopts {
   uint32_t    scale;       /* 1 (or 0), 2, 4, 8: the size divided by it */
   bool        region;      /* only x, y, w by h out (after the scale) */
   uint32_t    rx, ry, rw, rh;
+  size_t      mem_limit;   /* bytes the image may take; 0: no limit */
+  bool       *over;        /* set where refused for mem_limit (NULL: none) */
 } jopts_t;
 
 IM_HIDE bool jpg_decode_mem(const uint8_t *data, size_t len, ImImage *im, const jopts_t *o);
 IM_HIDE bool jpg_region_cut(jpg_t *j);
+IM_HIDE uint64_t jpg_frame_bytes(const jpg_t *j);
 IM_HIDE uint32_t jpg_region_rows(const jpg_t *j, uint32_t w, uint32_t h, uint32_t *first);
 
 /* huff.c */

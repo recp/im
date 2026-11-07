@@ -66,6 +66,7 @@ im_config(im_option_base_t *options[], ImOpenIntent openIntent) {
           conf.regionW = ((im_option_region_t*)opt)->width;
           conf.regionH = ((im_option_region_t*)opt)->height;
           break;
+        case IM_OPTION_MEMORY_LIMIT:         conf.memoryLimit    = ((im_option_size_t*)opt)->value;      break;
         case IM_OPTION_DEST:
           conf.dest       = ((im_option_dest_t*)opt)->pixels;
           conf.destStride = ((im_option_dest_t*)opt)->stride;

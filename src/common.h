@@ -84,6 +84,7 @@ typedef struct im_open_config_t {
   uint32_t          scale;          /* the size over 1 (or 0), 2, 4, 8 */
   bool              region;         /* only regionX … (IM_OPTION_REGION) */
   uint32_t          regionX, regionY, regionW, regionH;
+  size_t            memoryLimit;    /* bytes; 0: none (IM_OPTION_MEMORY_LIMIT) */
 } im_open_config_t;
 
 /* the options as a decoder reads them (load.c) */
