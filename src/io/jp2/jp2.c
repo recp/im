@@ -324,6 +324,10 @@ typedef struct jpx {
   arena_t   arena;
   uint32_t  x1, y1, x0, y0, tw, th, tx0, ty0, ntx, nty, ncomp;
   uint32_t  reduce;        /* the finest levels left out: the image that many halvings smaller */
+  bool      region;        /* only rgx0 … rgy1 composed (IM_OPTION_REGION): the
+                              reduced grid's, the tiles and code-blocks
+                              outside it not decoded */
+  uint32_t  rgx0, rgy0, rgx1, rgy1;
   uint8_t   prec[X_COMPS], sgnd[X_COMPS], dx[X_COMPS], dy[X_COMPS];
   bool      skip[X_COMPS]; /* not wanted: its code-blocks, wavelet and samples left out */
   xcod_t    cod;
@@ -3787,6 +3791,37 @@ tile_mct(const jpx_t *j, const xtile_t *t) {
       && t->tc[2].cc->reversible == t->tc[0].cc->reversible;
 }
 
+static void region_rect(const jpx_t *j, uint32_t c, int64_t *X0, int64_t *Y0, int64_t *X1, int64_t *Y1);
+
+/* v over 2^d, rounded down (v may be negative) */
+static int64_t
+floor_div_i(int64_t v, uint32_t d) {
+  return v >= 0 ? v >> d : -(((-v) + ((int64_t)1 << d) - 1) >> d);
+}
+
+/* whether a code-block of resolution r can reach the region's samples: the
+   region's place at the top level decoded (the reduced grid), widened by
+   the wavelet's reach (each level's filters 4 samples either side at most,
+   8 · 2^d over the d levels from the band to the top), scaled down to the
+   band (a sample of it 2^d of the top's). One that can't is left at zero,
+   its decoding not done: the region's samples the same */
+static bool
+cblk_wanted(const jpx_t *j, const xtc_t *tc, uint32_t c, uint32_t r, const xcblk_t *kb) {
+  int64_t  X0, Y0, X1, Y1, m;
+  uint32_t d;
+
+  if (!j->region) return true;
+  region_rect(j, c, &X0, &Y0, &X1, &Y1);
+  X0 += j->px0[c];
+  X1 += j->px0[c];
+  Y0 += j->py0[c];
+  Y1 += j->py0[c];
+  d = r ? tc->nuse - r : tc->nuse - 1u;
+  m = (int64_t)8 << d;
+  return kb->x0 < floor_div_i(X1 + m, d) + 2 && floor_div_i(X0 - m, d) - 1 < kb->x1
+      && kb->y0 < floor_div_i(Y1 + m, d) + 2 && floor_div_i(Y0 - m, d) - 1 < kb->y1;
+}
+
 /* the tile whole: every component's samples, its code-blocks, each level's
    rows and columns, into the planes */
 static bool
@@ -3829,7 +3864,7 @@ tile_whole(jpx_t *j, xtile_t *t) {
               const xcblk_t *kb   = &pb->blk[m];
               size_t         st   = (size_t)(tc->x1 - tc->x0);
 
-              if (!kb->nsegs || n >= t->blocks) continue;
+              if (!kb->nsegs || n >= t->blocks || !cblk_wanted(j, tc, c, r, kb)) continue;
               jobs[n].b      = &pb->blk[m];
               jobs[n].band   = band;
               jobs[n].cc     = tc->cc;
@@ -3908,6 +3943,34 @@ tile_rect(const jpx_t *j, uint32_t tile, uint32_t c, int64_t *X0, int64_t *Y0, i
   *Y1 = ceil_pow2(ceil_div_u(y1, j->dy[c]), j->reduce) - j->py0[c];
 }
 
+/* component c's plane columns [*X0, *X1) and rows [*Y0, *Y1) compose
+   reads for the region (its map: a pixel's grid place over dx, less px0) */
+static void
+region_rect(const jpx_t *j, uint32_t c, int64_t *X0, int64_t *Y0, int64_t *X1, int64_t *Y1) {
+  *X0 = (int64_t)j->rgx0 / j->dx[c] - j->px0[c];
+  *Y0 = (int64_t)j->rgy0 / j->dy[c] - j->py0[c];
+  *X1 = (int64_t)(j->rgx1 - 1u) / j->dx[c] - j->px0[c] + 1;
+  *Y1 = (int64_t)(j->rgy1 - 1u) / j->dy[c] - j->py0[c] + 1;
+}
+
+/* whether a tile has samples compose reads: without a region every one;
+   tiles are coded apart (no wavelet across them), so one outside is left */
+static bool
+tile_wanted(const jpx_t *j, uint32_t tile) {
+  uint32_t c;
+
+  if (!j->region) return true;
+  for (c = 0; c < j->ncomp; c++) {
+    int64_t X0, Y0, X1, Y1, a0, b0, a1, b1;
+
+    if (j->skip[c]) continue;
+    tile_rect(j, tile, c, &X0, &Y0, &X1, &Y1);
+    region_rect(j, c, &a0, &b0, &a1, &b1);
+    if (X0 < a1 && a0 < X1 && Y0 < b1 && b0 < Y1) return true;
+  }
+  return false;
+}
+
 /* compose's rows as the tiles are made, a row of tiles at a time: after
    each, the image's rows all of whose components' plane rows are there
    (the rest with the next row's); a tile with no data its place zeroed
@@ -3924,6 +3987,7 @@ tiles_run(jpx_t *j, xbands_t *b) {
       xtile_t *t;
       bool     ok;
 
+      if (!tile_wanted(j, tile)) continue; /* a region's: never composed */
       if (!tile_open(j, tile, &t)) return false;
       if (!t) {
         for (c = 0; c < j->ncomp; c++) {
@@ -4247,6 +4311,24 @@ stream_run(jpx_t *j, xbands_t *b) {
   xbands_t   prev = *b;
   uint32_t   need[X_COMPS], c, h = b->h, Y0, Y1;
 
+  /* a region's rows above it: walked a band at a time as compose would
+     (the rings hold a band's rows and what's decoded ahead of them, not
+     more), none composed */
+  if (j->region && st->t) {
+    uint32_t g0 = (uint32_t)ceil_pow2(j->oy0, j->reduce), pre = j->y0 - g0, A0, A1;
+
+    for (A0 = 0; A0 < pre; A0 = A1) {
+      A1 = pre - A0 > X_STRIPE ? A0 + X_STRIPE : pre;
+      for (c = 0; c < j->ncomp; c++) {
+        int64_t sy = (int64_t)(g0 + A1 - 1u) / j->dy[c] - (int64_t)j->py0[c];
+
+        sy      = sy < 0 ? 0 : sy >= (int64_t)j->ph[c] ? (int64_t)j->ph[c] - 1 : sy;
+        need[c] = (uint32_t)sy + 1u;
+      }
+      st->also = NULL;
+      if (!stream_to(j, need)) return false;
+    }
+  }
   for (Y0 = 0; Y0 < h; Y0 = Y1) {
     Y1 = h - Y0 > X_STRIPE ? Y0 + X_STRIPE : h;
     if (st->t) {
@@ -4601,6 +4683,8 @@ typedef struct jxopts {
   uint8_t    *dest;    /* the caller's memory, `dest_stride` a row; NULL: im's */
   size_t      dest_stride, dest_size;
   uint32_t    scale;   /* 1 (or 0), 2, 4, 8: levels left out, as many as halve it */
+  bool        region;  /* only x, y, w by h composed (the scaled image's) */
+  uint32_t    rx, ry, rw, rh;
 } jxopts_t;
 
 /* which channel is which: through a palette where the JP2 maps one; the
@@ -5492,6 +5576,19 @@ jpx_decode(const uint8_t *data, size_t len, ImImage *im, const jxopts_t *o) {
   for (c = 0; c < j->ncomp; c++) {
     if (j->cod.cc[c].levels < j->reduce) j->reduce = j->cod.cc[c].levels;
   }
+  /* a region: the reduced grid's rectangle, cut to it (none of it inside:
+     refused) */
+  if (o->region) {
+    uint32_t gx0 = (uint32_t)ceil_pow2(j->x0, j->reduce), gy0 = (uint32_t)ceil_pow2(j->y0, j->reduce);
+    uint32_t gw = (uint32_t)ceil_pow2(j->x1, j->reduce) - gx0, gh = (uint32_t)ceil_pow2(j->y1, j->reduce) - gy0;
+
+    if (o->rx >= gw || o->ry >= gh || !o->rw || !o->rh) goto done;
+    j->region = true;
+    j->rgx0   = gx0 + o->rx;
+    j->rgy0   = gy0 + o->ry;
+    j->rgx1   = j->rgx0 + (o->rw < gw - o->rx ? o->rw : gw - o->rx);
+    j->rgy1   = j->rgy0 + (o->rh < gh - o->ry ? o->rh : gh - o->ry);
+  }
   {
     uint64_t all = 0u, tile = 0u;
 
@@ -5546,14 +5643,22 @@ jpx_decode(const uint8_t *data, size_t len, ImImage *im, const jxopts_t *o) {
     if (!stream_open(j)) goto done;
   } else if (!j->rows) {
     for (tile = 0; tile < j->ntx * j->nty; tile++) {
-      if (!tile_decode(j, tile)) goto done;
+      if (tile_wanted(j, tile) && !tile_decode(j, tile)) goto done;
     }
   }
-  /* the image's grid made smaller with it, for compose */
+  /* the image's grid made smaller with it, for compose; a region's its
+     own: compose maps each pixel through the grid's origin, so the
+     rectangle comes out as the image */
   j->x0 = (uint32_t)ceil_pow2(j->x0, j->reduce);
   j->y0 = (uint32_t)ceil_pow2(j->y0, j->reduce);
   j->x1 = (uint32_t)ceil_pow2(j->x1, j->reduce);
   j->y1 = (uint32_t)ceil_pow2(j->y1, j->reduce);
+  if (j->region) {
+    j->x0 = j->rgx0;
+    j->y0 = j->rgy0;
+    j->x1 = j->rgx1;
+    j->y1 = j->rgy1;
+  }
   ok = compose(j, &x, im, o);
 
 done:
@@ -5643,6 +5748,11 @@ opts_of(const im_open_config_t *c) {
   o.dest_stride = c->destStride;
   o.dest_size   = c->destSize;
   o.scale       = c->scale;
+  o.region      = c->region;
+  o.rx          = c->regionX;
+  o.ry          = c->regionY;
+  o.rw          = c->regionW;
+  o.rh          = c->regionH;
   return o;
 }
 
