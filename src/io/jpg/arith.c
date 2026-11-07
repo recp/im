@@ -148,18 +148,20 @@ static const uint32_t aritab[114] = {
 
 #undef V
 
-typedef struct jac {
-  jpg_t         *j;
-  const uint8_t *p, *end;   /* the segment's bytes; zeros past */
+/* the coder: the segment's bytes (zeros past), its registers; ct -1:
+   damage, nothing read to the next restart. Its own struct so a decoder
+   can keep it in locals (copied in and back): the statistics' bytes
+   written through uint8_t pointers could be any memory, so a coder read
+   through a pointer would go back to memory at each decision */
+typedef struct jacs {
+  const uint8_t *p, *end;
   int64_t        c, a;
-  int32_t        ct;        /* -1: damage, nothing read to the next restart */
-  uint8_t        dc_stats[16][64], ac_stats[16][256], fixed[4];
-  uint8_t        ll_stats[4][160]; /* lossless: 158 bins a table (H.1.2.3.2) */
-  int32_t        last_dc[J_COMPS], dc_ctx[J_COMPS];
-} jac_t;
+  int32_t        ct;
+} jacs_t;
 
-static int
-decode(jac_t *e, uint8_t *st) {
+/* a decision (libjpeg's arith_decode) */
+IM_INLINE int
+dec_bit(jacs_t *e, uint8_t *st) {
   int64_t  qe, temp;
   uint32_t nl, nm;
   int      sv;
@@ -205,23 +207,31 @@ decode(jac_t *e, uint8_t *st) {
   return sv >> 7;
 }
 
+typedef struct jac {
+  jpg_t         *j;
+  jacs_t         s;         /* the coder */
+  uint8_t        dc_stats[16][64], ac_stats[16][256], fixed[4];
+  uint8_t        ll_stats[4][160]; /* lossless: 158 bins a table (H.1.2.3.2) */
+  int32_t        last_dc[J_COMPS], dc_ctx[J_COMPS];
+} jac_t;
+
 /* a DC difference's magnitude and sign (F.2.4.1), the context after;
    false: the magnitude past 15 bits */
-static bool
-dc_diff(jac_t *e, uint32_t ci, uint32_t tbl, int32_t *out) {
+IM_INLINE bool
+dc_diff(jac_t *e, jacs_t *s, uint32_t ci, uint32_t tbl, int32_t *out) {
   uint8_t *st = e->dc_stats[tbl] + e->dc_ctx[ci];
   int      sign, m, v;
 
-  if (decode(e, st) == 0) {
+  if (dec_bit(s, st) == 0) {
     e->dc_ctx[ci] = 0;
     *out          = 0;
     return true;
   }
-  sign = decode(e, st + 1);
+  sign = dec_bit(s, st + 1);
   st += 2 + sign;
-  if ((m = decode(e, st)) != 0) {
+  if ((m = dec_bit(s, st)) != 0) {
     st = e->dc_stats[tbl] + 20;
-    while (decode(e, st)) {
+    while (dec_bit(s, st)) {
       if ((m <<= 1) == 0x8000) return false;
       st += 1;
     }
@@ -232,7 +242,7 @@ dc_diff(jac_t *e, uint32_t ci, uint32_t tbl, int32_t *out) {
   v = m;
   st += 14;
   while (m >>= 1) {
-    if (decode(e, st)) v |= m;
+    if (dec_bit(s, st)) v |= m;
   }
   v += 1;
   *out = sign ? -v : v;
@@ -240,15 +250,15 @@ dc_diff(jac_t *e, uint32_t ci, uint32_t tbl, int32_t *out) {
 }
 
 /* an AC coefficient's magnitude past its sign (st at the bin after it) */
-static bool
-ac_value(jac_t *e, uint8_t *st, uint32_t tbl, uint32_t k, int *out) {
+IM_INLINE bool
+ac_value(jac_t *e, jacs_t *s, uint8_t *st, uint32_t tbl, uint32_t k, int *out) {
   int m, v;
 
-  if ((m = decode(e, st)) != 0) {
-    if (decode(e, st)) {
+  if ((m = dec_bit(s, st)) != 0) {
+    if (dec_bit(s, st)) {
       m <<= 1;
       st = e->ac_stats[tbl] + (k <= e->j->ac_k[tbl] ? 189 : 217);
-      while (decode(e, st)) {
+      while (dec_bit(s, st)) {
         if ((m <<= 1) == 0x8000) return false;
         st += 1;
       }
@@ -257,7 +267,7 @@ ac_value(jac_t *e, uint8_t *st, uint32_t tbl, uint32_t k, int *out) {
   v = m;
   st += 14;
   while (m >>= 1) {
-    if (decode(e, st)) v |= m;
+    if (dec_bit(s, st)) v |= m;
   }
   *out = v + 1;
   return true;
@@ -265,13 +275,13 @@ ac_value(jac_t *e, uint8_t *st, uint32_t tbl, uint32_t k, int *out) {
 
 /* -- blocks (libjpeg's decode_mcu and its progressive four) ------------------- */
 
-static bool
-block_seq(jac_t *e, uint32_t ci, int16_t *blk) {
+IM_INLINE bool
+block_seq_(jac_t *e, jacs_t *s, uint32_t ci, int16_t *blk) {
   const jcomp_t *c = &e->j->comp[ci];
   int32_t        diff;
   uint32_t       k;
 
-  if (!dc_diff(e, ci, c->td, &diff)) return false;
+  if (!dc_diff(e, s, ci, c->td, &diff)) return false;
   if (e->j->diff) e->last_dc[ci] = diff & 0xffff; /* a differential frame's: none predicted */
   else if (diff) e->last_dc[ci] = (e->last_dc[ci] + diff) & 0xffff;
   blk[0] = (int16_t)e->last_dc[ci];
@@ -279,31 +289,31 @@ block_seq(jac_t *e, uint32_t ci, int16_t *blk) {
     uint8_t *st = e->ac_stats[c->ta] + 3u * (k - 1u);
     int      sign, v;
 
-    if (decode(e, st)) break; /* EOB */
-    while (decode(e, st + 1) == 0) {
+    if (dec_bit(s, st)) break; /* EOB */
+    while (dec_bit(s, st + 1) == 0) {
       st += 3;
       if (++k > 63u) return false;
     }
-    sign = decode(e, e->fixed);
-    if (!ac_value(e, st + 2, c->ta, k, &v)) return false;
+    sign = dec_bit(s, e->fixed);
+    if (!ac_value(e, s, st + 2, c->ta, k, &v)) return false;
     blk[jpg_natural[k]] = (int16_t)(sign ? -v : v);
   }
   return true;
 }
 
-static bool
-block_dc_first(jac_t *e, uint32_t ci, int16_t *blk) {
+IM_INLINE bool
+block_dc_first_(jac_t *e, jacs_t *s, uint32_t ci, int16_t *blk) {
   int32_t diff;
 
-  if (!dc_diff(e, ci, e->j->comp[ci].td, &diff)) return false;
+  if (!dc_diff(e, s, ci, e->j->comp[ci].td, &diff)) return false;
   if (e->j->diff) e->last_dc[ci] = diff & 0xffff;
   else if (diff) e->last_dc[ci] = (e->last_dc[ci] + diff) & 0xffff;
   blk[0] = (int16_t)((uint32_t)e->last_dc[ci] << e->j->al);
   return true;
 }
 
-static bool
-block_ac_first(jac_t *e, uint32_t ci, int16_t *blk) {
+IM_INLINE bool
+block_ac_first_(jac_t *e, jacs_t *s, uint32_t ci, int16_t *blk) {
   const jpg_t *j = e->j;
   uint32_t     tbl = j->comp[ci].ta, k;
 
@@ -311,20 +321,20 @@ block_ac_first(jac_t *e, uint32_t ci, int16_t *blk) {
     uint8_t *st = e->ac_stats[tbl] + 3u * (k - 1u);
     int      sign, v;
 
-    if (decode(e, st)) break; /* EOB */
-    while (decode(e, st + 1) == 0) {
+    if (dec_bit(s, st)) break; /* EOB */
+    while (dec_bit(s, st + 1) == 0) {
       st += 3;
       if (++k > j->se) return false;
     }
-    sign = decode(e, e->fixed);
-    if (!ac_value(e, st + 2, tbl, k, &v)) return false;
+    sign = dec_bit(s, e->fixed);
+    if (!ac_value(e, s, st + 2, tbl, k, &v)) return false;
     blk[jpg_natural[k]] = (int16_t)((uint32_t)(sign ? -v : v) << j->al);
   }
   return true;
 }
 
-static bool
-block_ac_refine(jac_t *e, uint32_t ci, int16_t *blk) {
+IM_INLINE bool
+block_ac_refine_(jac_t *e, jacs_t *s, uint32_t ci, int16_t *blk) {
   const jpg_t *j = e->j;
   uint32_t     tbl = j->comp[ci].ta, k, kex;
   int32_t      p1 = 1 << j->al, m1 = -1 * (1 << j->al);
@@ -335,16 +345,16 @@ block_ac_refine(jac_t *e, uint32_t ci, int16_t *blk) {
   for (k = j->ss; k <= j->se; k++) {
     uint8_t *st = e->ac_stats[tbl] + 3u * (k - 1u);
 
-    if (k > kex && decode(e, st)) break; /* EOB */
+    if (k > kex && dec_bit(s, st)) break; /* EOB */
     for (;;) {
       int16_t *coef = &blk[jpg_natural[k]];
 
       if (*coef) {
-        if (decode(e, st + 2)) *coef = (int16_t)(*coef < 0 ? *coef + m1 : *coef + p1);
+        if (dec_bit(s, st + 2)) *coef = (int16_t)(*coef < 0 ? *coef + m1 : *coef + p1);
         break;
       }
-      if (decode(e, st + 1)) {
-        *coef = (int16_t)(decode(e, e->fixed) ? m1 : p1);
+      if (dec_bit(s, st + 1)) {
+        *coef = (int16_t)(dec_bit(s, e->fixed) ? m1 : p1);
         break;
       }
       st += 3;
@@ -352,6 +362,43 @@ block_ac_refine(jac_t *e, uint32_t ci, int16_t *blk) {
     }
   }
   return true;
+}
+
+/* each block with its coder in locals */
+static bool
+block_seq(jac_t *e, uint32_t ci, int16_t *blk) {
+  jacs_t s  = e->s;
+  bool   ok = block_seq_(e, &s, ci, blk);
+
+  e->s = s;
+  return ok;
+}
+
+static bool
+block_dc_first(jac_t *e, uint32_t ci, int16_t *blk) {
+  jacs_t s  = e->s;
+  bool   ok = block_dc_first_(e, &s, ci, blk);
+
+  e->s = s;
+  return ok;
+}
+
+static bool
+block_ac_first(jac_t *e, uint32_t ci, int16_t *blk) {
+  jacs_t s  = e->s;
+  bool   ok = block_ac_first_(e, &s, ci, blk);
+
+  e->s = s;
+  return ok;
+}
+
+static bool
+block_ac_refine(jac_t *e, uint32_t ci, int16_t *blk) {
+  jacs_t s  = e->s;
+  bool   ok = block_ac_refine_(e, &s, ci, blk);
+
+  e->s = s;
+  return ok;
 }
 
 /* -- a scan -------------------------------------------------------------------- */
@@ -373,9 +420,9 @@ reset(jac_t *e) {
     }
     if (j->process != J_PROGRESSIVE || j->ss) memset(e->ac_stats[c->ta], 0, sizeof(e->ac_stats[0]));
   }
-  e->c  = 0;
-  e->a  = 0;
-  e->ct = -16;
+  e->s.c  = 0;
+  e->s.a  = 0;
+  e->s.ct = -16;
 }
 
 static void
@@ -383,10 +430,10 @@ seg_at(jac_t *e, uint32_t s) {
   const jdata_t *d = &e->j->sd;
 
   if (s < d->nseg) {
-    e->p   = d->buf + d->seg[s].start;
-    e->end = d->buf + d->seg[s].end;
+    e->s.p   = d->buf + d->seg[s].start;
+    e->s.end = d->buf + d->seg[s].end;
   } else {
-    e->p = e->end = d->buf; /* at a marker: zeros */
+    e->s.p = e->s.end = d->buf; /* at a marker: zeros */
   }
 }
 
@@ -443,14 +490,14 @@ jpg_scan_arith(jpg_t *j) {
             memset(scratch, 0, sizeof(scratch));
           }
           if (refine_dc) {
-            if (decode(e, e->fixed)) blk[0] = (int16_t)(blk[0] | (1 << j->al));
-          } else if (e->ct != -1) {
+            if (dec_bit(&e->s, e->fixed)) blk[0] = (int16_t)(blk[0] | (1 << j->al));
+          } else if (e->s.ct != -1) {
             if (j->process != J_PROGRESSIVE) ok = block_seq(e, ci, blk);
             else if (j->ss == 0u) ok = block_dc_first(e, ci, blk);
             else if (!j->ah) ok = block_ac_first(e, ci, blk);
             else ok = block_ac_refine(e, ci, blk);
           }
-          if (!ok) e->ct = -1; /* the rest of the MCU and those after: left */
+          if (!ok) e->s.ct = -1; /* the rest of the MCU and those after: left */
           if (!j->multiscan) jpg_put(j, c, blk, bx, by);
         }
       }
@@ -466,7 +513,7 @@ jpg_scan_arith(jpg_t *j) {
 
 /* a difference's class for the contexts (F.1.4.4.1.2's bounds): 0 zero,
    1 small positive, 2 small negative, 3 large positive, 4 large negative */
-static uint8_t
+IM_INLINE uint8_t
 ll_class(const jpg_t *j, uint32_t tbl, int32_t d) {
   uint32_t a = d < 0 ? (uint32_t)-d : (uint32_t)d, l = j->dc_l[tbl];
 
@@ -478,20 +525,20 @@ ll_class(const jpg_t *j, uint32_t tbl, int32_t d) {
 /* a difference by its neighbours' classes, the left one's `ca` and the
    one above's `cb` (Table H.3: S0 from both, the magnitudes' from the one
    above alone); false: the magnitude past 15 bits */
-static bool
-ll_diff(jac_t *e, uint8_t *stats, uint32_t ca, uint32_t cb, int32_t *out) {
+IM_INLINE bool
+ll_diff(jacs_t *e, uint8_t *stats, uint32_t ca, uint32_t cb, int32_t *out) {
   uint8_t *st = stats + 20u * ca + 4u * cb;
   int      sign, m, v;
 
-  if (decode(e, st) == 0) {
+  if (dec_bit(e, st) == 0) {
     *out = 0;
     return true;
   }
-  sign = decode(e, st + 1);
+  sign = dec_bit(e, st + 1);
   st += 2 + sign;
-  if ((m = decode(e, st)) != 0) {
+  if ((m = dec_bit(e, st)) != 0) {
     st = stats + (cb >= 3u ? 129 : 100);
-    while (decode(e, st)) {
+    while (dec_bit(e, st)) {
       if ((m <<= 1) == 0x8000) return false;
       st += 1;
     }
@@ -499,7 +546,7 @@ ll_diff(jac_t *e, uint8_t *stats, uint32_t ca, uint32_t cb, int32_t *out) {
   v = m;
   st += 14;
   while (m >>= 1) {
-    if (decode(e, st)) v |= m;
+    if (dec_bit(e, st)) v |= m;
   }
   v += 1;
   *out = sign ? -v : v;
@@ -517,8 +564,9 @@ jpg_scan_arith_lossless(jpg_t *j) {
   jloss_t  L;
   uint8_t *above[J_COMPS] = { NULL };
   uint32_t i, per_row, nrows, nirows, irow, rows_to_go = 0u, cur = 0u, next_rst = 0u;
-  bool     single = j->nscomp == 1u, ok = false;
+  bool     single = j->nscomp == 1u, ok = false, full = true;
 
+  for (i = 0; i < j->nscomp; i++) full = full && j->comp[j->scomp[i]].h == 1u && j->comp[j->scomp[i]].v == 1u;
   per_row = single ? j->comp[j->scomp[0]].cw : j->mcux;
   nrows   = single ? j->comp[j->scomp[0]].ch : j->mcuy;
   if (j->restart && j->restart % per_row) return false; /* as the Huffman one */
@@ -528,7 +576,7 @@ jpg_scan_arith_lossless(jpg_t *j) {
   for (i = 0; i < j->nscomp; i++) {
     if (!(above[j->scomp[i]] = calloc(j->comp[j->scomp[i]].bw, 1))) goto done;
   }
-  e->ct = -16;
+  e->s.ct = -16;
   seg_at(e, 0u);
   rows_to_go = j->restart / per_row;
 
@@ -548,40 +596,72 @@ jpg_scan_arith_lossless(jpg_t *j) {
         bool at_marker = jpg_resync(&j->sd, &next_rst, &cur);
 
         memset(e->ll_stats, 0, sizeof(e->ll_stats));
-        e->c  = 0;
-        e->a  = 0;
-        e->ct = -16;
+        e->s.c  = 0;
+        e->s.a  = 0;
+        e->s.ct = -16;
         seg_at(e, at_marker ? UINT32_MAX : cur);
         for (i = 0; i < J_COMPS; i++) L.first[i] = true;
         for (i = 0; i < j->nscomp; i++) memset(above[j->scomp[i]], 0, j->comp[j->scomp[i]].bw);
         rows_to_go = j->restart / per_row;
       }
-      for (mx = 0; mx < per_row; mx++) {
-        for (i = 0; i < j->nscomp; i++) {
-          uint32_t ci = j->scomp[i], tbl;
-          jcomp_t *c  = &j->comp[ci];
-          uint32_t nh = single ? 1u : c->h, nv = single ? 1u : c->v, a, b;
+      jacs_t s = e->s; /* in registers */
 
-          tbl = c->td;
-          for (b = 0; b < nv; b++) {
-            uint32_t r = single ? yo : b;
-            int32_t *row = L.diff[ci] + (size_t)r * c->bw;
+      if (single || full) {
+        /* a sample a component an MCU, each one's row, table, the row
+           above's classes and the left one's class kept */
+        uint32_t n = j->nscomp, ca[J_COMPS], tb[J_COMPS];
+        int32_t *row[J_COMPS];
+        uint8_t *ab[J_COMPS], *stt[J_COMPS];
 
-            for (a = 0; a < nh; a++) {
-              uint32_t x = mx * nh + a, ca, cb;
-              int32_t  d = 0;
+        for (i = 0; i < n; i++) {
+          uint32_t ci = j->scomp[i];
 
-              ca = x ? ll_class(j, tbl, row[x - 1u]) : 0u;
-              cb = single || !r ? above[ci][x] : ll_class(j, tbl, L.diff[ci][(size_t)(r - 1u) * c->bw + x]);
-              if (e->ct != -1 && !ll_diff(e, e->ll_stats[tbl], ca, cb, &d)) {
-                e->ct = -1;
-                d     = 0;
+          tb[i]  = j->comp[ci].td;
+          row[i] = L.diff[ci] + (single ? (size_t)yo * j->comp[ci].bw : 0u);
+          ab[i]  = above[ci];
+          stt[i] = e->ll_stats[tb[i]];
+          ca[i]  = 0u;
+        }
+        for (mx = 0; mx < per_row; mx++) {
+          for (i = 0; i < n; i++) {
+            int32_t d = 0;
+
+            if (s.ct != -1 && !ll_diff(&s, stt[i], ca[i], ab[i][mx], &d)) {
+              s.ct = -1;
+              d    = 0;
+            }
+            row[i][mx] = d;
+            ca[i]      = ll_class(j, tb[i], d);
+          }
+        }
+      } else {
+        for (mx = 0; mx < per_row; mx++) {
+          for (i = 0; i < j->nscomp; i++) {
+            uint32_t ci = j->scomp[i], tbl;
+            jcomp_t *c  = &j->comp[ci];
+            uint32_t nh = c->h, nv = c->v, a, b;
+
+            tbl = c->td;
+            for (b = 0; b < nv; b++) {
+              int32_t *row = L.diff[ci] + (size_t)b * c->bw;
+
+              for (a = 0; a < nh; a++) {
+                uint32_t x = mx * nh + a, ca, cb;
+                int32_t  d = 0;
+
+                ca = x ? ll_class(j, tbl, row[x - 1u]) : 0u;
+                cb = !b ? above[ci][x] : ll_class(j, tbl, L.diff[ci][(size_t)(b - 1u) * c->bw + x]);
+                if (s.ct != -1 && !ll_diff(&s, e->ll_stats[tbl], ca, cb, &d)) {
+                  s.ct = -1;
+                  d    = 0;
+                }
+                row[x] = d;
               }
-              row[x] = d;
             }
           }
         }
       }
+      e->s = s;
       /* a lone component's row is the next one's above at once */
       if (single) {
         uint32_t ci = j->scomp[0], x;
