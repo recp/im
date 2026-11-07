@@ -636,8 +636,27 @@ block_ac_first(jctx_t *x, jbits_t *b, const jcomp_t *c, int16_t *blk) {
     return;
   }
   for (k = j->ss; k <= j->se; k++) {
-    uint32_t rs = huff_sym(b, h), r = rs >> 4, s = rs & 15u;
+    uint32_t rs, r, s, e;
 
+    /* code and value in one look-up where they fit (block_seq's) */
+    if (b->n < 32) refill(b);
+    e = h->fast[PEEK(b, J_HBITS)];
+    if (likely(e & J_FUSED)) {
+      DROP(b, e & 63u);
+      rs = (e >> 8) & 0xFFu;
+      if (rs & 15u) {
+        k += rs >> 4;
+        blk[jpg_natural[k]] = (int16_t)((uint32_t)((int32_t)e >> 16) << j->al);
+        continue;
+      }
+    } else if (e) {
+      DROP(b, e & 63u);
+      rs = (e >> 8) & 0xFFu;
+    } else {
+      rs = huff_slow(b, h);
+    }
+    r = rs >> 4;
+    s = rs & 15u;
     if (s) {
       k += r;
       blk[jpg_natural[k]] = (int16_t)((uint32_t)extend(get_bits(b, s), s) << j->al);
@@ -885,6 +904,31 @@ static const uint64_t jbitpos[256] = {
   0x0000070605040302ull, 0x0007060504030200ull, 0x0007060504030201ull, 0x0706050403020100ull
 };
 
+/* a refinement's symbol (its run and size, rs) and the new coefficient's
+   sign where it has one (*v: 1 or -1, else 0): with its sign bit in one
+   look-up where the size is 1. libjpeg reads one sign bit whatever the
+   size (another is damage), so only a size of 0 or 1 is taken fused */
+IM_INLINE uint32_t
+ref_sym(jbits_t *b, const jhuff_t *h, int32_t *v) {
+  uint32_t e, rs;
+
+  if (b->n < 32u) refill(b);
+  e = h->fast[PEEK(b, J_HBITS)];
+  if (likely((e & J_FUSED) && ((e >> 8) & 15u) <= 1u)) {
+    DROP(b, e & 63u);
+    *v = (int32_t)e >> 16;
+    return (e >> 8) & 0xFFu;
+  }
+  if (e) {
+    rs = (e >> 8) & 0xFFu;
+    DROP(b, (e & J_FUSED) ? (e & 63u) - (rs & 15u) : e & 63u); /* the code's bits */
+  } else {
+    rs = huff_slow(b, h);
+  }
+  *v = (rs & 15u) ? (get_bits(b, 1u) ? 1 : -1) : 0;
+  return rs;
+}
+
 /* `s` bits, none to 63, without a branch on none (the reader's next
    place shouldn't wait for one) */
 IM_INLINE uint64_t
@@ -937,11 +981,12 @@ block_ac_refine(jctx_t *x, jbits_t *b, const jcomp_t *c, int16_t *blk) {
       return;
     }
     while (k <= se) {
-      uint32_t rs = huff_sym(b, h), s = rs & 15u, r = rs >> 4, t;
+      int32_t  sg;
+      uint32_t rs = ref_sym(b, h, &sg), s = rs & 15u, r = rs >> 4, t;
 
       if (s) {
         t = k + r > se ? se + 1u : k + r;
-        blk[jpg_natural[t]] = (int16_t)(get_bits(b, 1u) ? p1 : -p1);
+        blk[jpg_natural[t]] = (int16_t)(sg > 0 ? p1 : -p1);
       } else if (r != 15u) {
         x->eobrun = 1u << r;
         if (r) x->eobrun += get_bits(b, r);
@@ -971,11 +1016,11 @@ block_ac_refine(jctx_t *x, jbits_t *b, const jcomp_t *c, int16_t *blk) {
       memcpy(zp + ((pre >> (8u * g)) & 0xFFu), &at, 8u);
     }
     while (k <= se) {
-      uint32_t rs = huff_sym(b, h), s = rs & 15u, r = rs >> 4, t, nc;
-      int32_t  v = 0;
+      int32_t  sg, v = 0;
+      uint32_t rs = ref_sym(b, h, &sg), s = rs & 15u, r = rs >> 4, t, nc;
 
       if (s) {
-        v = get_bits(b, 1u) ? p1 : -p1;
+        v = sg > 0 ? p1 : -p1;
       } else if (r != 15u) {
         x->eobrun = 1u << r;
         if (r) x->eobrun += get_bits(b, r);
