@@ -1426,15 +1426,17 @@ seq_range(jctx_t *x, const jsblk_t *list, uint32_t nb, uint32_t w, uint32_t b0, 
   x->r.b = bs;
 }
 
-/* A region's MCU rows (IM_OPTION_REGION): a one-pass sequential scan's
-   rows past the last its blocks need left undecoded (h cut: the rows
-   wanted), and its first MCU wanted (*first); otherwise h and 0 */
+/* A region's MCU rows (IM_OPTION_REGION): a scan's rows past the last its
+   blocks need left undecoded (h cut: the rows wanted), and a one-pass
+   sequential scan's first MCU wanted (*first); otherwise h and 0. A
+   progressive one's two more (block smoothing reads the DCs two rows
+   below); the scans after start at their own data */
 IM_HIDE uint32_t
 jpg_region_rows(const jpg_t *j, uint32_t w, uint32_t h, uint32_t *first) {
   uint32_t i, r0 = UINT32_MAX, r1 = 0u;
 
   *first = 0u;
-  if (!j->region || j->hier || j->multiscan || j->process != J_SEQUENTIAL) return h;
+  if (!j->region || j->hier || (j->process != J_SEQUENTIAL && j->process != J_PROGRESSIVE)) return h;
   for (i = 0; i < j->nscomp; i++) {
     const jcomp_t *c = &j->comp[j->scomp[i]];
     uint32_t       v = j->nscomp == 1u ? 1u : c->v, a = c->rby0 / v, b = (c->rby1 + v - 1u) / v;
@@ -1442,8 +1444,9 @@ jpg_region_rows(const jpg_t *j, uint32_t w, uint32_t h, uint32_t *first) {
     r0 = a < r0 ? a : r0;
     r1 = b > r1 ? b : r1;
   }
+  if (j->process == J_PROGRESSIVE) r1 += 2u;
   if (r1 < h) h = r1;
-  *first = r0 < h ? r0 * w : 0u;
+  if (!j->multiscan) *first = r0 < h ? r0 * w : 0u;
   return h;
 }
 
