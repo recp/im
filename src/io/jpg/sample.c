@@ -278,6 +278,19 @@ ycc_tables(jycc_t *t, uint32_t max, uint32_t n) {
   t->cb_g = t->cr_g + n;
   t->cr_r = (int32_t *)(void *)(t->cb_g + n);
   t->cb_b = t->cr_r + n;
+  if (n <= 4096u) {
+    /* 8-bit samples' 256 (up to 4096, 116130 · 2048 < 2^31): every
+       product fits 32 bits, the same values four at a time */
+    for (i = 0; i < n; i++) {
+      int32_t x = (int32_t)i - (int32_t)centre;
+
+      t->cr_r[i] = ((int32_t)FIX(1.40200) * x + (int32_t)ONE_HALF) >> SCALEBITS;
+      t->cb_b[i] = ((int32_t)FIX(1.77200) * x + (int32_t)ONE_HALF) >> SCALEBITS;
+      t->cr_g[i] = (int32_t)(-FIX(0.71414)) * x;
+      t->cb_g[i] = (int32_t)(-FIX(0.34414)) * x + (int32_t)ONE_HALF;
+    }
+    return true;
+  }
   for (i = 0; i < n; i++) {
     int64_t x = (int64_t)i - centre;
 

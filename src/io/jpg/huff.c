@@ -271,23 +271,27 @@ jpg_huff_build(jhuff_t *h, const uint8_t counts[16], const uint8_t *vals, bool d
      fill the look-ups from the first on, one after another (canonical),
      the rest none */
   for (i = 0; i < total; i++) {
-    uint32_t l = sizes[i], sym = h->vals[i], s = sym & 15u, first, span, f, v;
+    uint32_t l = sizes[i], sym = h->vals[i], s = sym & 15u, first, span, f;
 
     if (l > J_HBITS) break;
     first = (uint32_t)codes[i] << (J_HBITS - l);
     span  = 1u << (J_HBITS - l);
     if (l + s <= J_HBITS && !(dc && sym == 16u)) {
-      /* its value's bits after the code: a run of look-ups each */
-      uint32_t run = 1u << (J_HBITS - l - s);
+      /* its value's bits after the code: 1 << sh look-ups each value v,
+         the value extend(v, s) in bits 16–31. In each half of the values
+         that's linear in v (the lower half's v - 2^s + 1, the upper's v),
+         so a look-up is its half's first plus (k >> sh) << 16: two plain
+         loops (vectorized), no extend a value */
+      uint32_t  sh = J_HBITS - l - s, base = (l + s) | J_FUSED | sym << 8, half = s ? span >> 1 : span;
+      uint32_t  lo = s ? base + ((1u - (1u << s)) << 16) : base, k;
+      uint32_t *q  = h->fast + first;
 
-      for (v = 0; v < 1u << s; v++) {
-        uint32_t  e = (l + s) | J_FUSED | sym << 8 | (uint32_t)(uint16_t)extend(v, s) << 16;
-        uint32_t *q = h->fast + first + v * run;
-
-        for (f = 0; f < run; f++) q[f] = e;
-      }
+      for (k = 0; k < half; k++) q[k] = lo + ((k >> sh) << 16);
+      for (k = half; k < span; k++) q[k] = base + ((k >> sh) << 16);
     } else {
-      for (f = 0; f < span; f++) h->fast[first + f] = l | sym << 8;
+      uint32_t e = l | sym << 8, *q = h->fast + first;
+
+      for (f = 0; f < span; f++) q[f] = e;
     }
     end = first + span;
   }
