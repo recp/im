@@ -729,13 +729,15 @@ TEST_IMPL(region) {
   static const char *names[] = {
     "420.jpg", "422.jpg", "440.jpg", "411.jpg", "311.jpg", "mixed.jpg", "444.jpg", "gray.jpg", "prog.jpg",
     "prog-cut.jpg", "prog-rst.jpg", "rst.jpg", "p12.jpg", "arith.jpg", "arith-prog.jpg", "arith-rst.jpg",
-    "ycck.jpg", "cmyk.jpg", "ll1.jpg", "ll-420.jpg", "hier.jpg", "hier-prog.jpg", "dnl.jpg", "threads.jpg"
+    "ycck.jpg", "cmyk.jpg", "ll1.jpg", "ll-420.jpg", "hier.jpg", "hier-prog.jpg", "dnl.jpg", "threads.jpg",
+    "rct.jp2", "ict-tiles.j2k", "sycc420.jp2", "palette.jp2", "alpha.jp2", "gray16.jp2", "poc.j2k",
+    "styles.jp2", "ht-irv-tiles.j2c", "ht-rev.jph", "parts.j2k", "imageio.jp2", "premult.jp2", "cmyk.j2k"
   };
   size_t i;
 
   for (i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
-    size_t   len = 0;
-    uint8_t *data = read_all("jpg", names[i], &len);
+    size_t   len = 0, nl = strlen(names[i]);
+    uint8_t *data = read_all(nl > 4u && !strcmp(names[i] + nl - 4u, ".jpg") ? "jpg" : "jp2", names[i], &len);
     int32_t  scale;
 
     ASSERT(data);
@@ -790,12 +792,13 @@ TEST_IMPL(region) {
 }
 
 TEST_IMPL(memory_limit) {
-  static const char *names[] = { "420.jpg", "prog.jpg", "threads.jpg", "ll1.jpg", "hier.jpg" };
+  static const char *names[] = { "420.jpg", "prog.jpg", "threads.jpg", "ll1.jpg", "hier.jpg",
+                                 "rct.jp2", "ict-tiles.j2k", "palette.jp2", "ht-rev.jph", "imageio.jp2" };
   size_t i;
 
   for (i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
-    size_t           len = 0;
-    uint8_t         *data = read_all("jpg", names[i], &len);
+    size_t           len = 0, nl = strlen(names[i]);
+    uint8_t         *data = read_all(nl > 4u && !strcmp(names[i] + nl - 4u, ".jpg") ? "jpg" : "jp2", names[i], &len);
     im_option_size_t tiny = im_option_memory(1u), lots = im_option_memory((size_t)1 << 30);
     im_option_base_t *o[2] = { NULL, NULL };
     ImImage          *a, *b;
