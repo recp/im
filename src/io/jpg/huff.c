@@ -369,6 +369,37 @@ huff_pairs(const jhuff_t *h) {
   return t;
 }
 
+/* a DC table's look-ups with the first AC symbol of `ac`'s after them,
+   in huff_pairs' form: the first symbol the DC difference (its step 0,
+   unused), the second the AC one where it fits */
+static uint64_t*
+huff_dcac(const jhuff_t *dc, const jhuff_t *ac) {
+  uint64_t *t = malloc(J_HSIZE * sizeof(*t));
+  uint32_t  x;
+
+  if (!t) return NULL;
+  for (x = 0; x < J_HSIZE; x++) {
+    uint32_t e1 = dc->fast[x], l1 = e1 & 63u;
+    uint64_t e;
+
+    if (!(e1 & J_FUSED)) {
+      t[x] = 0u;
+      continue;
+    }
+    e = l1 | (uint64_t)l1 << 6 | JP_OK | (uint64_t)(uint16_t)(e1 >> 16) << 32;
+    if (l1 < J_HBITS) {
+      uint32_t e2 = ac->fast[(x << l1) & (J_HSIZE - 1u)], l2 = e2 & 63u;
+
+      if ((e2 & J_FUSED) && l1 + l2 <= J_HBITS) {
+        e = (e & ~(uint64_t)63u) | (l1 + l2);
+        e |= (uint64_t)pair_step((e2 >> 8) & 0xFFu) << 24 | JP_TWO | (uint64_t)(uint16_t)(e2 >> 16) << 48;
+      }
+    }
+    t[x] = e;
+  }
+  return t;
+}
+
 /* the tables Annex K suggests, where a stream defines none (Motion-JPEG):
    libjpeg-turbo's std_huff_tables, at the first scan */
 IM_HIDE void
@@ -415,6 +446,7 @@ jpg_huff_std(jpg_t *j) {
 
     if (*slot || !(*slot = malloc(sizeof(**slot)))) continue;
     (*slot)->pair = NULL; /* the rest the build sets */
+    (*slot)->pair_ac = NULL;
     jpg_huff_build(*slot, std[i].bits, std[i].vals, std[i].dc, false);
   }
 }
@@ -441,9 +473,8 @@ pair_long(jbits_t *b, const jhuff_t *act, int32_t *v) {
 /* a block's AC coefficients through its table's pairs (huff_pairs): two
    symbols a look-up where they fit, the same bits taken as one by one */
 IM_INLINE void
-block_pairs(jbits_t *b, const jhuff_t *act, int16_t *blk) {
+block_pairs(jbits_t *b, const jhuff_t *act, int16_t *blk, uint32_t k) {
   const uint64_t *pt = act->pair;
-  uint32_t        k  = 1u;
 
   while (k < 64u) {
     uint64_t e;
@@ -487,6 +518,20 @@ block_seq(jbits_t *b, const jhuff_t *dct, const jhuff_t *act, int32_t *dc, int16
   int32_t  diff;
 
   if (b->n < 32) refill(b);
+  if (dct->pair_ac == act) {
+    /* the DC and the first AC symbol in one look-up (huff_dcac) */
+    uint64_t p = dct->pair[PEEK(b, J_HBITS)];
+
+    if (likely(p & JP_OK)) {
+      DROP(b, p & 63u);
+      *dc    = (int32_t)((uint32_t)*dc + (uint32_t)(int16_t)(p >> 32));
+      blk[0] = (int16_t)*dc;
+      k      = 1u + ((uint32_t)(p >> 24) & 127u);
+      blk[jpg_natural[k]] = (int16_t)(p >> 48);
+      block_pairs(b, act, blk, k + ((uint32_t)(p >> 31) & 1u));
+      return;
+    }
+  }
   e = dct->fast[PEEK(b, J_HBITS)];
   if (likely(e & J_FUSED)) {
     DROP(b, e & 63u);
@@ -506,7 +551,7 @@ block_seq(jbits_t *b, const jhuff_t *dct, const jhuff_t *act, int32_t *dc, int16
   *dc    = (int32_t)((uint32_t)*dc + (uint32_t)diff);
   blk[0] = (int16_t)*dc;
   if (act->pair) {
-    block_pairs(b, act, blk);
+    block_pairs(b, act, blk, 1u);
     return;
   }
 
@@ -2172,11 +2217,36 @@ jpg_scan_huff(jpg_t *j, im_pool_t *pool) {
   /* a big sequential scan's AC tables in pairs, here before any thread
      reads them (a table's look-ups cost more than a small scan's blocks
      save); without memory for them, one symbol a look-up */
+  for (i = 0; i < j->nscomp && j->process != J_LOSSLESS; i++) {
+    jhuff_t *d = j->dc[j->comp[j->scomp[i]].td & 3u];
+
+    /* a DC table's DC+AC look-ups are this scan's or none: its AC table
+       may have been built again since */
+    if (d) {
+      free(d->pair);
+      d->pair    = NULL;
+      d->pair_ac = NULL;
+    }
+  }
   if (j->process == J_SEQUENTIAL && (uint64_t)total * blocks >= J_PAIR_MIN) {
     for (i = 0; i < j->nscomp; i++) {
       jhuff_t *a = j->ac[j->comp[j->scomp[i]].ta & 3u];
 
       if (a && a->ok && !a->pair) a->pair = huff_pairs(a);
+    }
+    for (i = 0; i < j->nscomp; i++) {
+      const jcomp_t *c = &j->comp[j->scomp[i]];
+      jhuff_t       *d = j->dc[c->td & 3u], *a = j->ac[c->ta & 3u];
+      uint32_t       o;
+      bool           one = true;
+
+      /* where every component with this DC table has the same AC table */
+      for (o = 0; o < j->nscomp; o++) {
+        const jcomp_t *e = &j->comp[j->scomp[o]];
+
+        one = one && ((e->td & 3u) != (c->td & 3u) || (e->ta & 3u) == (c->ta & 3u));
+      }
+      if (one && d && d->ok && a && a->pair && !d->pair && (d->pair = huff_dcac(d, a))) d->pair_ac = a;
     }
   }
 

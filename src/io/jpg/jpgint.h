@@ -101,10 +101,13 @@ typedef struct jhuff {
   uint8_t   vals[256];
   uint8_t   maxsym;
   bool      ok;
-  uint64_t *pair;          /* an AC table's two-symbol look-ups (huff.c's
-                              JP_*), made for a big sequential scan; NULL
-                              none. Its own: freed where the table is
-                              built again or freed (jpg_huff_free) */
+  uint64_t *pair;          /* two-symbol look-ups (huff.c's JP_*), made for
+                              a big sequential scan; NULL none. An AC
+                              table's its own pairs; a DC table's its code
+                              with the first AC symbol of `pair_ac`'s, made
+                              again each such scan. Its own: freed where
+                              the table is built again or freed */
+  const struct jhuff *pair_ac;
 } jhuff_t;
 
 enum { J_FUSED = 1u << 7 };

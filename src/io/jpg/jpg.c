@@ -657,7 +657,8 @@ read_dht(jpg_t *j, const uint8_t *s, uint32_t len) {
     slot = tc ? &j->ac[th] : &j->dc[th];
     if (!*slot) {
       if (!(*slot = malloc(sizeof(**slot)))) return false;
-      (*slot)->pair = NULL; /* the rest the build sets */
+      (*slot)->pair    = NULL; /* the rest the build sets */
+      (*slot)->pair_ac = NULL;
     }
     jpg_huff_build(*slot, s + at + 1u, s + at + 17u, !tc, true);
     at += 17u + total;
@@ -990,7 +991,8 @@ defer_scan(jpg_t *j, const uint8_t *p, const uint8_t *end, const uint8_t **next)
       if (have) continue;
       if (!(dup = malloc(sizeof(*dup)))) goto fail;
       *dup = *orig;
-      dup->pair = NULL; /* the original's own */
+      dup->pair    = NULL; /* the original's own */
+      dup->pair_ac = NULL;
       /* every slot of its kind the scan has pointing at it: at the copy */
       for (o = 0; o < 4u; o++) {
         if (w == 0u && c->dc[o] == orig) c->dc[o] = dup;
