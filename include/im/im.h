@@ -114,7 +114,8 @@ typedef enum ImFileFormatType {
   IM_FILEFORMATTYPE_JXL,
   IM_FILEFORMATTYPE_JP2,
   IM_FILEFORMATTYPE_J2K,  /* a bare JPEG 2000 codestream */
-  IM_FILEFORMATTYPE_CCITT  /* raw CCITT fax: Group 3 or 4 (IM_OPTION_CCITT) */
+  IM_FILEFORMATTYPE_CCITT, /* raw CCITT fax: Group 3 or 4 (IM_OPTION_CCITT) */
+  IM_FILEFORMATTYPE_JBIG2  /* JBIG2: a file, or a stream's embedded segments */
 } ImFileFormatType;
 
 typedef enum ImColorSpace {

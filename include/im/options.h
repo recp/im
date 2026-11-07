@@ -114,13 +114,20 @@ typedef enum im_option_type_t {
 
   /* the data's format where it has no signature to tell it by (int,
      ImFileFormatType): IM_FILEFORMATTYPE_CCITT (its parameters by
-     IM_OPTION_CCITT) */
+     IM_OPTION_CCITT), IM_FILEFORMATTYPE_JBIG2 (a stream's embedded
+     segments; a JBIG2 file is told by its header) */
   IM_OPTION_FORMAT,
 
   /* a CCITT fax stream's parameters (im_option_ccitt). The image a bit a
      pixel (rows (width + 7) / 8 bytes, first pixel the top bit), 1 white
      unless black_is_1; IM_OPTION_EIGHT_BITS: a byte a pixel, 255 for a 1 */
   IM_OPTION_CCITT,
+
+  /* a JBIG2 stream's globals (im_option_jbig2_globals): the segments its
+     own refer to (symbol dictionaries, tables), read first. The page a bit
+     a pixel, 0 black (rows (width + 7) / 8 bytes, first pixel the top
+     bit); IM_OPTION_EIGHT_BITS: a byte a pixel, 255 white */
+  IM_OPTION_JBIG2_GLOBALS,
 } im_option_type_t;
 
 
@@ -174,6 +181,12 @@ typedef struct im_ccitt_t {
   uint32_t damaged_rows; /* rows with EOLs: damaged ones taken (each the
                             row before again) before the rows so far end */
 } im_ccitt_t;
+
+typedef struct im_option_data_t {
+  im_option_base_t base;
+  const void      *data;
+  size_t           len;
+} im_option_data_t;
 
 typedef struct im_option_ccitt_t {
   im_option_base_t base;
@@ -281,6 +294,19 @@ im_option_region(uint32_t x, uint32_t y, uint32_t width, uint32_t height) {
   opt.y         = y;
   opt.width     = width;
   opt.height    = height;
+
+  return opt;
+}
+
+/* the bytes stay the caller's through the decode */
+IM_INLINE
+im_option_data_t
+im_option_jbig2_globals(const void *data, size_t len) {
+  im_option_data_t opt;
+
+  opt.base.type = IM_OPTION_JBIG2_GLOBALS;
+  opt.data      = data;
+  opt.len       = len;
 
   return opt;
 }

@@ -15,8 +15,9 @@
  */
 
 /*
- * From memory: im_load_mem (JPEG, JPEG 2000; raw CCITT fax where the caller
- * says so), im_info_mem (JPEG, JPEG 2000), im_free, and the options as
+ * From memory: im_load_mem (JPEG, JPEG 2000, JBIG2; raw CCITT fax and JBIG2's
+ * embedded segments where the caller says so), im_info_mem (JPEG, JPEG 2000,
+ * JBIG2), im_free, and the options as
  * decoders read them. All a codec-only build has
  * (IM_CODECS_ONLY: no file layer, no Core Image, no other formats).
  */
@@ -31,6 +32,9 @@
 #endif
 #if IM_WITH_CCITT
 #  include "io/ccitt/ccitt.h"
+#endif
+#if IM_WITH_JBIG2
+#  include "io/jbig2/jbig2.h"
 #endif
 
 /* the options as a decoder reads them */
@@ -73,6 +77,10 @@ im_config(im_option_base_t *options[], ImOpenIntent openIntent) {
         case IM_OPTION_MEMORY_LIMIT:         conf.memoryLimit    = ((im_option_size_t*)opt)->value;      break;
         case IM_OPTION_FORMAT:               conf.format         = ((im_option_int_t*)opt)->value;       break;
         case IM_OPTION_CCITT:                conf.ccitt          = ((im_option_ccitt_t*)opt)->params;    break;
+        case IM_OPTION_JBIG2_GLOBALS:
+          conf.jbig2Globals    = ((im_option_data_t*)opt)->data;
+          conf.jbig2GlobalsLen = ((im_option_data_t*)opt)->len;
+          break;
         case IM_OPTION_DEST:
           conf.dest       = ((im_option_dest_t*)opt)->pixels;
           conf.destStride = ((im_option_dest_t*)opt)->stride;
@@ -89,6 +97,7 @@ IM_EXPORT
 ImResult
 im_info_mem(ImInfo * __restrict info, const void * __restrict data, size_t len) {
   static const uint8_t jp2sig[12] = { 0, 0, 0, 12, 'j', 'P', ' ', ' ', 13, 10, 0x87, 10 };
+  static const uint8_t jbig2sig[8] = { 0x97, 'J', 'B', '2', 0x0D, 0x0A, 0x1A, 0x0A };
   const uint8_t       *p = data;
 
   if (!info) return IM_EBADF;
@@ -102,7 +111,11 @@ im_info_mem(ImInfo * __restrict info, const void * __restrict data, size_t len) 
     return jp2_info(p, len, info) ? IM_OK : IM_EBADF;
   }
 #endif
+#if IM_WITH_JBIG2
+  if (len >= 9u && !memcmp(p, jbig2sig, 8u)) return jbig2_info(p, len, info) ? IM_OK : IM_EBADF;
+#endif
   (void)jp2sig;
+  (void)jbig2sig;
   return IM_EBADF;
 }
 
@@ -114,6 +127,7 @@ im_load_mem(ImImage         ** __restrict dest,
             im_option_base_t *            options[],
             ImOpenIntent                  openIntent) {
   static const uint8_t jp2sig[12] = { 0, 0, 0, 12, 'j', 'P', ' ', ' ', 13, 10, 0x87, 10 };
+  static const uint8_t jbig2sig[8] = { 0x97, 'J', 'B', '2', 0x0D, 0x0A, 0x1A, 0x0A };
   const uint8_t       *p = data;
   im_open_config_t     conf;
 
@@ -126,6 +140,9 @@ im_load_mem(ImImage         ** __restrict dest,
      stream of a byte or two can be a whole image) */
 #if IM_WITH_CCITT
   if (conf.format == IM_FILEFORMATTYPE_CCITT) return ccitt_dec_mem(dest, p, len, &conf);
+#endif
+#if IM_WITH_JBIG2
+  if (conf.format == IM_FILEFORMATTYPE_JBIG2 || (len >= 9u && !memcmp(p, jbig2sig, 8u))) return jbig2_dec_mem(dest, p, len, &conf);
 #endif
   if (len < 4u) return IM_EBADF;
 

@@ -5,7 +5,7 @@ target_sources(${PROJECT_NAME}
 )
 
 # the formats asked for (IM_FORMATS); Apple's fallback always
-foreach(f png bmp ppm qoi tga jpg jp2 ccitt jxl heic)
+foreach(f png bmp ppm qoi tga jpg jp2 ccitt jbig2 jxl heic)
   if(f IN_LIST IM_ON)
     add_subdirectory(${f})
   endif()

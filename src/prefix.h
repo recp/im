@@ -25,12 +25,15 @@
 
 #ifdef IM_PREFIX
 #  define ccitt_dec_mem         IM_PFX(ccitt_dec_mem)
+#  define ccitt_mmr             IM_PFX(ccitt_mmr)
 #  define im_config             IM_PFX(im_config)
 #  define im_pool_free          IM_PFX(im_pool_free)
 #  define im_pool_new           IM_PFX(im_pool_new)
 #  define im_pool_run           IM_PFX(im_pool_run)
 #  define im_pool_size          IM_PFX(im_pool_size)
 #  define im_pool_wrap          IM_PFX(im_pool_wrap)
+#  define jbig2_dec_mem         IM_PFX(jbig2_dec_mem)
+#  define jbig2_info            IM_PFX(jbig2_info)
 #  define jp2_dec_mem           IM_PFX(jp2_dec_mem)
 #  define jp2_info              IM_PFX(jp2_info)
 #  define jpg_dc8               IM_PFX(jpg_dc8)

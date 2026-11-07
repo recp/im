@@ -87,6 +87,8 @@ typedef struct im_open_config_t {
   size_t            memoryLimit;    /* bytes; 0: none (IM_OPTION_MEMORY_LIMIT) */
   int32_t           format;         /* IM_OPTION_FORMAT's (0: by the data) */
   im_ccitt_t        ccitt;          /* IM_OPTION_CCITT's */
+  const uint8_t    *jbig2Globals;   /* IM_OPTION_JBIG2_GLOBALS's */
+  size_t            jbig2GlobalsLen;
 } im_open_config_t;
 
 /* the options as a decoder reads them (load.c) */
