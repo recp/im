@@ -916,3 +916,125 @@ TEST_IMPL(ccitt) {
   TEST_SUCCESS
 }
 
+/* JBIG2 (data/jbig2): streams of every segment kind (generic regions of
+   each template, MMR, typical prediction, unknown length; text regions
+   and symbol dictionaries, arithmetic and Huffman, refinement and
+   aggregation, contexts kept from one dictionary for the next, a custom
+   table; patterns and halftones; refinement of the page and of an
+   intermediate region; striped pages; globals; a whole file) and a book
+   page in symbol mode. Each the page its encoder's own model gives, and
+   the same in two other decoders where they read what it has */
+static ImResult
+jb2_load(const uint8_t *data, size_t len, const uint8_t *glob, size_t glen, bool embedded, im_option_base_t *more,
+         ImImage **im) {
+  im_option_int_t   fm = im_option_int(IM_OPTION_FORMAT, IM_FILEFORMATTYPE_JBIG2);
+  im_option_data_t  gl = im_option_jbig2_globals(glob, glen);
+  im_option_base_t *o[4] = { &gl.base, more, NULL, NULL };
+
+  if (embedded) {
+    o[0] = &fm.base;
+    o[1] = &gl.base;
+    o[2] = more;
+  }
+  return load_with(data, len, o, im);
+}
+
+TEST_IMPL(jbig2) {
+  static const struct {
+    const char *name;
+    bool        globals;
+    uint32_t    w, h;
+    uint32_t    hash;
+  } cases[] = {
+    { "mix",          1,  190,   23, 0x51075FC5u },
+    { "huffman",      0,    7,   77, 0xA9598342u },
+    { "contexts",     0,   31,  103, 0x914F62D1u },
+    { "file",         0,   64,   16, 0x67F63671u },
+    { "intermediate", 0,   64,   16, 0x8ED8B345u },
+    { "stripes",      0,   31,   29, 0xFECE813Cu },
+    { "refine",       0,  304,   61, 0x23E63090u },
+    { "page",         0, 2480, 3508, 0x3BEEE73Bu },
+  };
+  size_t i;
+
+  for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+    char     name[64], gname[64];
+    size_t   len = 0, glen = 0;
+    uint8_t *data, *glob = NULL;
+    bool     file = !strcmp(cases[i].name, "file");
+    ImImage *a, *b;
+    uint32_t x, y, h;
+
+    snprintf(name, sizeof(name), "%s.jb2", cases[i].name);
+    data = read_all("jbig2", name, &len);
+    ASSERT(data);
+    if (cases[i].globals) {
+      snprintf(gname, sizeof(gname), "%s.glob", cases[i].name);
+      ASSERT((glob = read_all("jbig2", gname, &glen)));
+    }
+    ASSERT(jb2_load(data, len, glob, glen, !file, NULL, &a) == IM_OK && a);
+    ASSERT(a->width == cases[i].w && a->height == cases[i].h && a->bitsPerComponent == 1u);
+    ASSERT(a->len == (size_t)(a->width + 7u) / 8u * a->height && a->fileFormatType == IM_FILEFORMATTYPE_JBIG2);
+    h = fnv1a(a->data.data, a->len);
+    if (h != cases[i].hash) fprintf(stderr, "  %s: 0x%08X\n", cases[i].name, h);
+    ASSERT(h == cases[i].hash);
+    if (file) {
+      /* a file: told by its header, or said; its size without decoding */
+      ImInfo info;
+
+      ASSERT(jb2_load(data, len, NULL, 0u, true, NULL, &b) == IM_OK && b);
+      ASSERT(b->len == a->len && !memcmp(a->data.data, b->data.data, a->len));
+      im_free(b);
+      ASSERT(im_info_mem(&info, data, len) == IM_OK);
+      ASSERT(info.width == a->width && info.height == a->height && info.fileFormatType == IM_FILEFORMATTYPE_JBIG2);
+    }
+    /* a byte a pixel */
+    {
+      im_option_bool_t e8 = im_option_bool(IM_OPTION_EIGHT_BITS, true);
+
+      ASSERT(jb2_load(data, len, glob, glen, !file, &e8.base, &b) == IM_OK && b);
+      ASSERT(b->bitsPerComponent == 8u && b->len == (size_t)a->width * a->height);
+      for (y = 0; y < a->height; y++) {
+        for (x = 0; x < a->width; x++) ASSERT(fax_bit(b, x, y) == fax_bit(a, x, y));
+      }
+      im_free(b);
+    }
+    /* a region: the whole page's pixels there */
+    {
+      uint32_t           rx = a->width / 3u, ry = a->height / 4u, rw = a->width / 2u + 1u, rh = a->height / 2u + 1u;
+      im_option_region_t rg = im_option_region(rx, ry, rw, rh);
+
+      if (rx + rw > a->width) rw = a->width - rx;
+      if (ry + rh > a->height) rh = a->height - ry;
+      ASSERT(jb2_load(data, len, glob, glen, !file, &rg.base, &b) == IM_OK && b);
+      ASSERT(b->width == rw && b->height == rh);
+      for (y = 0; y < rh; y++) {
+        for (x = 0; x < rw; x++) ASSERT(fax_bit(b, x, y) == fax_bit(a, rx + x, ry + y));
+      }
+      im_free(b);
+    }
+    /* refused: a limit it doesn't fit; a dictionary it doesn't have */
+    {
+      im_option_size_t tiny = im_option_memory(64u);
+
+      ASSERT(jb2_load(data, len, glob, glen, !file, &tiny.base, &b) == IM_ENOMEM && !b);
+      if (cases[i].globals && jb2_load(data, len, NULL, 0u, true, NULL, &b) == IM_OK) {
+        ASSERT(b->len != a->len || memcmp(a->data.data, b->data.data, a->len));
+        im_free(b);
+      }
+    }
+    im_free(a);
+    free(data);
+    free(glob);
+  }
+  /* not JBIG2 */
+  {
+    static const uint8_t junk[] = { 0, 0, 0, 1, 0x30, 0, 1, 0, 0, 0, 3, 1, 2, 3 };
+    ImImage             *b;
+
+    ASSERT(jb2_load(junk, sizeof(junk), NULL, 0u, true, NULL, &b) != IM_OK && !b);
+  }
+
+  TEST_SUCCESS
+}
+
