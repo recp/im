@@ -1357,6 +1357,11 @@ dry_run(const jpg_t *j) {
   d->dest_stride    = j->dest_stride;
   d->dest_size      = j->dest_size;
   d->scale          = j->scale;
+  d->region         = j->region; /* the caller's memory is the region's */
+  d->reg_x          = j->reg_x;
+  d->reg_y          = j->reg_y;
+  d->reg_w          = j->reg_w;
+  d->reg_h          = j->reg_h;
   d->dry            = true;
   ok                = decode_stream(d, NULL, IM_BYTEORDER_ANY, &pad);
   free(pad);
