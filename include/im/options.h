@@ -95,6 +95,15 @@ typedef enum im_option_type_t {
      one a palette maps at its size). The image's width and height say
      what came */
   IM_OPTION_SCALE,
+
+  /* only a rectangle of the image (im_option_region): x, y, width and
+     height in the decoded image's pixels (after IM_OPTION_SCALE), cut to
+     the image; none of it inside: the load fails. The image is the
+     rectangle (IM_OPTION_DEST's memory holds it). Work outside it is left
+     out where the format allows (JPEG: blocks outside not transformed,
+     colours made only inside, the rows below never decoded, restart
+     intervals above passed over) */
+  IM_OPTION_REGION,
 } im_option_type_t;
 
 
@@ -134,6 +143,11 @@ typedef struct im_option_dest_t {
   void            *pixels;
   size_t           stride, size;
 } im_option_dest_t;
+
+typedef struct im_option_region_t {
+  im_option_base_t base;
+  uint32_t         x, y, width, height;
+} im_option_region_t;
 
 #define IM_OPTIONS (im_option_base_t *[])
 
@@ -212,6 +226,20 @@ im_option_dest(void *pixels, size_t stride, size_t size) {
   opt.pixels    = pixels;
   opt.stride    = stride;
   opt.size      = size;
+
+  return opt;
+}
+
+IM_INLINE
+im_option_region_t
+im_option_region(uint32_t x, uint32_t y, uint32_t width, uint32_t height) {
+  im_option_region_t opt;
+
+  opt.base.type = IM_OPTION_REGION;
+  opt.x         = x;
+  opt.y         = y;
+  opt.width     = width;
+  opt.height    = height;
 
   return opt;
 }

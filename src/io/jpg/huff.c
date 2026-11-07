@@ -1408,7 +1408,7 @@ seq_range(jctx_t *x, const jsblk_t *list, uint32_t nb, uint32_t w, uint32_t b0, 
       if (diff) *s->pred = 0; /* a differential frame's DC: none predicted */
       block_seq(&bs, s->dc, s->ac, s->pred, blk);
     }
-    if (bx < c->sw && by < c->sh) {
+    if (bx >= c->rbx0 && bx < c->rbx1 && by >= c->rby0 && by < c->rby1) {
       c->idct(blk, c->q, (uint8_t *)c->plane + ((size_t)by * c->stride + bx) * c->ss * es, c->stride);
     }
     if (++slot == nb) {
@@ -1426,20 +1426,56 @@ seq_range(jctx_t *x, const jsblk_t *list, uint32_t nb, uint32_t w, uint32_t b0, 
   x->r.b = bs;
 }
 
-/* the whole scan in order, its restart intervals one by one */
+/* A region's MCU rows (IM_OPTION_REGION): a one-pass sequential scan's
+   rows past the last its blocks need left undecoded (h cut: the rows
+   wanted), and its first MCU wanted (*first); otherwise h and 0 */
+IM_HIDE uint32_t
+jpg_region_rows(const jpg_t *j, uint32_t w, uint32_t h, uint32_t *first) {
+  uint32_t i, r0 = UINT32_MAX, r1 = 0u;
+
+  *first = 0u;
+  if (!j->region || j->hier || j->multiscan || j->process != J_SEQUENTIAL) return h;
+  for (i = 0; i < j->nscomp; i++) {
+    const jcomp_t *c = &j->comp[j->scomp[i]];
+    uint32_t       v = j->nscomp == 1u ? 1u : c->v, a = c->rby0 / v, b = (c->rby1 + v - 1u) / v;
+
+    r0 = a < r0 ? a : r0;
+    r1 = b > r1 ? b : r1;
+  }
+  if (r1 < h) h = r1;
+  *first = r0 < h ? r0 * w : 0u;
+  return h;
+}
+
+/* the first interval of k0 (a region's first) where each one before it is
+   its own segment ended by the RST it should be: those passed over
+   without decoding (their DCs restart anyway); else 0 */
+static uint32_t
+region_skip(const jpg_t *j, uint32_t first, uint32_t per) {
+  uint32_t k0 = j->restart && per ? first / per : 0u, k;
+
+  if (!k0 || j->sd.nseg <= k0) return 0u;
+  for (k = 0; k < k0; k++) {
+    if (j->sd.seg[k].marker != 0xD0u + (k & 7u)) return 0u;
+  }
+  return k0;
+}
+
+/* the whole scan in order, its restart intervals one by one (a region's
+   first ones passed over where they can be) */
 static void
-scan_seq(jctx_t *x, uint32_t w, uint32_t h) {
+scan_seq(jctx_t *x, uint32_t w, uint32_t h, uint32_t first) {
   jsblk_t  list[J_MCU_BLOCKS];
   jpg_t   *j = x->j;
   uint32_t nb = seq_list(x, list), total = w * h, per = j->restart ? j->restart : total, n;
-  uint32_t next_rst = 0u, cur = 0u;
+  uint32_t k0 = region_skip(j, first, per), next_rst = k0 & 7u, cur = k0;
   bool     at_marker = false;
 
-  rd_start(x, 0u);
-  for (n = 0; n < total; n += per) {
+  rd_start(x, k0);
+  for (n = k0 * per; n < total; n += per) {
     uint32_t last = total - n > per ? n + per : total;
 
-    if (n) restart(x, &next_rst, &cur, &at_marker);
+    if (n != k0 * per) restart(x, &next_rst, &cur, &at_marker);
     seq_range(x, list, nb, w, n * nb, last * nb);
   }
 }
@@ -1450,6 +1486,7 @@ typedef struct jpar {
   jpg_t    *j;
   jctx_t   *ctx;       /* a worker's */
   uint32_t  w, total, per, step;
+  uint32_t  k0;        /* the first interval decoded (a region's) */
   uint32_t  last_good; /* the last interval's */
 } jpar_t;
 
@@ -1457,7 +1494,7 @@ static bool
 par_item(void *arg, uint32_t worker, uint32_t item) {
   jpar_t  *pa = arg;
   jctx_t  *x  = &pa->ctx[worker];
-  uint32_t k  = item * pa->step, end = k + pa->step, n, i, nb = 0u;
+  uint32_t k  = pa->k0 + item * pa->step, end = k + pa->step, n, i, nb = 0u;
   uint32_t ints = (pa->total + pa->per - 1u) / pa->per;
   jsblk_t  list[J_MCU_BLOCKS];
 
@@ -2277,7 +2314,7 @@ scan_spec(jpg_t *j, im_pool_t *pool, uint32_t w, uint32_t h, size_t margin, bool
 IM_HIDE bool
 jpg_scan_huff(jpg_t *j, im_pool_t *pool) {
   jctx_t   x;
-  uint32_t w, h, i, blocks = 0u, n, total, cur = 0u, next_rst = 0u, togo;
+  uint32_t w, h, hfull, i, blocks = 0u, n, total, cur = 0u, next_rst = 0u, togo, first = 0u;
   size_t   margin;
   bool     at_marker = false;
 
@@ -2298,6 +2335,9 @@ jpg_scan_huff(jpg_t *j, im_pool_t *pool) {
     w = j->mcux;
     h = j->mcuy;
   }
+  /* a region's rows: those below it not decoded */
+  hfull = h;
+  h     = jpg_region_rows(j, w, h, &first);
   total = w * h;
 
   /* a big sequential scan's AC tables in pairs, here before any thread
@@ -2360,9 +2400,10 @@ jpg_scan_huff(jpg_t *j, im_pool_t *pool) {
       pa.w     = w;
       pa.total = total;
       pa.per   = j->restart;
-      items    = nw * 4u < ints ? nw * 4u : ints;
-      pa.step  = (ints + items - 1u) / items;
-      items    = (ints + pa.step - 1u) / pa.step;
+      pa.k0    = region_skip(j, first, j->restart);
+      items    = nw * 4u < ints - pa.k0 ? nw * 4u : ints - pa.k0;
+      pa.step  = (ints - pa.k0 + items - 1u) / items;
+      items    = (ints - pa.k0 + pa.step - 1u) / pa.step;
       pa.last_good = 0u;
       ok       = im_pool_run(pool, par_item, &pa, items);
       for (i = 0; i < nw; i++) free(ctx[i].tail);
@@ -2375,17 +2416,19 @@ jpg_scan_huff(jpg_t *j, im_pool_t *pool) {
 
   /* one segment, one pass, sequential: on threads, speculatively */
   if (pool && !j->restart && !j->multiscan && j->process == J_SEQUENTIAL && j->sd.nseg >= 1u
-      && j->sd.seg[0].end - j->sd.seg[0].start >= (256u << 10)) {
+      && j->sd.seg[0].end - j->sd.seg[0].start >= (256u << 10) && h * 2u > hfull) {
     bool done;
 
-    if (scan_spec(j, pool, w, h, margin, &done)) return true;
+    /* the whole segment (a region's rows past it decoded too, their
+       blocks not transformed): its chunks are the segment's bytes */
+    if (scan_spec(j, pool, w, hfull, margin, &done)) return true;
     if (done) return false;
   }
 
   /* in order */
   if (!ctx_init(&x, j, margin)) return false;
   if (!j->multiscan && j->process == J_SEQUENTIAL && !j->flow) {
-    scan_seq(&x, w, h);
+    scan_seq(&x, w, h, first);
     j->last_good = x.last_good;
     free(x.tail);
     return true;

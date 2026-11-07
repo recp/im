@@ -149,6 +149,9 @@ typedef struct jcomp {
   uint32_t  bw, bh;           /* blocks across and down, every MCU's */
   uint32_t  cw, ch;           /* its samples across and down (downsampled) */
   uint32_t  sw, sh;           /* blocks a scan of it alone covers */
+  uint32_t  rbx0, rbx1, rby0, rby1; /* the blocks transformed: sw × sh, or
+                                 the region's (and its upsampling's
+                                 neighbours) */
   void     *plane;            /* bw × 8 by bh × 8 samples: uint8 or uint16 */
   size_t    stride;           /* samples a plane row */
   size_t    plane_size;       /* its bytes */
@@ -166,7 +169,12 @@ typedef struct jpg {
   /* the frame */
   uint32_t  width, height, ncomp, prec;
   uint32_t  scale;            /* the size divided by this: 1, 2, 4, 8 */
-  uint32_t  ds, ow, oh;       /* the smallest block's side; the pixels out */
+  uint32_t  ds, ow, oh;       /* the smallest block's side; the frame's
+                                 pixels (scaled) */
+  bool      region;           /* only reg_x, reg_y, reg_w by reg_h of them
+                                 out (IM_OPTION_REGION; cut to the frame;
+                                 without one, all of it) */
+  uint32_t  reg_x, reg_y, reg_w, reg_h;
   uint32_t  hmax, vmax, mcux, mcuy;
   uint32_t  process;          /* J_SEQUENTIAL, J_PROGRESSIVE, J_LOSSLESS */
   bool      arith, frame, multiscan;
@@ -249,9 +257,13 @@ typedef struct jopts {
   uint8_t    *dest;        /* the caller's memory, `stride` a row; NULL: im's */
   size_t      dest_stride, dest_size;
   uint32_t    scale;       /* 1 (or 0), 2, 4, 8: the size divided by it */
+  bool        region;      /* only x, y, w by h out (after the scale) */
+  uint32_t    rx, ry, rw, rh;
 } jopts_t;
 
 IM_HIDE bool jpg_decode_mem(const uint8_t *data, size_t len, ImImage *im, const jopts_t *o);
+IM_HIDE bool jpg_region_cut(jpg_t *j);
+IM_HIDE uint32_t jpg_region_rows(const jpg_t *j, uint32_t w, uint32_t h, uint32_t *first);
 
 /* huff.c */
 IM_HIDE bool jpg_huff_build(jhuff_t *h, const uint8_t counts[16], const uint8_t *vals, bool dc, bool lossless);

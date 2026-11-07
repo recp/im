@@ -453,6 +453,11 @@ jpg_scan_arith(jpg_t *j) {
     w = j->mcux;
     h = j->mcuy;
   }
+  {
+    uint32_t first;
+
+    h = jpg_region_rows(j, w, h, &first); /* a region's rows: none below it */
+  }
   total = w * h;
   reset(e);
   seg_at(e, 0u);

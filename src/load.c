@@ -59,6 +59,13 @@ im_config(im_option_base_t *options[], ImOpenIntent openIntent) {
         case IM_OPTION_OPACITY:              conf.opacity        = ((im_option_int_t*)opt)->value;       break;
         case IM_OPTION_RUNNER:               conf.runner         = ((im_option_runner_t*)opt)->runner;   break;
         case IM_OPTION_SCALE:                conf.scale          = (uint32_t)((im_option_int_t*)opt)->value; break;
+        case IM_OPTION_REGION:
+          conf.region  = true;
+          conf.regionX = ((im_option_region_t*)opt)->x;
+          conf.regionY = ((im_option_region_t*)opt)->y;
+          conf.regionW = ((im_option_region_t*)opt)->width;
+          conf.regionH = ((im_option_region_t*)opt)->height;
+          break;
         case IM_OPTION_DEST:
           conf.dest       = ((im_option_dest_t*)opt)->pixels;
           conf.destStride = ((im_option_dest_t*)opt)->stride;

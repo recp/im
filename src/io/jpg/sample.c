@@ -85,7 +85,7 @@ up_method(const jpg_t *j, const jcomp_t *c) {
 /* `T` a sample: uint8_t or uint16_t; `W` the int its sums need */
 #define UPSAMPLE_FN(NAME, T, W)                                                \
 static const T*                                                                \
-NAME(const jpg_t *j, const jcomp_t *c, const jupc_t *u, uint32_t y, T *out) {  \
+NAME(const jpg_t *j, const jcomp_t *c, const jupc_t *u, uint32_t y, T *out, uint32_t ow) { \
   const T *plane = c->plane, *rnear, *rfar;                                      \
   size_t   st    = c->stride;                                                  \
   uint32_t n     = c->ow, x, cy;                                               \
@@ -140,13 +140,13 @@ NAME(const jpg_t *j, const jcomp_t *c, const jupc_t *u, uint32_t y, T *out) {  \
     const T *in = plane + (size_t)(y / u->vx) * st;                            \
                                                                                \
     if (u->hx == 1u) return in;                                                \
-    for (x = 0; x < j->ow; x++) out[x] = in[x / u->hx];                        \
+    for (x = 0; x < ow; x++) out[x] = in[x / u->hx];                           \
     return out;                                                                \
   }                                                                            \
   default: {                                                                   \
     const T *in = plane + (size_t)(((uint64_t)y * c->uv) / j->vmax) * st;      \
                                                                                \
-    for (x = 0; x < j->ow; x++) out[x] = in[((uint64_t)x * c->uh) / j->hmax];  \
+    for (x = 0; x < ow; x++) out[x] = in[((uint64_t)x * c->uh) / j->hmax];     \
     return out;                                                                \
   }                                                                            \
   }                                                                            \
@@ -163,7 +163,7 @@ typedef struct jrow {
 } jrow_t;
 
 static const uint8_t*
-up_row8(const jpg_t *j, const jcomp_t *c, const jupc_t *u, uint32_t y, uint8_t *out, const jrow_t *r) {
+up_row8(const jpg_t *j, const jcomp_t *c, const jupc_t *u, uint32_t y, uint8_t *out, const jrow_t *r, uint32_t ow) {
 #if J_NEON
   const uint8_t *plane = c->plane, *rnear, *rfar;
   size_t         st = c->stride;
@@ -253,7 +253,7 @@ up_row8(const jpg_t *j, const jcomp_t *c, const jupc_t *u, uint32_t y, uint8_t *
 #else
   (void)r;
 #endif
-  return up_row8_plain(j, c, u, y, out);
+  return up_row8_plain(j, c, u, y, out, ow);
 }
 
 /* libjpeg's YCbCr tables (jdcolor.c build_ycc_rgb_table), for samples up
@@ -420,6 +420,12 @@ struct jsout {
   bool     pad;      /* RGB as RGB0: a row made, then spread to four */
   bool     h2v2;     /* YCbCr 4:2:0, 8 bits, fancy: chroma upsampled in
                         the colour conversion (NEON) */
+  /* the region's columns: each component as a view of its plane from the
+     first sample they need (a real neighbour either side kept, so the
+     upsampling's edge copies fall outside), the region's first pixel
+     `voff` into the view's row, the view's row `vow` pixels */
+  jcomp_t  vc[J_COMPS];
+  uint32_t voff[J_COMPS], vow[J_COMPS];
   ImByteOrder order;
   uint32_t on;       /* samples a pixel out */
   uint8_t *rows[IM_POOL_MAX];
@@ -503,27 +509,76 @@ h2v2_row(const jsout_t *o, const jpg_t *j, uint32_t y, uint16_t *sums, uint8_t *
 }
 #endif
 
+/* component i's view for the region's columns (jsout's vc, voff, vow):
+   its samples from the first the region needs, a real one either side
+   where there is one (an upsampled pixel's neighbours; the edge copies an
+   upsampler makes at a view's ends then fall outside), three at least (a
+   fancy upsampler's least). Nearest-sample ratios (UP_ANY) keep the row */
+static void
+out_view(jsout_t *o, const jpg_t *j, uint32_t i) {
+  const jcomp_t *c  = &j->comp[i];
+  size_t         es = o->wide ? 2u : 1u;
+  uint32_t       x0 = j->reg_x, x1 = j->reg_x + j->reg_w, s0, s1;
+
+  o->vc[i] = *c;
+  switch (o->up[i].how) {
+  case UP_FULL:
+  case UP_H1V2_FANCY:
+    s0 = x0;
+    s1 = x1;
+    break;
+  case UP_H2V1_FANCY:
+  case UP_H2V2_FANCY:
+    s0 = x0 / 2u ? x0 / 2u - 1u : 0u;
+    s1 = (x1 - 1u) / 2u + 2u < c->ow ? (x1 - 1u) / 2u + 2u : c->ow;
+    if (s1 - s0 < 3u) {
+      s1 = s0 + 3u < c->ow ? s0 + 3u : c->ow;
+      s0 = s1 > 3u ? s1 - 3u : 0u;
+    }
+    break;
+  case UP_INT:
+    s0 = x0 / o->up[i].hx;
+    s1 = (x1 + o->up[i].hx - 1u) / o->up[i].hx < c->ow ? (x1 + o->up[i].hx - 1u) / o->up[i].hx : c->ow;
+    break;
+  default:
+    o->voff[i] = x0;
+    o->vow[i]  = j->ow;
+    return;
+  }
+  o->vc[i].plane = (uint8_t *)c->plane + (size_t)s0 * es;
+  o->vc[i].ow    = s1 - s0;
+  o->voff[i]     = o->up[i].how == UP_H2V1_FANCY || o->up[i].how == UP_H2V2_FANCY ? x0 - 2u * s0
+                   : o->up[i].how == UP_INT ? x0 - s0 * o->up[i].hx : x0 - s0;
+  o->vow[i]      = o->up[i].how == UP_INT ? (s1 - s0) * o->up[i].hx : s1 - s0;
+}
+
 /* rows y0 … y1 - 1 out, with worker `worker`'s rows */
 IM_HIDE void
 jpg_out_rows(jsout_t *o, uint32_t worker, uint32_t y0, uint32_t y1) {
   jpg_t   *j = o->j;
-  uint32_t n = j->ncomp, w = j->ow, y, i;
+  uint32_t n = j->ncomp, w = j->reg_w, y, i, ya = y0 > j->reg_y ? y0 : j->reg_y;
+  uint32_t yb = y1 < j->reg_y + j->reg_h ? y1 : j->reg_y + j->reg_h;
   uint8_t *rows = o->rows[worker];
 
   if (y1 > j->oh) y1 = j->oh;
-  for (y = y0; y < y1; y++) {
+  /* the region's rows (the frame's without one), each at its place */
+  for (y = ya; y < yb; y++) {
+    size_t at = (size_t)(y - j->reg_y) * o->pitch;
+
     if (!o->wide) {
       const uint8_t *row[J_COMPS];
-      uint8_t       *dst = o->pad ? o->rgb[worker] : o->px + (size_t)y * o->pitch;
+      uint8_t       *dst = o->pad ? o->rgb[worker] : o->px + at;
 
 #if J_NEON
       if (o->h2v2) {
         h2v2_row(o, j, y, o->scratch[worker].sums, dst);
-        if (o->pad) pad8(dst, w, o->px + (size_t)y * o->pitch);
+        if (o->pad) pad8(dst, w, o->px + at);
         continue;
       }
 #endif
-      for (i = 0; i < n; i++) row[i] = up_row8(j, &j->comp[i], &o->up[i], y, rows + o->rowlen * i, &o->scratch[worker]);
+      for (i = 0; i < n; i++) {
+        row[i] = up_row8(j, &o->vc[i], &o->up[i], y, rows + o->rowlen * i, &o->scratch[worker], o->vow[i]) + o->voff[i];
+      }
       pixels8(row, n, o->space, &o->t, (int32_t)o->max, o->invert, w, dst, o->scratch[worker].x86);
       if (j->prec < 8u) {
         /* shallower samples spread over 0–255 */
@@ -536,13 +591,15 @@ jpg_out_rows(jsout_t *o, uint32_t worker, uint32_t y0, uint32_t y1) {
           p[k] = (uint8_t)((v * 255u + o->max / 2u) / o->max);
         }
       }
-      if (o->pad) pad8(dst, w, o->px + (size_t)y * o->pitch);
+      if (o->pad) pad8(dst, w, o->px + at);
     } else {
       const uint16_t *row[J_COMPS];
-      uint16_t       *p = o->pad ? (uint16_t *)(void *)o->rgb[worker] : (uint16_t *)(void *)(o->px + (size_t)y * o->pitch);
+      uint16_t       *p = o->pad ? (uint16_t *)(void *)o->rgb[worker] : (uint16_t *)(void *)(o->px + at);
       size_t          k;
 
-      for (i = 0; i < n; i++) row[i] = up_row16(j, &j->comp[i], &o->up[i], y, (uint16_t *)rows + o->rowlen * i);
+      for (i = 0; i < n; i++) {
+        row[i] = up_row16(j, &o->vc[i], &o->up[i], y, (uint16_t *)(void *)rows + o->rowlen * i, o->vow[i]) + o->voff[i];
+      }
       pixels16(row, n, o->space, &o->t, (int32_t)o->max, o->invert, w, p);
       /* deeper samples to 16 bits, in the order asked */
       for (k = 0; k < (size_t)w * n; k++) {
@@ -552,7 +609,7 @@ jpg_out_rows(jsout_t *o, uint32_t worker, uint32_t y0, uint32_t y1) {
 
         p[k] = o->swap ? bswapu16((uint16_t)v) : (uint16_t)v;
       }
-      if (o->pad) pad16(p, w, (uint16_t *)(void *)(o->px + (size_t)y * o->pitch));
+      if (o->pad) pad16(p, w, (uint16_t *)(void *)(o->px + at));
     }
   }
   /* the planes' rows only these rows read given back (a big image's): two
@@ -572,7 +629,7 @@ static bool
 out_band(void *arg, uint32_t worker, uint32_t item) {
   jsout_t *o = arg;
 
-  jpg_out_rows(o, worker, item * o->band, item * o->band + o->band);
+  jpg_out_rows(o, worker, o->j->reg_y + item * o->band, o->j->reg_y + item * o->band + o->band);
   return true;
 }
 
@@ -587,8 +644,8 @@ jpg_out_ok(const jpg_t *j, jspace_t space) {
     return false;
   }
   if (!j->dest) return true;
-  pitch = (size_t)j->ow * (n == 3u && j->rgb_pad ? 4u : n) * unit;
-  return j->dest_stride >= pitch && j->dest_size >= j->dest_stride * (j->oh - 1u) + pitch
+  pitch = (size_t)j->reg_w * (n == 3u && j->rgb_pad ? 4u : n) * unit;
+  return j->dest_stride >= pitch && j->dest_size >= j->dest_stride * (j->reg_h - 1u) + pitch
          && !(unit == 2u && (((uintptr_t)j->dest | j->dest_stride) & 1u));
 }
 
@@ -615,10 +672,13 @@ out_free(jsout_t *o) {
 IM_HIDE jsout_t*
 jpg_out_begin(jpg_t *j, jspace_t space, ImByteOrder order) {
   jsout_t *o;
-  uint32_t n = j->ncomp, w = j->ow, h = j->oh, i, nw = im_pool_size(j->pool);
+  uint32_t n = j->ncomp, w, h, i, nw = im_pool_size(j->pool);
   size_t   len;
 
-  if (!jpg_out_ok(j, space) || !(o = calloc(1, sizeof(*o)))) return NULL;
+  /* a hierarchical sequence's region cut here, at its last frame */
+  if (!jpg_region_cut(j) || !jpg_out_ok(j, space) || !(o = calloc(1, sizeof(*o)))) return NULL;
+  w = j->reg_w;
+  h = j->reg_h;
   if (order != IM_BYTEORDER_BIG && order != IM_BYTEORDER_LITTLE) order = IM_BYTEORDER_HOST;
   o->j      = j;
   o->space  = space;
@@ -634,11 +694,14 @@ jpg_out_begin(jpg_t *j, jspace_t space, ImByteOrder order) {
   o->band   = o->band < 8u ? 8u : o->band;
   o->order  = order;
   len       = (size_t)w * h * o->on * (o->wide ? 2u : 1u);
-  for (i = 0; i < n; i++) o->up[i] = up_method(j, &j->comp[i]);
+  for (i = 0; i < n; i++) {
+    o->up[i] = up_method(j, &j->comp[i]);
+    out_view(o, j, i);
+  }
 #if J_NEON
   o->h2v2 = n == 3u && space == J_YCC && !o->wide && o->max == 255u && o->up[0].how == UP_FULL
             && o->up[1].how == UP_H2V2_FANCY && o->up[2].how == UP_H2V2_FANCY && j->comp[1].ow == j->comp[2].ow
-            && j->comp[1].oh == j->comp[2].oh;
+            && j->comp[1].oh == j->comp[2].oh && j->reg_x == 0u && j->reg_w == j->ow;
 #endif
   if ((space == J_YCC || space == J_YCCK) && !ycc_tables(&o->t, o->max, o->wide ? 65536u : 256u)) goto done;
   /* the caller's memory, where given: its rows' stride, enough of it */
@@ -673,7 +736,7 @@ done:
 IM_HIDE bool
 jpg_out_end(jsout_t *o, ImImage *im, bool run) {
   jpg_t      *j = o->j;
-  uint32_t    n = j->ncomp, w = j->ow, h = j->oh;
+  uint32_t    n = j->ncomp, w = j->reg_w, h = j->reg_h;
   size_t      len = (size_t)w * h * o->on * (o->wide ? 2u : 1u);
   ImByteOrder order = o->order;
 

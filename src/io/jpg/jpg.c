@@ -41,7 +41,8 @@ IM_HIDE void
 jpg_put(jpg_t *j, jcomp_t *c, int16_t *blk, uint32_t bx, uint32_t by) {
   size_t at;
 
-  if (bx >= c->sw || by >= c->sh) return; /* an MCU's padding: never shown */
+  /* an MCU's padding (never shown), or outside the region's blocks */
+  if (bx < c->rbx0 || bx >= c->rbx1 || by < c->rby0 || by >= c->rby1) return;
   at = ((size_t)by * c->stride + bx) * c->ss;
   if (j->diff) c->idct(blk, c->q, (int32_t *)c->plane + at, c->stride);
   else if (j->prec <= 8u) c->idct(blk, c->q, (uint8_t *)c->plane + at, c->stride);
@@ -239,8 +240,8 @@ idct_rows(const jidct_t *t, uint32_t ci, uint32_t by0, uint32_t by1) {
     idct_release(j, c, by0, by1);
     return;
   }
-  for (by = by0; by < by1; by++) {
-    for (bx = 0; bx < c->sw; bx++) jpg_put(j, c, c->coefs + ((size_t)by * c->bw + bx) * 64u, bx, by);
+  for (by = by0 > c->rby0 ? by0 : c->rby0; by < by1 && by < c->rby1; by++) {
+    for (bx = c->rbx0; bx < c->rbx1; bx++) jpg_put(j, c, c->coefs + ((size_t)by * c->bw + bx) * 64u, bx, by);
   }
   idct_release(j, c, by0, by1);
 }
@@ -340,6 +341,60 @@ read_sof(jpg_t *j, uint32_t m, const uint8_t *s, uint32_t len) {
   return j->height ? frame_size(j) : true;
 }
 
+/* the region cut to the frame's pixels (without one: all of them, the
+   frame's as it's shown: a cut hierarchical sequence's is its last
+   reference, past the frame read last); false: none of it inside */
+IM_HIDE bool
+jpg_region_cut(jpg_t *j) {
+  if (!j->region) {
+    j->reg_x = j->reg_y = 0u;
+    j->reg_w = j->ow;
+    j->reg_h = j->oh;
+    return true;
+  }
+  if (j->reg_x >= j->ow || j->reg_y >= j->oh || !j->reg_w || !j->reg_h) return false;
+  if (j->reg_w > j->ow - j->reg_x) j->reg_w = j->ow - j->reg_x;
+  if (j->reg_h > j->oh - j->reg_y) j->reg_h = j->oh - j->reg_y;
+  return true;
+}
+
+/* IM_OPTION_REGION's rectangle cut to the frame (none of it inside: false),
+   and each component's blocks it needs: those under its pixels and their
+   upsampling's neighbours (a sample either side, a block more for safety
+   at a block's edge). A hierarchical frame's blocks are all made (the next
+   frame's reference); without a region, every block */
+static bool
+region_size(jpg_t *j) {
+  uint32_t i;
+
+  /* a hierarchical sequence's is cut at its last frame (jpg_out) */
+  if ((!j->region || !j->hier) && !jpg_region_cut(j)) return false;
+  for (i = 0; i < j->ncomp; i++) {
+    jcomp_t *c = &j->comp[i];
+    uint64_t s0, s1, t0, t1, ss = c->ss ? c->ss : 1u;
+
+    c->rbx0 = c->rby0 = 0u;
+    c->rbx1 = c->sw;
+    c->rby1 = c->sh;
+    if (!j->region || j->hier || j->process == J_LOSSLESS) continue;
+    /* its samples under the region: x × uh / hmax (UP_ANY's map, every
+       other's too), a sample's neighbours either side */
+    s0 = (uint64_t)j->reg_x * c->uh / j->hmax;
+    s1 = ((uint64_t)(j->reg_x + j->reg_w) * c->uh + j->hmax - 1u) / j->hmax;
+    t0 = (uint64_t)j->reg_y * c->uv / j->vmax;
+    t1 = ((uint64_t)(j->reg_y + j->reg_h) * c->uv + j->vmax - 1u) / j->vmax;
+    s0 = s0 > 1u ? s0 - 2u : 0u;
+    t0 = t0 > 1u ? t0 - 2u : 0u;
+    s1 += 2u;
+    t1 += 2u;
+    c->rbx0 = (uint32_t)(s0 / ss);
+    c->rby0 = (uint32_t)(t0 / ss);
+    c->rbx1 = (uint32_t)((s1 + ss - 1u) / ss) < c->sw ? (uint32_t)((s1 + ss - 1u) / ss) : c->sw;
+    c->rby1 = (uint32_t)((t1 + ss - 1u) / ss) < c->sh ? (uint32_t)((t1 + ss - 1u) / ss) : c->sh;
+  }
+  return true;
+}
+
 /* the frame's MCUs and planes' sizes, its size known; past J_SAMPLES a
    component, refused (nothing made: the planes at the first scan).
 
@@ -384,7 +439,7 @@ frame_size(jpg_t *j) {
     if (samples > J_SAMPLES) return false;
     memset(c->bits, -1, sizeof(c->bits));
   }
-  return true;
+  return region_size(j);
 }
 
 /* a component's coefficients' bytes */
@@ -1565,6 +1620,11 @@ jpg_decode_mem(const uint8_t *data, size_t len, ImImage *im, const jopts_t *o) {
   j->dest_stride    = o->dest_stride;
   j->dest_size      = o->dest_size;
   j->scale          = o->scale == 2u || o->scale == 4u || o->scale == 8u ? o->scale : 1u;
+  j->region         = o->region;
+  j->reg_x            = o->rx;
+  j->reg_y            = o->ry;
+  j->reg_w            = o->rw;
+  j->reg_h            = o->rh;
   ok                = decode(j, im, o->order);
   im_pool_free(j->pool);
   jpg_free(j);
@@ -1586,6 +1646,11 @@ opts_of(const im_open_config_t *c) {
   o.dest_stride = c->destStride;
   o.dest_size   = c->destSize;
   o.scale       = c->scale;
+  o.region      = c->region;
+  o.rx          = c->regionX;
+  o.ry          = c->regionY;
+  o.rw          = c->regionW;
+  o.rh          = c->regionH;
   return o;
 }
 
