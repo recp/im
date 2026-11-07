@@ -3527,12 +3527,21 @@ typedef struct xjob {
   uint32_t      *out;    /* its samples' place */
   size_t         stride;
   bool           fill;
+  bool           skip;   /* outside the region's reach: zeros, not decoded */
 } xjob_t;
 
 static bool
 t1_job(jpx_t *j, xscratch_t *s, void *ctx, uint32_t item) {
   const xjob_t *job = (const xjob_t *)ctx + item;
 
+  if (job->skip) {
+    uint32_t w = (uint32_t)(job->b->x1 - job->b->x0), h = (uint32_t)(job->b->y1 - job->b->y0), y;
+
+    (void)j;
+    (void)s;
+    for (y = 0; job->fill && y < h; y++) memset(job->out + (size_t)y * job->stride, 0, (size_t)w * 4u);
+    return true;
+  }
   return t1_block(j, s, job->b, job->band, job->cc, job->out, job->stride, job->fill);
 }
 
@@ -4080,6 +4089,7 @@ tile_whole(jpx_t *j, xtile_t *t) {
               jobs[n].cc     = tc->cc;
               jobs[n].stride = st;
               jobs[n].fill   = false;
+              jobs[n].skip   = false;
               jobs[n].out    = (uint32_t *)tc->data + (band->offy + (size_t)(kb->y0 - band->y0)) * st
                              + band->offx + (size_t)(kb->x0 - band->x0);
               n++;
@@ -4250,9 +4260,11 @@ grow(void **p, uint32_t *cap, uint64_t want, size_t each) {
 
 /* the band's next code-block row, its blocks' jobs; false past its last */
 static bool
-sband_next(xstream_t *st, xsband_t *sb, const xcc_t *cc) {
+sband_next(const jpx_t *j, xstream_t *st, xsband_t *sb, const xtc_t *tc, uint32_t c) {
   const xres_t  *res  = sb->res;
   const xband_t *band = &res->band[sb->b];
+  const xcc_t   *cc   = tc->cc;
+  uint32_t       r    = (uint32_t)(res - tc->res);
 
   while (sb->py < res->ph) {
     const xpband_t *any = NULL;
@@ -4287,6 +4299,7 @@ sband_next(xstream_t *st, xsband_t *sb, const xcc_t *cc) {
         jb->band   = band;
         jb->cc     = cc;
         jb->fill   = true;
+        jb->skip   = !cblk_wanted(j, tc, c, r, k);
         jb->stride = sb->ring->row / 4u;
         jb->out    = (uint32_t *)(void *)ring_row(sb->ring, (uint32_t)(k->y0 - band->y0)) + sb->col + (uint32_t)(k->x0 - band->x0);
       }
@@ -4392,12 +4405,12 @@ stream_to(jpx_t *j, const uint32_t *need) {
       lv->t1  = lv_steps(lv, want, rev);
       lv->lto = lv->t1 < lv->sn ? lv->t1 : lv->sn;
       lv->hto = lv->t1 + lv->cy < lv->dn ? lv->t1 + lv->cy : lv->dn;
-      while (lv->band[0].have < lv->lto && sband_next(st, &lv->band[0], tc->cc)) {}
-      while (lv->band[1].have < lv->hto && sband_next(st, &lv->band[1], tc->cc)) {}
-      while (lv->band[2].have < lv->hto && sband_next(st, &lv->band[2], tc->cc)) {}
+      while (lv->band[0].have < lv->lto && sband_next(j, st, &lv->band[0], tc, c)) {}
+      while (lv->band[1].have < lv->hto && sband_next(j, st, &lv->band[1], tc, c)) {}
+      while (lv->band[2].have < lv->hto && sband_next(j, st, &lv->band[2], tc, c)) {}
       want = lv->lto;
     }
-    while (sc->ll.have < want && sband_next(st, &sc->ll, tc->cc)) {}
+    while (sc->ll.have < want && sband_next(j, st, &sc->ll, tc, c)) {}
   }
   if (st->failed || !pool_run(j, mix_job, st, st->njobs + (st->also ? (st->also->Y1 - st->also->Y0) * st->also->pieces : 0u))) {
     return false;
