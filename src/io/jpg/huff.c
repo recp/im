@@ -42,11 +42,17 @@
 #  include <intrin.h>
 #endif
 
-IM_HIDE const uint8_t jpg_natural[64 + 16] = {
+/* zigzag to natural order; past 63 all 63: a run past the block lands
+   there, as libjpeg's, and so does a pair look-up's end of block (64 on:
+   block_pairs) */
+IM_HIDE const uint8_t jpg_natural[128] = {
   0,  1,  8,  16, 9,  2,  3,  10, 17, 24, 32, 25, 18, 11, 4,  5,
   12, 19, 26, 33, 40, 48, 41, 34, 27, 20, 13, 6,  7,  14, 21, 28,
   35, 42, 49, 56, 57, 50, 43, 36, 29, 22, 15, 23, 30, 37, 44, 51,
   58, 59, 52, 45, 38, 31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 63,
+  63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63,
+  63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63,
+  63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63,
   63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63
 };
 
@@ -237,7 +243,9 @@ jpg_huff_build(jhuff_t *h, const uint8_t counts[16], const uint8_t *vals, bool d
   uint16_t codes[256];
   uint8_t  sizes[256];
 
-  /* all but the look-ups (those past the short codes cleared below) */
+  /* all but the look-ups (those past the short codes cleared below); the
+     pairs, made for the old codes, go */
+  free(h->pair);
   memset(&h->maxcode, 0, sizeof(*h) - offsetof(jhuff_t, maxcode));
   for (len = 1; len <= 16u; len++) total += counts[len - 1u];
   if (total > 256u) return false;
@@ -300,6 +308,67 @@ jpg_huff_build(jhuff_t *h, const uint8_t counts[16], const uint8_t *vals, bool d
   return true;
 }
 
+IM_HIDE void
+jpg_huff_free(jhuff_t *h) {
+  if (h) free(h->pair);
+  free(h);
+}
+
+/* An AC table's pairs: for each J_HBITS bits, the symbol they start with
+   and, where its code and value leave room, the next one's too. A symbol
+   is a step and a value: k moves by the step, the value goes at k, k
+   moves on one. A coefficient's step is its run; ZRL's 15 with value 0
+   (the 16th zero written: it was zero); an end of block (EOB, or any run
+   with no size but 15, as libjpeg reads it) 64, value 0, which lands on
+   jpg_natural's 63 — still zero, no block reaching there goes on — and
+   ends the block. A single's second is a step of 0 that k doesn't move
+   past (JP_TWO clear): the zero goes where the next coefficient would.
+     bits 0–5    bits taken: both symbols', or the one's
+     bits 6–11   the first's alone (where the block ends with it)
+     bits 16–22  the first's step
+     JP_OK       a look-up: the first is code and value in J_HBITS bits
+                 (else the long way, one symbol)
+     bits 24–30  the second's step
+     JP_TWO      a second symbol
+     bits 32–47  the first's value, 48–63 the second's (signed) */
+#define JP_OK  ((uint64_t)1 << 23)
+#define JP_TWO ((uint64_t)1 << 31)
+
+static uint32_t
+pair_step(uint32_t sym) {
+  return (sym & 15u) ? sym >> 4 : sym == 0xF0u ? 15u : 64u;
+}
+
+static uint64_t*
+huff_pairs(const jhuff_t *h) {
+  uint64_t *t = malloc(J_HSIZE * sizeof(*t));
+  uint32_t  x;
+
+  if (!t) return NULL;
+  for (x = 0; x < J_HSIZE; x++) {
+    uint32_t e1 = h->fast[x], l1 = e1 & 63u, s1 = (e1 >> 8) & 0xFFu, p1 = pair_step(s1);
+    uint64_t e;
+
+    if (!(e1 & J_FUSED)) {
+      t[x] = 0u;
+      continue;
+    }
+    e = l1 | (uint64_t)l1 << 6 | (uint64_t)p1 << 16 | JP_OK | (uint64_t)(uint16_t)(e1 >> 16) << 32;
+    if (p1 != 64u && l1 < J_HBITS) {
+      /* the next symbol where it's whole in the bits left: its look-up
+         then depends on those bits only */
+      uint32_t e2 = h->fast[(x << l1) & (J_HSIZE - 1u)], l2 = e2 & 63u;
+
+      if ((e2 & J_FUSED) && l1 + l2 <= J_HBITS) {
+        e = (e & ~(uint64_t)63u) | (l1 + l2);
+        e |= (uint64_t)pair_step((e2 >> 8) & 0xFFu) << 24 | JP_TWO | (uint64_t)(uint16_t)(e2 >> 16) << 48;
+      }
+    }
+    t[x] = e;
+  }
+  return t;
+}
+
 /* the tables Annex K suggests, where a stream defines none (Motion-JPEG):
    libjpeg-turbo's std_huff_tables, at the first scan */
 IM_HIDE void
@@ -345,11 +414,71 @@ jpg_huff_std(jpg_t *j) {
     jhuff_t **slot = std[i].dc ? &j->dc[std[i].slot] : &j->ac[std[i].slot];
 
     if (*slot || !(*slot = malloc(sizeof(**slot)))) continue;
+    (*slot)->pair = NULL; /* the rest the build sets */
     jpg_huff_build(*slot, std[i].bits, std[i].vals, std[i].dc, false);
   }
 }
 
 /* -- blocks -------------------------------------------------------------------- */
+
+/* the long way, one symbol, for the pair loops: its run and size (rs), the
+   value read; ZRL and the end of block as huffman gives them */
+IM_INLINE uint32_t
+pair_long(jbits_t *b, const jhuff_t *act, int32_t *v) {
+  uint32_t f = act->fast[PEEK(b, J_HBITS)], rs, s;
+
+  if (f) {
+    DROP(b, f & 63u);
+    rs = (f >> 8) & 0xFFu;
+  } else {
+    rs = huff_slow(b, act);
+  }
+  s  = rs & 15u;
+  *v = s ? extend(get_bits(b, s), s) : 0;
+  return rs;
+}
+
+/* a block's AC coefficients through its table's pairs (huff_pairs): two
+   symbols a look-up where they fit, the same bits taken as one by one */
+IM_INLINE void
+block_pairs(jbits_t *b, const jhuff_t *act, int16_t *blk) {
+  const uint64_t *pt = act->pair;
+  uint32_t        k  = 1u;
+
+  while (k < 64u) {
+    uint64_t e;
+
+    if (b->n < 32) refill(b);
+    e = pt[PEEK(b, J_HBITS)];
+    if (likely(e & JP_OK)) {
+      k += (uint32_t)(e >> 16) & 127u;
+      blk[jpg_natural[k]] = (int16_t)(e >> 32);
+      k++;
+      if (unlikely(k >= 64u)) {
+        DROP(b, (e >> 6) & 63u);
+        return;
+      }
+      DROP(b, e & 63u);
+      k += (uint32_t)(e >> 24) & 127u;
+      blk[jpg_natural[k]] = (int16_t)(e >> 48);
+      k += (uint32_t)(e >> 31) & 1u;
+    } else {
+      /* a long code, or a value past the look-up: one symbol */
+      int32_t  v;
+      uint32_t rs = pair_long(b, act, &v);
+
+      if (rs & 15u) {
+        k += rs >> 4;
+        blk[jpg_natural[k]] = (int16_t)v;
+        k++;
+      } else if (rs == 0xF0u) {
+        k += 16u;
+      } else {
+        return;
+      }
+    }
+  }
+}
 
 /* a sequential block's coefficients into `blk` (zeros where none) */
 IM_INLINE void
@@ -376,6 +505,10 @@ block_seq(jbits_t *b, const jhuff_t *dct, const jhuff_t *act, int32_t *dc, int16
   }
   *dc    = (int32_t)((uint32_t)*dc + (uint32_t)diff);
   blk[0] = (int16_t)*dc;
+  if (act->pair) {
+    block_pairs(b, act, blk);
+    return;
+  }
 
   for (k = 1; k < 64u; k++) {
     uint32_t rs, s;
@@ -1499,11 +1632,94 @@ typedef struct jspec {
   uint8_t   slot_ci[64], slot_h[64], slot_v[64];
 } jspec_t;
 
+/* block_pairs' walk, its coefficients as records at `out` (a natural
+   position, a value): every symbol writes one where the next goes, a
+   value (never 0) keeps it, so ZRL, the end of block and a single's
+   second leave none but one past the last (room for it: 2 int16s past
+   63 records). The records kept */
+IM_INLINE uint32_t
+keep_pairs(jbits_t *b, const jhuff_t *act, int16_t *out) {
+  const uint64_t *pt = act->pair;
+  uint32_t        k  = 1u, n = 0u;
+
+  while (k < 64u) {
+    uint64_t e;
+
+    if (b->n < 32) refill(b);
+    e = pt[PEEK(b, J_HBITS)];
+    if (likely(e & JP_OK)) {
+      int16_t v1 = (int16_t)(e >> 32), v2 = (int16_t)(e >> 48);
+
+      k += (uint32_t)(e >> 16) & 127u;
+      out[2u * n]      = (int16_t)jpg_natural[k];
+      out[2u * n + 1u] = v1;
+      n += v1 != 0;
+      k++;
+      if (unlikely(k >= 64u)) {
+        DROP(b, (e >> 6) & 63u);
+        break;
+      }
+      DROP(b, e & 63u);
+      k += (uint32_t)(e >> 24) & 127u;
+      out[2u * n]      = (int16_t)jpg_natural[k];
+      out[2u * n + 1u] = v2;
+      n += v2 != 0;
+      k += (uint32_t)(e >> 31) & 1u;
+    } else {
+      int32_t  v;
+      uint32_t rs = pair_long(b, act, &v);
+
+      if (rs & 15u) {
+        k += rs >> 4;
+        out[2u * n]      = (int16_t)jpg_natural[k];
+        out[2u * n + 1u] = (int16_t)v;
+        n++;
+        k++;
+      } else if (rs == 0xF0u) {
+        k += 16u;
+      } else {
+        break;
+      }
+    }
+  }
+  return n;
+}
+
+/* block_pairs' walk, only the bits taken */
+IM_INLINE void
+drop_pairs(jbits_t *b, const jhuff_t *act) {
+  const uint64_t *pt = act->pair;
+  uint32_t        k  = 1u;
+
+  while (k < 64u) {
+    uint64_t e;
+
+    if (b->n < 32) refill(b);
+    e = pt[PEEK(b, J_HBITS)];
+    if (likely(e & JP_OK)) {
+      k += ((uint32_t)(e >> 16) & 127u) + 1u;
+      if (unlikely(k >= 64u)) {
+        DROP(b, (e >> 6) & 63u);
+        return;
+      }
+      DROP(b, e & 63u);
+      k += ((uint32_t)(e >> 24) & 127u) + ((uint32_t)(e >> 31) & 1u);
+    } else {
+      int32_t  v;
+      uint32_t rs = pair_long(b, act, &v);
+
+      if (rs & 15u) k += (rs >> 4) + 1u;
+      else if (rs == 0xF0u) k += 16u;
+      else return;
+    }
+  }
+}
+
 /* a sequential block decoded into a compact record at `out`: its count n
    of coefficients past the DC, its DC (as predicted), then n pairs of a
    natural position and a value, in decode order (a damaged run's past the
    end at 63, as jpg_natural has it; a later one over an earlier); the
-   int16s it took */
+   int16s it took (with pairs, 2 more may be written past them) */
 IM_INLINE uint32_t
 block_keep(jbits_t *b, const jhuff_t *dct, const jhuff_t *act, int32_t *dc, int16_t *out) {
   uint32_t e, k, n = 0;
@@ -1528,6 +1744,10 @@ block_keep(jbits_t *b, const jhuff_t *dct, const jhuff_t *act, int32_t *dc, int1
   }
   *dc    = (int32_t)((uint32_t)*dc + (uint32_t)diff);
   out[1] = (int16_t)*dc;
+  if (act->pair) {
+    out[0] = (int16_t)(n = keep_pairs(b, act, out + 2));
+    return 2u + 2u * n;
+  }
 
   for (k = 1; k < 64u; k++) {
     uint32_t rs, s;
@@ -1586,6 +1806,10 @@ block_drop(jbits_t *b, const jhuff_t *dct, const jhuff_t *act) {
     }
 
     diff = extend(get_bits(b, s), s);
+  }
+  if (act->pair) {
+    drop_pairs(b, act);
+    return diff;
   }
   for (k = 1; k < 64u; k++) {
     uint32_t rs;
@@ -1673,9 +1897,9 @@ spec_pass1(void *arg, uint32_t worker, uint32_t item) {
     }
     if (st.blk >= sp->total) return true; /* ran off the end */
     if (!last && ch->coef) {
-      /* room for the longest record (a DC and 63 pairs), else dropped as they
-         come, decoded again in (3) */
-      if (ch->ncoef + 128u > ch->coefcap) {
+      /* room for the longest record (a DC and 63 pairs, and keep_pairs'
+         one past them), else dropped as they come, decoded again in (3) */
+      if (ch->ncoef + 130u > ch->coefcap) {
         size_t   cap  = ch->coefcap * 2u;
         int16_t *next = im_big_grow(ch->coef, ch->coefcap * sizeof(*next), cap * sizeof(*next), j->big);
 
@@ -1944,6 +2168,17 @@ jpg_scan_huff(jpg_t *j, im_pool_t *pool) {
     h = j->mcuy;
   }
   total = w * h;
+
+  /* a big sequential scan's AC tables in pairs, here before any thread
+     reads them (a table's look-ups cost more than a small scan's blocks
+     save); without memory for them, one symbol a look-up */
+  if (j->process == J_SEQUENTIAL && (uint64_t)total * blocks >= J_PAIR_MIN) {
+    for (i = 0; i < j->nscomp; i++) {
+      jhuff_t *a = j->ac[j->comp[j->scomp[i]].ta & 3u];
+
+      if (a && a->ok && !a->pair) a->pair = huff_pairs(a);
+    }
+  }
 
   /* in parallel: where every interval has its segment, ended by the RST
      the next restart expects */

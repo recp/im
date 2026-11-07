@@ -655,7 +655,10 @@ read_dht(jpg_t *j, const uint8_t *s, uint32_t len) {
     for (i = 0; i < 16u; i++) total += s[at + 1u + i];
     if (total > 256u || total > len - at - 17u || tc > 1u || th > 3u) return false;
     slot = tc ? &j->ac[th] : &j->dc[th];
-    if (!*slot && !(*slot = malloc(sizeof(**slot)))) return false;
+    if (!*slot) {
+      if (!(*slot = malloc(sizeof(**slot)))) return false;
+      (*slot)->pair = NULL; /* the rest the build sets */
+    }
     jpg_huff_build(*slot, s + at + 1u, s + at + 17u, !tc, true);
     at += 17u + total;
   }
@@ -851,8 +854,8 @@ jpg_free(jpg_t *j) {
     free(j->ref[i]);
   }
   for (i = 0; i < 4u; i++) {
-    free(j->dc[i]);
-    free(j->ac[i]);
+    jpg_huff_free(j->dc[i]);
+    jpg_huff_free(j->ac[i]);
   }
   free(j->icc);
   free(j->sd.buf);
@@ -942,7 +945,7 @@ static void
 free_copy(jdeferred_t *d) {
   uint32_t k;
 
-  for (k = 0; k < 8u; k++) free(d->own[k]);
+  for (k = 0; k < 8u; k++) jpg_huff_free(d->own[k]);
   if (d->copy) {
     free(d->copy->sd.buf);
     free(d->copy->sd.seg);
@@ -987,6 +990,7 @@ defer_scan(jpg_t *j, const uint8_t *p, const uint8_t *end, const uint8_t **next)
       if (have) continue;
       if (!(dup = malloc(sizeof(*dup)))) goto fail;
       *dup = *orig;
+      dup->pair = NULL; /* the original's own */
       /* every slot of its kind the scan has pointing at it: at the copy */
       for (o = 0; o < 4u; o++) {
         if (w == 0u && c->dc[o] == orig) c->dc[o] = dup;

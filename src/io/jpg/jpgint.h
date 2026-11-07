@@ -48,6 +48,12 @@
 #  define J_DRY 64u
 #endif
 
+/* a sequential scan's blocks from which its AC tables get two-symbol
+   look-ups (a test build can lower it) */
+#ifndef J_PAIR_MIN
+#  define J_PAIR_MIN 4096u
+#endif
+
 /* a cold path kept out of its caller (whose fast path then saves no
    registers for it) */
 #if defined(_MSC_VER)
@@ -89,12 +95,16 @@ typedef enum jspace {
      J_FUSED (bit 7)        the value is in bits 16–31 (signed)
      bits 8–15              the symbol */
 typedef struct jhuff {
-  uint32_t fast[J_HSIZE];
-  int32_t  maxcode[18];   /* by length, -1 none; [17] ends any search */
-  int32_t  valoff[18];
-  uint8_t  vals[256];
-  uint8_t  maxsym;
-  bool     ok;
+  uint32_t  fast[J_HSIZE];
+  int32_t   maxcode[18];   /* by length, -1 none; [17] ends any search */
+  int32_t   valoff[18];
+  uint8_t   vals[256];
+  uint8_t   maxsym;
+  bool      ok;
+  uint64_t *pair;          /* an AC table's two-symbol look-ups (huff.c's
+                              JP_*), made for a big sequential scan; NULL
+                              none. Its own: freed where the table is
+                              built again or freed (jpg_huff_free) */
 } jhuff_t;
 
 enum { J_FUSED = 1u << 7 };
@@ -242,6 +252,7 @@ IM_HIDE bool jpg_decode_mem(const uint8_t *data, size_t len, ImImage *im, const 
 
 /* huff.c */
 IM_HIDE bool jpg_huff_build(jhuff_t *h, const uint8_t counts[16], const uint8_t *vals, bool dc, bool lossless);
+IM_HIDE void jpg_huff_free(jhuff_t *h);
 IM_HIDE void jpg_huff_std(jpg_t *j);
 IM_HIDE bool jpg_unstuff(jdata_t *d, const uint8_t *p, const uint8_t *end);
 IM_HIDE const uint8_t *jpg_scan_end(const uint8_t *p, const uint8_t *end);
@@ -301,6 +312,6 @@ IM_HIDE void jpg_put(jpg_t *j, jcomp_t *c, int16_t *blk, uint32_t bx, uint32_t b
 
 /* the natural order of zig-zag position k, and 16 more for a damaged
    run past the end (libjpeg's jpeg_natural_order) */
-IM_HIDE extern const uint8_t jpg_natural[64 + 16];
+IM_HIDE extern const uint8_t jpg_natural[128];
 
 #endif /* src_io_jpg_jpgint_h */
