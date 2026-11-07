@@ -537,6 +537,33 @@ decode_rows(ccr_t *r, const im_ccitt_t *pa, uint8_t *out, size_t stride, uint32_
   return ok_any || !rows ? (int64_t)kept : -1;
 }
 
+/* T.6 as JBIG2's MMR regions have it: w × h rows into out (stride a row),
+   1 black, bits past w 0; rows the data doesn't reach left as they are.
+   The rows decoded (-1 none) and the bytes taken, an EOFB after them too */
+IM_HIDE int64_t
+ccitt_mmr(const uint8_t *data, size_t len, uint32_t w, uint32_t h, uint8_t *out, size_t stride, size_t *used) {
+  im_ccitt_t pa;
+  ccr_t     *r;
+  int64_t    n;
+  uint64_t   took;
+
+  if (used) *used = 0u;
+  if (!w || w > CC_MAX_COLS || !h || !(r = malloc(sizeof(*r)))) return -1;
+  memset(&pa, 0, sizeof(pa));
+  pa.k            = -1;
+  pa.columns      = w;
+  pa.rows         = h;
+  pa.end_of_block = true;
+  pa.black_is_1   = true;
+  reader_init(r, data, len);
+  n = decode_rows(r, &pa, out, stride, 0u, h, 0u, w, false, NULL, NULL, 0u);
+  if (peek(&r->s, 24u) == 0x001001u) r->s.bit += 24u;
+  took = (r->s.bit + 7u) / 8u;
+  if (used) *used = took < len ? (size_t)took : len;
+  free(r);
+  return n;
+}
+
 IM_HIDE ImResult
 ccitt_dec_mem(ImImage **dest, const uint8_t *data, size_t len, const im_open_config_t *conf) {
   const im_ccitt_t *pa = &conf->ccitt;

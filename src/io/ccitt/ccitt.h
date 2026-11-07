@@ -23,4 +23,8 @@
 IM_HIDE ImResult
 ccitt_dec_mem(ImImage **dest, const uint8_t *data, size_t len, const im_open_config_t *conf);
 
+/* JBIG2's MMR: T.6 rows, 1 black (ccitt.c says how) */
+IM_HIDE int64_t
+ccitt_mmr(const uint8_t *data, size_t len, uint32_t w, uint32_t h, uint8_t *out, size_t stride, size_t *used);
+
 #endif /* src_io_ccitt_ccitt_h */
