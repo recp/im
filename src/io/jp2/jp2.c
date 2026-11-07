@@ -2915,14 +2915,28 @@ typedef struct xlevel {
   uint32_t r;
 } xlevel_t;
 
+#if X_NEON
+static void rows97(float *L, float *H, uint32_t sn, uint32_t dn, uint32_t cas, float *o);
+static void rows53(int32_t *L, int32_t *H, uint32_t sn, uint32_t dn, uint32_t cas, int32_t *o);
+#endif
+
 /* a row of `w`, its `sw` lows then its highs: lifted where its halves lie,
-   then interleaved through `tmp` (w samples) */
+   then interleaved through `tmp` (w samples); both bands there, the steps
+   and the interleaving in one pass (rows97) */
 static void
 idwt_row(uint8_t *row, uint8_t *tmp, uint32_t w, uint32_t sw, uint32_t cx, bool reversible) {
   const uint32_t *l = (const uint32_t *)(void *)row, *hh = l + sw;
   uint32_t       *t = (uint32_t *)(void *)tmp;
   uint32_t        done = 0, i;
 
+#if X_NEON
+  if (sw && sw < w) {
+    if (reversible) rows53((int32_t *)(void *)row, (int32_t *)(void *)row + sw, sw, w - sw, cx, (int32_t *)(void *)tmp);
+    else rows97((float *)(void *)row, (float *)(void *)row + sw, sw, w - sw, cx, (float *)(void *)tmp);
+    memcpy(row, tmp, (size_t)w * 4u);
+    return;
+  }
+#endif
   lift_apart(row, row + (size_t)sw * 4u, sw, w - sw, cx, 1u, 1u, reversible);
   /* lows to cx, cx + 2, …; highs between (32 bits either way): pairs of
      them (a high then a low where the row starts with a high) together */
@@ -3072,6 +3086,142 @@ cols53(int32_t *L, int32_t *H, uint32_t sn, uint32_t dn, uint32_t cas, size_t st
     }
   }
 }
+
+/* A row's level the same way, its results interleaved to `o`: the steps of
+   time t on single samples (cols97's, cols53's with n 1), and where no
+   neighbour is mirrored, four times at once, the values a step reads from
+   the one before it held in registers (the last four, the one before them
+   moved in), so each sample is read once and its result written once.
+   Where the vectors stop, what the scalar steps read next (a step's last
+   sample) put back in place */
+#if X_NEON
+static JPX_INLINE void
+row97_t(float *L, float *H, uint32_t sn, uint32_t dn, uint32_t cas, float *o, int64_t t) {
+  int64_t i = t, jj = t + (int64_t)cas - 1, a, b;
+
+  if (i < (int64_t)sn) {
+    a = i + (int64_t)cas - 1;
+    b = a + 1;
+    MIRROR(a, b, dn);
+    L[i] = L[i] * KL + (H[a] * KH + H[b] * KH) * -0.443506852f;
+  }
+  if (jj >= 0 && jj < (int64_t)dn) {
+    a = jj - (int64_t)cas;
+    b = a + 1;
+    MIRROR(a, b, sn);
+    H[jj] = H[jj] * KH + (L[a] + L[b]) * -0.882911075f;
+  }
+  i = t - 1;
+  if (i >= 0 && i < (int64_t)sn) {
+    a = i + (int64_t)cas - 1;
+    b = a + 1;
+    MIRROR(a, b, dn);
+    o[cas + 2u * (uint32_t)i] = L[i] = L[i] + (H[a] + H[b]) * 0.052980118f;
+  }
+  jj = t + (int64_t)cas - 2;
+  if (jj >= 0 && jj < (int64_t)dn) {
+    a = jj - (int64_t)cas;
+    b = a + 1;
+    MIRROR(a, b, sn);
+    o[1u - cas + 2u * (uint32_t)jj] = H[jj] + (L[a] + L[b]) * 1.586134342f;
+  }
+}
+
+static JPX_INLINE void
+row53_t(int32_t *L, int32_t *H, uint32_t sn, uint32_t dn, uint32_t cas, int32_t *o, int64_t t) {
+  int64_t i = t, jj = t + (int64_t)cas - 1, a, b;
+
+  if (i < (int64_t)sn) {
+    a = i + (int64_t)cas - 1;
+    b = a + 1;
+    MIRROR(a, b, dn);
+    o[cas + 2u * (uint32_t)i] = L[i] = (int32_t)((uint32_t)L[i] - (uint32_t)((int32_t)((uint32_t)H[a] + (uint32_t)H[b] + 2u) >> 2));
+  }
+  if (jj >= 0 && jj < (int64_t)dn) {
+    a = jj - (int64_t)cas;
+    b = a + 1;
+    MIRROR(a, b, sn);
+    o[1u - cas + 2u * (uint32_t)jj] = (int32_t)((uint32_t)H[jj] + (uint32_t)((int32_t)((uint32_t)L[a] + (uint32_t)L[b]) >> 1));
+  }
+}
+
+/* times [t0, t1), four at a time: the lows' first step L1[t … t + 3], the
+   highs' H2[t + cas - 1 …], the lows' last L3[t - 1 …] and the highs'
+   H4[t + cas - 2 …], each from the vectors before it and (moved in by
+   one) their last block's */
+static void
+rows97_neon(float *L, float *H, uint32_t cas, float *o, uint32_t t0, uint32_t t1) {
+  const float32x4_t kl = vdupq_n_f32(KL), kh = vdupq_n_f32(KH), c1 = vdupq_n_f32(-0.443506852f);
+  const float32x4_t c2 = vdupq_n_f32(-0.882911075f), c3 = vdupq_n_f32(0.052980118f), c4 = vdupq_n_f32(1.586134342f);
+  float32x4_t       l1p = vdupq_n_f32(L[t0 - 1u]), h2p = vdupq_n_f32(H[t0 + cas - 2u]), l3p = vdupq_n_f32(L[t0 - 2u]);
+  uint32_t          t;
+
+  for (t = t0; t < t1; t += 4u) {
+    float32x4_t ha = vld1q_f32(H + t + cas - 1u), hb = vld1q_f32(H + t + cas), hk = vmulq_f32(ha, kh);
+    float32x4_t l1 = vaddq_f32(vmulq_f32(vld1q_f32(L + t), kl), vmulq_f32(vaddq_f32(hk, vmulq_f32(hb, kh)), c1));
+    float32x4_t l1m = vextq_f32(l1p, l1, 3);
+    float32x4_t h2  = vaddq_f32(hk, vmulq_f32(vaddq_f32(l1m, l1), c2));
+    float32x4_t h2m = vextq_f32(h2p, h2, 3);
+    float32x4_t l3  = vaddq_f32(l1m, vmulq_f32(vaddq_f32(h2m, h2), c3));
+    float32x4_t l3m = vextq_f32(l3p, l3, 3);
+    float32x4x2_t v;
+
+    v.val[cas]      = cas ? l3 : l3m;
+    v.val[1u - cas] = vaddq_f32(h2m, vmulq_f32(vaddq_f32(l3m, l3), c4));
+    vst2q_f32(o + 2u * (t - 2u + cas), v);
+    l1p = l1;
+    h2p = h2;
+    l3p = l3;
+  }
+  L[t1 - 1u]       = vgetq_lane_f32(l1p, 3);
+  H[t1 + cas - 2u] = vgetq_lane_f32(h2p, 3);
+  L[t1 - 2u]       = vgetq_lane_f32(l3p, 3);
+  if (!cas) o[2u * (t1 - 2u)] = L[t1 - 2u];
+}
+
+/* the 5/3's: the lows L[t …], the highs H[t + cas - 1 …] */
+static void
+rows53_neon(int32_t *L, int32_t *H, uint32_t cas, int32_t *o, uint32_t t0, uint32_t t1) {
+  const int32x4_t two = vdupq_n_s32(2);
+  int32x4_t       lp  = vdupq_n_s32(L[t0 - 1u]);
+  uint32_t        t;
+
+  for (t = t0; t < t1; t += 4u) {
+    int32x4_t ha = vld1q_s32(H + t + cas - 1u), hb = vld1q_s32(H + t + cas);
+    int32x4_t l  = vsubq_s32(vld1q_s32(L + t), vshrq_n_s32(vaddq_s32(vaddq_s32(ha, hb), two), 2));
+    int32x4_t lm = vextq_s32(lp, l, 3);
+    int32x4x2_t v;
+
+    v.val[cas]      = cas ? l : lm;
+    v.val[1u - cas] = vaddq_s32(ha, vshrq_n_s32(vaddq_s32(lm, l), 1));
+    vst2q_s32(o + 2u * (t - 1u + cas), v);
+    lp = l;
+  }
+  L[t1 - 1u] = vgetq_lane_s32(lp, 3);
+  if (!cas) o[2u * (t1 - 1u)] = L[t1 - 1u];
+}
+
+/* a row's level whole: lows L (sn), highs H (dn), both there, to `o` */
+static void
+rows97(float *L, float *H, uint32_t sn, uint32_t dn, uint32_t cas, float *o) {
+  int64_t  tend = (int64_t)sn > (int64_t)dn + 1 - (int64_t)cas ? (int64_t)sn : (int64_t)dn + 1 - (int64_t)cas, t;
+  uint32_t lim = sn < dn - cas ? sn : dn - cas, t1 = lim >= 6u ? 2u + ((lim - 2u) & ~3u) : 2u;
+
+  for (t = 0; t < 2 && t <= tend; t++) row97_t(L, H, sn, dn, cas, o, t);
+  if (t1 > 2u) rows97_neon(L, H, cas, o, 2u, t1);
+  for (t = t1; t <= tend; t++) row97_t(L, H, sn, dn, cas, o, t);
+}
+
+static void
+rows53(int32_t *L, int32_t *H, uint32_t sn, uint32_t dn, uint32_t cas, int32_t *o) {
+  int64_t  tend = (int64_t)sn - 1 > (int64_t)dn - (int64_t)cas ? (int64_t)sn - 1 : (int64_t)dn - (int64_t)cas, t;
+  uint32_t lim = sn < dn - cas ? sn : dn - cas, t1 = lim >= 5u ? 1u + ((lim - 1u) & ~3u) : 1u;
+
+  for (t = 0; t < 1 && t <= tend; t++) row53_t(L, H, sn, dn, cas, o, t);
+  if (t1 > 1u) rows53_neon(L, H, cas, o, 1u, t1);
+  for (t = t1; t <= tend; t++) row53_t(L, H, sn, dn, cas, o, t);
+}
+#endif
 
 /* rows in a ring: row i in slot (y0 + i) & mask */
 typedef struct xring {
