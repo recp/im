@@ -1947,7 +1947,8 @@ typedef struct htbw {
 
 typedef struct htmel {
   const uint8_t *p, *end;
-  uint32_t       bits, tmp;
+  uint64_t       buf;  /* its next bits from the top, n of them */
+  uint32_t       n, tmp;
   int32_t        k, run, one;
 } htmel_t;
 
@@ -2070,33 +2071,43 @@ bw_skip(htbw_t *r, uint32_t m) {
   r->n -= m;
 }
 
-static uint32_t
-mel_bit(htmel_t *s) {
-  if (!s->bits) {
-    s->bits = s->tmp == 0xFFu ? 7u : 8u;
-    /* modDcup: the segment's last byte 0xFF, the one before its 4 LSBs 1s */
-    if (s->p + 1 < s->end) s->tmp = s->p + 2 == s->end ? *s->p | 0x0Fu : *s->p;
-    else s->tmp = 0xFFu;
+/* the MEL's bits in, a byte at a time while 56 or fewer are there: each
+   byte's eight, seven after an 0xFF (its top one a stuffed 0); modDcup the
+   segment's last byte 0xFF and the 4 LSBs of the one before it 1s; past
+   the end 0xFFs */
+static void
+mel_fill(htmel_t *s) {
+  while (s->n <= 56u) {
+    uint32_t nb = s->tmp == 0xFFu ? 7u : 8u, b;
+
+    if (s->p + 1 < s->end) b = s->p + 2 == s->end ? *s->p | 0x0Fu : *s->p;
+    else b = 0xFFu;
     if (s->p < s->end) s->p++;
+    s->tmp  = b;
+    s->buf |= (uint64_t)(b & ((1u << nb) - 1u)) << (64u - s->n - nb);
+    s->n   += nb;
   }
-  s->bits--;
-  return (s->tmp >> s->bits) & 1u;
 }
 
-/* decodeMELSym (7.3.3) */
+/* decodeMELSym (7.3.3): a run's length (eval bits) taken at once */
 static uint32_t
 mel_sym(htmel_t *s) {
   if (!s->run && !s->one) {
-    uint32_t eval = mel_e[s->k];
+    uint32_t eval = mel_e[s->k], bit;
 
-    if (mel_bit(s)) {
+    if (s->n < 6u) mel_fill(s);
+    bit      = (uint32_t)(s->buf >> 63);
+    s->buf <<= 1;
+    s->n    -= 1u;
+    if (bit) {
       s->run = 1 << eval;
       s->k   = s->k + 1 < 12 ? s->k + 1 : 12;
     } else {
-      s->run = 0;
-      while (eval--) s->run = 2 * s->run + (int32_t)mel_bit(s);
-      s->k   = s->k > 0 ? s->k - 1 : 0;
-      s->one = 1;
+      s->run = eval ? (int32_t)(s->buf >> (64u - eval)) : 0;
+      s->buf <<= eval;
+      s->n    -= eval;
+      s->k     = s->k > 0 ? s->k - 1 : 0;
+      s->one   = 1;
     }
   }
   if (s->run > 0) {
