@@ -194,10 +194,12 @@ jn_ycc_h2v2(const uint8_t *y, const uint16_t *sb, const uint16_t *sr, uint32_t w
     }
     jn_rgb16(yy.val[0], be, re, &pe);
     jn_rgb16(yy.val[1], bo, ro, &po);
-    for (h = 0; h < 3u; h++) {
-      p0.val[h] = vzip1q_u8(pe.val[h], po.val[h]);
-      p1.val[h] = vzip2q_u8(pe.val[h], po.val[h]);
-    }
+    p0.val[0] = vzip1q_u8(pe.val[0], po.val[0]);
+    p0.val[1] = vzip1q_u8(pe.val[1], po.val[1]);
+    p0.val[2] = vzip1q_u8(pe.val[2], po.val[2]);
+    p1.val[0] = vzip2q_u8(pe.val[0], po.val[0]);
+    p1.val[1] = vzip2q_u8(pe.val[1], po.val[1]);
+    p1.val[2] = vzip2q_u8(pe.val[2], po.val[2]);
     vst3q_u8(o + 3u * x, p0);
     vst3q_u8(o + 3u * x + 48u, p1);
   }
@@ -235,10 +237,12 @@ jn_ycc_h2v1(const uint8_t *y, const uint8_t *b, const uint8_t *r, uint32_t w, ui
     }
     jn_rgb16(yy.val[0], ev[0], ev[1], &pe);
     jn_rgb16(yy.val[1], od[0], od[1], &po);
-    for (h = 0; h < 3u; h++) {
-      p0.val[h] = vzip1q_u8(pe.val[h], po.val[h]);
-      p1.val[h] = vzip2q_u8(pe.val[h], po.val[h]);
-    }
+    p0.val[0] = vzip1q_u8(pe.val[0], po.val[0]);
+    p0.val[1] = vzip1q_u8(pe.val[1], po.val[1]);
+    p0.val[2] = vzip1q_u8(pe.val[2], po.val[2]);
+    p1.val[0] = vzip2q_u8(pe.val[0], po.val[0]);
+    p1.val[1] = vzip2q_u8(pe.val[1], po.val[1]);
+    p1.val[2] = vzip2q_u8(pe.val[2], po.val[2]);
     vst3q_u8(o + 3u * x, p0);
     vst3q_u8(o + 3u * x + 48u, p1);
   }
