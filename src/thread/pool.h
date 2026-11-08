@@ -15,10 +15,10 @@
  */
 
 /*
- * A decode's worker threads: items [0, n) of a job handed out in turn,
- * the caller working too; a run ends when every item is done. Items are
- * meant to be large (a band of rows, a restart interval or more), so the
- * lock is taken twice an item at most.
+ * A decode's worker threads: items [0, n) of a job handed out in turn (an
+ * atomic add each), the caller working too; a run ends when every item is
+ * done. A pool freed is kept for the next decode (pool.c, IM_POOL_KEEP),
+ * its threads waiting.
  */
 
 #ifndef src_thread_pool_h
