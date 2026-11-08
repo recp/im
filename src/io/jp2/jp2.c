@@ -33,6 +33,7 @@
  */
 
 #include "jp2.h"
+#include "../../thread/pool.h"
 #if defined(_MSC_VER) && !defined(__clang__)
 #  include <intrin.h>
 #endif
@@ -305,21 +306,6 @@ typedef bool (*xjob_fn)(struct jpx *j, xscratch_t *s, void *ctx, uint32_t item);
 
 /* threads for a large image: items handed out in turn, the caller working
    too; a round ends when every item is done */
-typedef struct xpool {
-  th_thread_mutex m;
-  th_thread_cond  go, idle;
-  xjob_fn         fn;
-  void           *ctx;
-  uint32_t        items, next, busy, round;
-  bool            quit, failed;
-} xpool_t;
-
-typedef struct xworker {
-  struct jpx *j;
-  uint32_t    id;
-  th_thread  *thread;
-} xworker_t;
-
 typedef struct jpx {
   arena_t   arena;
   uint32_t  x1, y1, x0, y0, tw, th, tx0, ty0, ntx, nty, ncomp;
@@ -354,8 +340,7 @@ typedef struct jpx {
   uint32_t  ox0, oy0, ox1, oy1; /* the grid as SIZ has it (x0 … y1 made
                                    smaller for compose) */
   xscratch_t scratch[X_THREADS];
-  xpool_t    pool;
-  xworker_t  worker[X_THREADS - 1];
+  im_pool_t *pool;          /* its threads (thread/pool.h), or the caller's runner */
   uint32_t   workers; /* threads besides the caller's */
   uint32_t   threads; /* at most, the caller's among them; 0 as many as help */
   im_runner_t runner;  /* the caller's threads (run NULL: none) */
@@ -3396,56 +3381,18 @@ idwt_cols(jpx_t *j, xscratch_t *s, void *ctx, uint32_t item) {
 
 /* -- the pool ---------------------------------------------------------------------- */
 
-/* the next item, without the lock: a round's start and end are under it,
-   its items taken by one atomic add each */
-#if defined(_MSC_VER) && !defined(__clang__)
-#  define X_TAKE(p)     ((uint32_t)_InterlockedExchangeAdd((volatile long *)(p), 1))
-#  define X_RESET(p)    ((void)_InterlockedExchange((volatile long *)(p), 0))
-#else
-#  define X_TAKE(p)     __atomic_fetch_add((p), 1u, __ATOMIC_RELAXED)
-#  define X_RESET(p)    __atomic_store_n((p), 0u, __ATOMIC_RELAXED)
-#endif
-
-static void
-pool_main(void *arg) {
-  xworker_t *w = arg;
-  jpx_t     *j = w->j;
-  xpool_t   *p = &j->pool;
-  uint32_t   seen = 0;
-
-  thread_lock(&p->m);
-  for (;;) {
-    xjob_fn  fn;
-    void    *ctx;
-    uint32_t items, i;
-    bool     ok = true;
-
-    while (!p->quit && p->round == seen) thread_cond_wait(&p->go, &p->m);
-    if (p->quit) break;
-    seen  = p->round;
-    fn    = p->fn;
-    ctx   = p->ctx;
-    items = p->items;
-    p->busy++;
-    thread_unlock(&p->m);
-    while ((i = X_TAKE(&p->next)) < items) ok = fn(j, &j->scratch[w->id], ctx, i) && ok;
-    thread_lock(&p->m);
-    if (!ok) p->failed = true;
-    if (!--p->busy) thread_cond_broadcast(&p->idle);
-  }
-  thread_unlock(&p->m);
-}
-
 /* threads for an image this large, as many as the machine has (at most
-   X_THREADS) */
+   X_THREADS): thread/pool.h's (kept between decodes), or the caller's
+   runner */
 static void
 pool_start(jpx_t *j) {
   uint64_t each = (uint64_t)(j->x1 - j->x0) * (j->y1 - j->y0) / X_POOL_MIN;
-  uint32_t cpus, n, i;
+  uint32_t cpus, n;
 
-  /* the caller's runner: its workers, no thread of ours */
   if (j->runner.run) {
-    if (j->runner.workers >= 2u && j->runner.workers <= X_THREADS && each) j->workers = j->runner.workers - 1u;
+    if (j->runner.workers >= 2u && j->runner.workers <= X_THREADS && each && (j->pool = im_pool_wrap(&j->runner))) {
+      j->workers = j->runner.workers - 1u;
+    }
     return;
   }
 
@@ -3456,46 +3403,17 @@ pool_start(jpx_t *j) {
   n    = cpus > X_THREADS ? X_THREADS - 1u : cpus > 1u ? cpus - 1u : 0u;
   if (j->threads && n > j->threads - 1u) n = j->threads - 1u;
   if (n > each - 1u) n = (uint32_t)(each - 1u);
-  if (!n) return;
-  thread_mutex_init(&j->pool.m);
-  thread_cond_init(&j->pool.go);
-  thread_cond_init(&j->pool.idle);
-  for (i = 0; i < n; i++) {
-    j->worker[i].j  = j;
-    j->worker[i].id = i + 1u;
-    if (!(j->worker[i].thread = thread_new(pool_main, &j->worker[i]))) break;
-  }
-  j->workers = i;
-  if (!i) {
-    thread_cond_destroy(&j->pool.idle);
-    thread_cond_destroy(&j->pool.go);
-    thread_mutex_destroy(&j->pool.m);
-  }
+  if (n && (j->pool = im_pool_new(n + 1u))) j->workers = im_pool_size(j->pool) - 1u;
 }
 
 static void
 pool_stop(jpx_t *j) {
-  uint32_t i;
-
-  if (!j->workers || j->runner.run) {
-    j->workers = 0;
-    return;
-  }
-  thread_lock(&j->pool.m);
-  j->pool.quit = true;
-  thread_cond_broadcast(&j->pool.go);
-  thread_unlock(&j->pool.m);
-  for (i = 0; i < j->workers; i++) {
-    thread_join(j->worker[i].thread);
-    thread_release(j->worker[i].thread);
-  }
-  thread_cond_destroy(&j->pool.idle);
-  thread_cond_destroy(&j->pool.go);
-  thread_mutex_destroy(&j->pool.m);
+  im_pool_free(j->pool);
+  j->pool    = NULL;
   j->workers = 0;
 }
 
-/* a job on the caller's runner: its worker's scratch */
+/* a job on the pool: its worker's scratch */
 typedef struct xrun {
   jpx_t  *j;
   xjob_fn fn;
@@ -3512,40 +3430,18 @@ run_item(void *arg, uint32_t worker, uint32_t item) {
 /* `fn` for items [0, n): on the workers too where there are */
 static bool
 pool_run(jpx_t *j, xjob_fn fn, void *ctx, uint32_t n) {
-  xpool_t *p  = &j->pool;
   bool     ok = true;
   uint32_t i;
+  xrun_t   r;
 
   if (!j->workers || n < 2u) {
     for (i = 0; i < n; i++) ok = fn(j, &j->scratch[0], ctx, i) && ok;
     return ok;
   }
-  if (j->runner.run) {
-    xrun_t r;
-
-    r.j   = j;
-    r.fn  = fn;
-    r.ctx = ctx;
-    return j->runner.run(j->runner.ctx, run_item, &r, n);
-  }
-  thread_lock(&p->m);
-  /* a worker late for the last round may still hold its job: done with it
-     first, so the counter it reads is that round's */
-  while (p->busy) thread_cond_wait(&p->idle, &p->m);
-  p->fn     = fn;
-  p->ctx    = ctx;
-  p->items  = n;
-  p->failed = false;
-  X_RESET(&p->next);
-  p->round++;
-  thread_cond_broadcast(&p->go);
-  thread_unlock(&p->m);
-  while ((i = X_TAKE(&p->next)) < n) ok = fn(j, &j->scratch[0], ctx, i) && ok;
-  thread_lock(&p->m);
-  while (p->busy) thread_cond_wait(&p->idle, &p->m);
-  ok = ok && !p->failed;
-  thread_unlock(&p->m);
-  return ok;
+  r.j   = j;
+  r.fn  = fn;
+  r.ctx = ctx;
+  return im_pool_run(j->pool, run_item, &r, n);
 }
 
 typedef struct xjob {
