@@ -19,8 +19,9 @@
  * its first page) or a stream's embedded segments (IM_OPTION_FORMAT),
  * with the segments of its globals (IM_OPTION_JBIG2_GLOBALS) first. The
  * segments read: page information, end of stripe, page and file; generic
- * regions (arithmetic: the four templates, their adaptive pixels, typical
- * prediction; MMR through ccitt.c), refinement regions, symbol
+ * regions (arithmetic: the four templates and Amendment 2's extended one,
+ * their adaptive pixels, typical prediction; MMR through ccitt.c),
+ * refinement regions, symbol
  * dictionaries and text regions (arithmetic or Huffman, refinement and
  * aggregation, contexts kept from one dictionary for the next), pattern
  * dictionaries and halftone regions, custom Huffman tables.
@@ -772,12 +773,20 @@ typedef struct gen {
   uint8_t      templ;
   bool         tpgdon;
   bool         mmr;
-  int8_t       at[8]; /* (x, y) pairs */
-  const jbm_t *skip;  /* pixels not decoded, 0 (halftones) */
+  bool         ext;    /* template 0's extended one: twelve adaptive pixels
+                          (EXTTEMPLATE, T.88 Amd. 2) */
+  int8_t       at[24]; /* (x, y) pairs */
+  const jbm_t *skip;   /* pixels not decoded, 0 (halftones) */
 } gen_t;
 
 static const int8_t at_nominal[4][8] = {
   { 3, -1, -3, -1, 2, -2, -2, -2 }, { 3, -1 }, { 2, -1 }, { 2, -1 }
+};
+
+/* the extended template's (Table 5): its sixteen places are template 0's,
+   four fixed, (x-1, y), (x+1 … x-1, y-1), and twelve adaptive */
+static const int8_t at_nominal_ext[24] = {
+  -2, 0, 0, -2, -2, -1, -1, -2, 1, -2, 2, -1, -3, 0, -4, 0, 2, -2, 3, -1, -2, -2, -3, -1
 };
 static const uint32_t sltp_cx[4] = { 0x9B25u, 0x0795u, 0x00E5u, 0x0195u };
 
@@ -912,16 +921,21 @@ GEN_FAST(gen_t3, 0, (l1 >> 1) & 0x3F0u, 0x1F7u, 8u, 0x10u, 31u, 0u)
 /* any adaptive pixels, a skip mask: the nominal context's rows as above
    with the adaptive pixels' places (their nominal ones) taken from where
    they are; each pixel stored as it's decoded (an adaptive pixel may be
-   on the row's left) */
+   on the row's left). The extended template's pixels numbered as template
+   0's places they nominally take (Amd. 2 gives no order of its own: so
+   its nominal context is template 0's, and the typical prediction's
+   context the same pattern) */
 static void
 gen_any(mq_t *m, uint8_t *cx, jbm_t *b, const gen_t *g) {
   static const uint32_t at_bit[4][4] = { { 4, 10, 11, 15 }, { 3 }, { 2 }, { 4 } };
+  static const uint32_t at_ext[12]   = { 1, 13, 9, 14, 12, 5, 2, 3, 11, 4, 15, 10 };
   static const uint32_t nat[4]       = { 4, 1, 1, 1 };
-  const uint32_t        w = b->w, stride = b->stride, k3 = g->templ & 3u;
+  const uint32_t        w = b->w, stride = b->stride, k3 = g->templ & 3u, na = g->ext ? 12u : nat[k3];
+  const uint32_t       *ab = g->ext ? at_ext : at_bit[k3];
   const jbm_t          *skip = g->skip && g->skip->w == w && g->skip->h >= g->rows ? g->skip : NULL;
   uint32_t              y, ltp = 0u, atmask = 0u, i;
 
-  for (i = 0; i < nat[k3]; i++) atmask |= 1u << at_bit[k3][i];
+  for (i = 0; i < na; i++) atmask |= 1u << ab[i];
   for (y = 0; y < g->rows && !mq_spent(m); y++) {
     uint8_t       *row = b->p + (size_t)y * stride;
     const uint8_t *r1 = y >= 1u ? row - stride : NULL, *r2 = y >= 2u ? row - 2u * (size_t)stride : NULL;
@@ -955,7 +969,7 @@ gen_any(mq_t *m, uint8_t *cx, jbm_t *b, const gen_t *g) {
         int64_t  x = (int64_t)8u * k + xm;
         uint32_t c = ctx & ~atmask, bit = 0u;
 
-        for (i = 0; i < nat[k3]; i++) c |= bm_px(b, x + g->at[2u * i], (int64_t)y + g->at[2u * i + 1u]) << at_bit[k3][i];
+        for (i = 0; i < na; i++) c |= bm_px(b, x + g->at[2u * i], (int64_t)y + g->at[2u * i + 1u]) << ab[i];
         if (!skip || !bm_px(skip, x, y)) bit = mq_bit(m, &cx[c]);
         row[k] |= (uint8_t)(bit << (7u - xm));
         switch (k3) {
@@ -982,7 +996,7 @@ gen_decode(jb_t *j, const gen_t *g, mq_t *m, uint8_t *cx, const uint8_t *data, s
     if (ccitt_mmr(data, len, g->w, g->h, b->p, b->stride, used) < 0) return NULL;
     return b;
   }
-  if (!g->skip && !memcmp(g->at, at_nominal[k3], n)) {
+  if (!g->skip && (g->ext ? !memcmp(g->at, at_nominal_ext, 24u) : !memcmp(g->at, at_nominal[k3], n))) {
     switch (k3) {
       case 0:  gen_t0(m, cx, b, g->rows, g->tpgdon, sltp_cx[0]); break;
       case 1:  gen_t1(m, cx, b, g->rows, g->tpgdon, sltp_cx[1]); break;
@@ -1900,9 +1914,9 @@ generic_region(jb_t *j, seg_t *s, region_info_t *ri, bool immediate) {
   g.mmr    = flags & 1u;
   g.templ  = (flags >> 1) & 3u;
   g.tpgdon = (flags >> 3) & 1u;
-  if ((flags >> 4) & 1u) return NULL; /* the extended template */
+  g.ext    = (flags >> 4) & 1u && !g.mmr && g.templ == 0u; /* else unused (Table 2) */
   if (!g.mmr) {
-    for (i = 0; i < (g.templ == 0u ? 8u : 2u); i++) g.at[i] = (int8_t)rd_s8(&r);
+    for (i = 0; i < (g.ext ? 24u : g.templ == 0u ? 8u : 2u); i++) g.at[i] = (int8_t)rd_s8(&r);
   }
   if (r.bad) return NULL;
   g.w = ri->w;

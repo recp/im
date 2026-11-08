@@ -76,7 +76,8 @@ TODO
   - [x] a bit a pixel (1 white unless `black_is_1`) or a byte a pixel (`IM_OPTION_EIGHT_BITS`); a region
 - [x] JBIG2: a file (its first page), or a stream's embedded segments (`IM_OPTION_FORMAT`
       `IM_FILEFORMATTYPE_JBIG2`, the globals' by `im_option_jbig2_globals`)
-  - [x] generic regions: the four templates, adaptive pixels, typical prediction, MMR, unknown length
+  - [x] generic regions: the four templates and the extended one (12 adaptive pixels), adaptive pixels,
+        typical prediction, MMR, unknown length
   - [x] symbol dictionaries and text regions: arithmetic and Huffman (custom tables too), refinement and
         aggregation, contexts kept from one dictionary for the next
   - [x] pattern dictionaries and halftones; refinement of the page or of an intermediate region; striped pages
