@@ -297,12 +297,12 @@ IM_HIDE bool jpg_loss_start(jpg_t *j, jloss_t *L);
 IM_HIDE void jpg_loss_end(jloss_t *L);
 /* a row of component ci's differences predicted, to its plane */
 IM_HIDE void jpg_undiff(jpg_t *j, jloss_t *L, uint32_t ci, const int32_t *d);
-IM_HIDE bool jpg_scan_lossless(jpg_t *j);
+IM_HIDE bool jpg_scan_lossless(jpg_t *j, im_pool_t *pool);
 
 /* arith.c */
 IM_HIDE void jpg_flow_row(jpg_t *j, uint32_t row);
 IM_HIDE bool jpg_scan_arith(jpg_t *j);
-IM_HIDE bool jpg_scan_arith_lossless(jpg_t *j);
+IM_HIDE bool jpg_scan_arith_lossless(jpg_t *j, im_pool_t *pool);
 
 /* idct.c */
 

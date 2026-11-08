@@ -954,7 +954,7 @@ jpg_free(jpg_t *j) {
 /* the scan whose data is unstuffed in `j->sd`, as its process codes it */
 static bool
 scan(jpg_t *j) {
-  if (j->process == J_LOSSLESS) return j->arith ? jpg_scan_arith_lossless(j) : jpg_scan_lossless(j);
+  if (j->process == J_LOSSLESS) return j->arith ? jpg_scan_arith_lossless(j, j->pool) : jpg_scan_lossless(j, j->pool);
   return j->arith ? jpg_scan_arith(j) : jpg_scan_huff(j, j->pool);
 }
 

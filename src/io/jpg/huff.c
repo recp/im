@@ -1635,8 +1635,8 @@ loss_diff(jbits_t *b, const jhuff_t *h) {
 }
 
 /* libjpeg's jdlhuff.c: where data ran out the rows after are zeros */
-IM_HIDE bool
-jpg_scan_lossless(jpg_t *j) {
+static bool
+loss_seq(jpg_t *j) {
   jctx_t   x;
   jloss_t  L;
   uint32_t i, nrows, per_row, rows_to_go = 0u, cur = 0u, next_rst = 0u, irow, nirows, blocks = 0u;
@@ -2324,6 +2324,507 @@ scan_spec(jpg_t *j, im_pool_t *pool, uint32_t w, uint32_t h, size_t margin, bool
     im_big_free(ch[i].coef, ch[i].coefcap * sizeof(int16_t), j->big);
   }
   return ok;
+}
+
+/* -- lossless on threads ------------------------------------------------------- */
+
+/* A lossless row is predicted from the row above, its differences from
+   nothing but the bits: those are what threads decode, the predictors run
+   in order (an eighth of a decode). Restart intervals each start over (a
+   first row's prediction): one whole on a thread. One segment: as
+   scan_spec, speculatively (Huffman codes fall into step), the
+   differences kept (16 bits each: the predictors add modulo 2^16), then
+   each component's rows predicted on a thread of their own */
+
+/* where threads can take the scan: one component, or several none
+   subsampled (a sample each an MCU); its rows and MCUs a row */
+static bool
+loss_shape(const jpg_t *j, uint32_t *per_row, uint32_t *rows, uint32_t *nslot) {
+  uint32_t i;
+
+  if (j->diff || j->hier) return false;
+  if (j->nscomp == 1u) {
+    *per_row = j->comp[j->scomp[0]].cw;
+    *rows    = j->comp[j->scomp[0]].ch;
+    *nslot   = 1u;
+    return true;
+  }
+  for (i = 0; i < j->nscomp; i++) {
+    if (j->comp[j->scomp[i]].h != 1u || j->comp[j->scomp[i]].v != 1u) return false;
+  }
+  *per_row = j->mcux;
+  *rows    = j->mcuy;
+  *nslot   = j->nscomp;
+  return true;
+}
+
+/* a row's differences, MCU by MCU, into the rows of `dp` */
+IM_INLINE void
+loss_row(jbits_t *bs, const jhuff_t *const *ht, int32_t *const *dp, uint32_t n, uint32_t per_row) {
+  uint32_t mx, i;
+
+  if (n == 1u) {
+    for (mx = 0; mx < per_row; mx++) dp[0][mx] = loss_diff(bs, ht[0]);
+  } else if (n == 3u) {
+    for (mx = 0; mx < per_row; mx++) {
+      dp[0][mx] = loss_diff(bs, ht[0]);
+      dp[1][mx] = loss_diff(bs, ht[1]);
+      dp[2][mx] = loss_diff(bs, ht[2]);
+    }
+  } else {
+    for (mx = 0; mx < per_row; mx++) {
+      for (i = 0; i < n; i++) dp[i][mx] = loss_diff(bs, ht[i]);
+    }
+  }
+}
+
+typedef struct jlpar {
+  jpg_t   *j;
+  jctx_t  *ctx;
+  uint32_t per_row, rows, nslot, rpi, ints, step;
+} jlpar_t;
+
+/* restart intervals [item × step, …): each as loss_seq has it after its
+   restart (its first row predicted as a first one, data run out: zeros) */
+static bool
+loss_par_item(void *arg, uint32_t worker, uint32_t item) {
+  jlpar_t       *pa = arg;
+  jpg_t         *j  = pa->j;
+  jctx_t        *x  = &pa->ctx[worker];
+  jloss_t        L;
+  const jhuff_t *ht[J_COMPS];
+  int32_t       *dp[J_COMPS];
+  uint32_t       k = item * pa->step, end = k + pa->step, i, r;
+  bool           ok = false;
+
+  if (!jpg_loss_start(j, &L)) goto done;
+  for (i = 0; i < pa->nslot; i++) {
+    ht[i] = j->dc[j->comp[j->scomp[i]].td];
+    dp[i] = L.diff[j->scomp[i]];
+  }
+  for (; k < end && k < pa->ints; k++) {
+    uint32_t r1 = (k + 1u) * pa->rpi < pa->rows ? (k + 1u) * pa->rpi : pa->rows;
+
+    rd_start(x, k);
+    x->lacking = false;
+    for (i = 0; i < J_COMPS; i++) {
+      L.first[i] = true;
+      L.y[i]     = k * pa->rpi;
+    }
+    for (r = k * pa->rpi; r < r1; r++) {
+      if (x->lacking) {
+        for (i = 0; i < pa->nslot; i++) memset(dp[i], 0, (size_t)pa->per_row * sizeof(int32_t));
+        for (i = 0; i < J_COMPS; i++) L.first[i] = true;
+      } else {
+        jbits_t bs;
+
+        if (!x->r.tail && x->r.b.p >= x->r.lim) rd_tail(x);
+        bs = x->r.b;
+        loss_row(&bs, ht, dp, pa->nslot, pa->per_row);
+        x->r.b = bs;
+        if (rd_past(&x->r)) x->lacking = true;
+      }
+      for (i = 0; i < pa->nslot; i++) jpg_undiff(j, &L, j->scomp[i], dp[i]);
+    }
+  }
+  ok = true;
+
+done:
+  jpg_loss_end(&L);
+  return ok;
+}
+
+/* a sample boundary: where, samples since the start, its place in the MCU */
+typedef struct jlrec {
+  uint64_t bit;
+  uint32_t n, slot;
+} jlrec_t;
+
+typedef struct jlchunk {
+  size_t   start, end;   /* bytes */
+  uint64_t window;       /* boundaries kept below this bit */
+  jlrec_t *rec;
+  uint32_t nrec, cap;
+  jlrec_t  cross;        /* the first boundary at or past `end` */
+  bool     crossed;
+  int16_t *d;            /* (1): its differences from its first byte */
+  size_t   nd, dcap;
+  size_t   within;       /* the last chunk's: those read inside the data */
+  int16_t *head;         /* (2): the true ones from its true start on to */
+  size_t   nhead, hcap;
+  uint32_t from;         /* … its own `from`th, where the paths met */
+  bool     met;
+} jlchunk_t;
+
+typedef struct jlspec {
+  jpg_t         *j;
+  jctx_t        *ctx;
+  jlchunk_t     *ch;
+  const jhuff_t *ht[J_COMPS];
+  uint32_t       n, nslot, per_row, rows, total, run;
+  uint64_t       bits;   /* the segment's */
+  size_t         room;   /* int16s a chunk's may take */
+  bool           alike;  /* every slot's table the same: a sample decodes
+                            the same in any, in step wherever the bits are */
+} jlspec_t;
+
+/* room for k more */
+static bool
+loss_room(const jlspec_t *sp, int16_t **d, size_t nd, size_t *cap, size_t k) {
+  if (nd + k > *cap) {
+    size_t   c    = *cap ? *cap * 2u : 4096u;
+    int16_t *next;
+
+    while (c < nd + k) c *= 2u;
+    next = c <= sp->room ? im_big_grow(*d, *cap * sizeof(int16_t), c * sizeof(int16_t), sp->j->big) : NULL;
+    if (!next) return false;
+    *d   = next;
+    *cap = c;
+  }
+  return true;
+}
+
+static bool
+loss_push(const jlspec_t *sp, int16_t **d, size_t *nd, size_t *cap, int32_t v) {
+  if (*nd == *cap) {
+    size_t   c    = *cap ? *cap * 2u : 4096u;
+    int16_t *next = c <= sp->room ? im_big_grow(*d, *cap * sizeof(int16_t), c * sizeof(int16_t), sp->j->big) : NULL;
+
+    if (!next) return false;
+    *d   = next;
+    *cap = c;
+  }
+  (*d)[(*nd)++] = (int16_t)(uint16_t)(uint32_t)v;
+  return true;
+}
+
+IM_INLINE uint64_t
+bs_bit(const jrd_t *r, const jbits_t *bs) {
+  return ((uint64_t)(bs->p - r->org) + r->pre) * 8u - bs->n;
+}
+
+/* (1): chunk `item` from its first byte (the first chunk's the true
+   start): boundaries in its window kept, its differences, the first
+   boundary past its end (the last chunk: to the data's end) */
+static bool
+loss_pass1(void *arg, uint32_t worker, uint32_t item) {
+  jlspec_t  *sp = arg;
+  jctx_t    *x  = &sp->ctx[worker];
+  jlchunk_t *ch = &sp->ch[item];
+  jlrec_t    st;
+  jbits_t    bs;
+  uint64_t   end = (uint64_t)ch->end * 8u;
+  bool       last = item + 1u == sp->n;
+
+  memset(&st, 0, sizeof(st));
+  rd_seek(x, (uint64_t)ch->start * 8u);
+  bs = x->r.b;
+  for (;;) {
+    if (!x->r.tail && bs.p >= x->r.lim) {
+      x->r.b = bs;
+      rd_tail(x);
+      bs = x->r.b;
+    }
+    st.bit = bs_bit(&x->r, &bs);
+    if (item && st.bit < ch->window) {
+      if (ch->nrec == ch->cap) {
+        uint32_t cap  = ch->cap ? ch->cap * 2u : 1024u;
+        jlrec_t *next = realloc(ch->rec, cap * sizeof(*next));
+
+        if (!next) return false;
+        ch->rec = next;
+        ch->cap = cap;
+      }
+      ch->rec[ch->nrec++] = st;
+    }
+    if (last ? st.bit > sp->bits : st.bit >= end) {
+      ch->cross   = st;
+      ch->crossed = !last;
+      return true;
+    }
+    if (last) ch->within = st.n;
+    if (st.n >= sp->total) return true;
+    {
+      /* past the window and far from the end (32 bits a sample at most):
+         a run with no boundary to look at */
+      uint64_t to = last ? sp->bits : end;
+      uint32_t k  = 1u, q;
+      int16_t *o;
+
+      if (!(item && st.bit < ch->window) && to - st.bit > 32u * (uint64_t)sp->run) k = sp->run;
+      if (k > sp->total - st.n) k = sp->total - st.n;
+      if (!loss_room(sp, &ch->d, ch->nd, &ch->dcap, k)) return false;
+      o = ch->d + ch->nd;
+      for (q = 0; q < k; q++) {
+        o[q]    = (int16_t)(uint16_t)(uint32_t)loss_diff(&bs, sp->ht[st.slot]);
+        st.slot = st.slot + 1u == sp->nslot ? 0u : st.slot + 1u;
+      }
+      ch->nd += k;
+      st.n   += k;
+    }
+  }
+}
+
+/* (2)'s walk: the true path on from `t`, its differences to the chunk's
+   head, to a boundary in `rec` (its index; UINT32_MAX none), `stop` bits
+   or `nmax` samples; false past the data, or out of memory */
+static bool
+loss_walk(jlspec_t *sp, jctx_t *x, jlrec_t *t, jlchunk_t *ch, const jlrec_t *rec, uint32_t nrec, uint64_t stop, uint32_t nmax,
+          uint32_t *hit) {
+  jbits_t  bs;
+  uint32_t r = 0;
+
+  *hit = UINT32_MAX;
+  rd_seek(x, t->bit);
+  bs = x->r.b;
+  for (;;) {
+    if (!x->r.tail && bs.p >= x->r.lim) {
+      x->r.b = bs;
+      rd_tail(x);
+      bs = x->r.b;
+    }
+    t->bit = bs_bit(&x->r, &bs);
+    if (t->bit > sp->bits) return false;
+    while (r < nrec && rec[r].bit < t->bit) r++;
+    if (r < nrec && rec[r].bit == t->bit && (sp->alike || rec[r].slot == t->slot)) {
+      *hit = r;
+      return true;
+    }
+    if (t->bit >= stop || t->n >= nmax || (nrec && r >= nrec && stop == UINT64_MAX)) return true;
+    if (!loss_push(sp, &ch->head, &ch->nhead, &ch->hcap, loss_diff(&bs, sp->ht[t->slot]))) return false;
+    t->n++;
+    t->slot = t->slot + 1u == sp->nslot ? 0u : t->slot + 1u;
+  }
+}
+
+/* (2): each chunk's true start in order, the differences between it and
+   where the paths met; false: in order on one thread */
+static bool
+loss_pass2(jlspec_t *sp, jctx_t *x) {
+  jlrec_t  t;
+  uint32_t i, hit;
+
+  if (!sp->ch[0].crossed || sp->ch[0].nd != sp->ch[0].cross.n) return false;
+  sp->ch[0].met  = true;
+  sp->ch[0].from = 0u;
+  t              = sp->ch[0].cross;
+  for (i = 1; i < sp->n; i++) {
+    jlchunk_t *ch   = &sp->ch[i];
+    bool       last = i + 1u == sp->n;
+
+    /* on to a boundary its decoder passed */
+    if (!loss_walk(sp, x, &t, ch, ch->rec, ch->nrec, UINT64_MAX, sp->total, &hit)) return false;
+    if (hit != UINT32_MAX) {
+      const jlrec_t *a = &ch->rec[hit];
+      uint32_t       need;
+
+      ch->met  = true;
+      ch->from = a->n;
+      if (last) {
+        need = sp->total - t.n;
+        if ((size_t)a->n + need > ch->within || (size_t)a->n + need > ch->nd) return false;
+        t.n = sp->total;
+      } else {
+        if (!ch->crossed || ch->nd != ch->cross.n) return false;
+        /* its slots its own count's: the true one's from where they met */
+        t.slot = (uint32_t)(((uint64_t)t.slot + (ch->cross.n - a->n)) % sp->nslot);
+        t.n   += ch->cross.n - a->n;
+        t.bit  = ch->cross.bit;
+      }
+      continue;
+    }
+    /* never in step: through it in order */
+    ch->met = false;
+    if (!loss_walk(sp, x, &t, ch, NULL, 0u, last ? UINT64_MAX : (uint64_t)ch->end * 8u, sp->total, &hit)) return false;
+  }
+  return t.n == sp->total;
+}
+
+/* the differences in order (pieces: chunk by chunk, its head, then its
+   own from where the paths met) */
+typedef struct jlund {
+  jlspec_t      *sp;
+  jloss_t       *L;
+  const int16_t *pc[2u * IM_POOL_MAX];
+  size_t         pn[2u * IM_POOL_MAX];
+  uint32_t       npc;
+} jlund_t;
+
+static bool
+loss_pieces(jlund_t *u) {
+  const jlspec_t *sp = u->sp;
+  uint64_t        sum = 0u;
+  uint32_t        i;
+
+  u->npc = 0u;
+  for (i = 0; i < sp->n; i++) {
+    const jlchunk_t *ch = &sp->ch[i];
+
+    if (ch->nhead) {
+      u->pc[u->npc]   = ch->head;
+      u->pn[u->npc++] = ch->nhead;
+      sum            += ch->nhead;
+    }
+    if (ch->met) {
+      size_t n = i + 1u < sp->n ? (size_t)ch->cross.n - ch->from : (size_t)(sp->total - sum);
+
+      if (sum + n > sp->total || ch->from + n > ch->nd) return false;
+      u->pc[u->npc]   = ch->d + ch->from;
+      u->pn[u->npc++] = n;
+      sum            += n;
+    }
+  }
+  return sum == sp->total;
+}
+
+/* (3): component `item`'s rows, predicted in order: its samples every
+   nslot-th of the pieces' */
+static bool
+loss_pass3(void *arg, uint32_t worker, uint32_t item) {
+  jlund_t        *u  = arg;
+  const jlspec_t *sp = u->sp;
+  jpg_t          *j  = sp->j;
+  uint32_t        ci = j->scomp[item], mx = 0u, ns = sp->nslot, k;
+  int32_t        *d  = u->L->diff[ci];
+  uint64_t        g  = 0u; /* the stream's samples before the piece */
+
+  (void)worker;
+  for (k = 0; k < u->npc; k++) {
+    const int16_t *p = u->pc[k];
+    size_t         n = u->pn[k], q = (size_t)((item + ns - g % ns) % ns);
+
+    for (; q < n; q += ns) {
+      d[mx++] = p[q];
+      if (mx == sp->per_row) {
+        jpg_undiff(j, u->L, ci, d);
+        mx = 0u;
+      }
+    }
+    g += n;
+  }
+  return true;
+}
+
+/* the lossless scan's single Huffman segment on `pool`, speculatively;
+   false with nothing written: in order */
+static bool
+loss_spec(jpg_t *j, im_pool_t *pool, uint32_t per_row, uint32_t rows, uint32_t nslot, size_t margin, bool *done) {
+  jlspec_t  sp;
+  jctx_t    ctx[IM_POOL_MAX];
+  jlchunk_t ch[IM_POOL_MAX];
+  jloss_t   L;
+  jlund_t   u;
+  size_t    len = j->sd.seg[0].end - j->sd.seg[0].start, part;
+  uint32_t  nw = im_pool_size(pool), i;
+  bool      ok = false;
+
+  *done = false;
+  memset(&sp, 0, sizeof(sp));
+  memset(ch, 0, sizeof(ch));
+  memset(&L, 0, sizeof(L));
+  sp.j       = j;
+  sp.nslot   = nslot;
+  sp.per_row = per_row;
+  sp.rows    = rows;
+  sp.total   = per_row * rows * nslot;
+  sp.bits    = (uint64_t)len * 8u;
+  sp.n       = nw;
+  sp.alike = true;
+  for (i = 0; i < nslot; i++) {
+    sp.ht[i]  = j->dc[j->comp[j->scomp[i]].td];
+    sp.alike = sp.alike && sp.ht[i] == sp.ht[0];
+  }
+  /* a run's samples: what a quarter of the margin holds at 4 bytes each */
+  sp.run = (uint32_t)(margin / 16u < 256u ? margin / 16u : 256u);
+  sp.run = sp.run ? sp.run : 1u;
+  if (len / sp.n < (64u << 10) || len / sp.n < margin * 4u) sp.n = (uint32_t)(len / ((64u << 10) > margin * 4u ? (64u << 10) : margin * 4u));
+  if (sp.n < 2u) return false;
+  part = len / sp.n;
+  /* the differences, 2 bytes a sample: under a memory limit what the
+     frame leaves of it (too little: one thread) */
+  sp.room = SIZE_MAX;
+  if (j->mem_limit) {
+    uint64_t used = jpg_frame_bytes(j), left = used < j->mem_limit ? j->mem_limit - used : 0u;
+
+    if (left < (uint64_t)sp.total * 3u) return false;
+    sp.room = (size_t)(left / 2u / sp.n);
+  }
+  for (i = 0; i < sp.n; i++) {
+    ch[i].start  = part * i;
+    ch[i].end    = i + 1u < sp.n ? part * (i + 1u) : len;
+    ch[i].window = ((uint64_t)ch[i].start + (part / 2u < (16u << 10) ? part / 2u : (16u << 10))) * 8u;
+  }
+  for (i = 0; i < nw; i++) {
+    if (!ctx_init(&ctx[i], j, margin)) {
+      while (i--) free(ctx[i].tail);
+      return false;
+    }
+  }
+  sp.ctx = ctx;
+  sp.ch  = ch;
+  if (im_pool_run(pool, loss_pass1, &sp, sp.n) && loss_pass2(&sp, &ctx[0])) {
+    *done = true;
+    u.sp = &sp;
+    u.L  = &L;
+    if (loss_pieces(&u) && jpg_loss_start(j, &L)) ok = im_pool_run(pool, loss_pass3, &u, nslot);
+    else *done = false;
+    jpg_loss_end(&L);
+  }
+  for (i = 0; i < nw; i++) free(ctx[i].tail);
+  for (i = 0; i < sp.n; i++) {
+    free(ch[i].rec);
+    im_big_free(ch[i].d, ch[i].dcap * sizeof(int16_t), j->big);
+    im_big_free(ch[i].head, ch[i].hcap * sizeof(int16_t), j->big);
+  }
+  return ok;
+}
+
+/* a lossless Huffman scan: on threads where it can be, else in order */
+IM_HIDE bool
+jpg_scan_lossless(jpg_t *j, im_pool_t *pool) {
+  uint32_t per_row, rows, nslot, i;
+  size_t   margin;
+
+  if (pool && loss_shape(j, &per_row, &rows, &nslot)) {
+    margin = (size_t)nslot * per_row * 5u + 64u;
+    if (j->restart && !(j->restart % per_row) && rows > j->restart / per_row) {
+      jlpar_t  pa;
+      jctx_t   ctx[IM_POOL_MAX];
+      uint32_t nw = im_pool_size(pool), items, k;
+      bool     valid, ok;
+
+      pa.rpi  = j->restart / per_row;
+      pa.ints = (rows + pa.rpi - 1u) / pa.rpi;
+      valid   = j->sd.nseg >= pa.ints;
+      for (k = 0; valid && k + 1u < pa.ints; k++) valid = j->sd.seg[k].marker == 0xD0u + (k & 7u);
+      if (valid) {
+        for (i = 0; i < nw; i++) {
+          if (!ctx_init(&ctx[i], j, margin)) {
+            while (i--) free(ctx[i].tail);
+            return false;
+          }
+        }
+        pa.j       = j;
+        pa.ctx     = ctx;
+        pa.per_row = per_row;
+        pa.rows    = rows;
+        pa.nslot   = nslot;
+        items      = nw * 4u < pa.ints ? nw * 4u : pa.ints;
+        pa.step    = (pa.ints + items - 1u) / items;
+        items      = (pa.ints + pa.step - 1u) / pa.step;
+        ok         = im_pool_run(pool, loss_par_item, &pa, items);
+        for (i = 0; i < nw; i++) free(ctx[i].tail);
+        return ok;
+      }
+    }
+    if (!j->restart && j->sd.nseg >= 1u && j->sd.seg[0].end - j->sd.seg[0].start >= (256u << 10)) {
+      bool done;
+
+      if (loss_spec(j, pool, per_row, rows, nslot, margin, &done)) return true;
+      if (done) return false;
+    }
+  }
+  return loss_seq(j);
 }
 
 /* the scan whose data `j->sd` holds; `pool` its threads, if any */

@@ -613,13 +613,134 @@ ll_diff(jacs_t *e, uint8_t *stats, uint32_t ca, uint32_t cb, int32_t *out) {
   return true;
 }
 
+/* a row of a sample a component an MCU (one component, or none
+   subsampled): its differences into `row`, the classes above (`ab`) made
+   this row's */
+static void
+ll_row(jpg_t *j, jacs_t *s, jac_t *e, uint32_t n, uint32_t per_row, int32_t *const *row, uint8_t *const *ab, const uint32_t *ci) {
+  uint32_t mx, i, ca[J_COMPS], tb[J_COMPS], x;
+  uint8_t *stt[J_COMPS];
+
+  for (i = 0; i < n; i++) {
+    tb[i]  = j->comp[ci[i]].td;
+    stt[i] = e->ll_stats[tb[i]];
+    ca[i]  = 0u;
+  }
+  for (mx = 0; mx < per_row; mx++) {
+    for (i = 0; i < n; i++) {
+      int32_t d = 0;
+
+      if (!s->dead && !ll_diff(s, stt[i], ca[i], ab[i][mx], &d)) {
+        s->dead = true;
+        d       = 0;
+      }
+      row[i][mx] = d;
+      ca[i]      = ll_class(j, tb[i], d);
+    }
+  }
+  for (i = 0; i < n; i++) {
+    for (x = 0; x < j->comp[ci[i]].bw; x++) ab[i][x] = ll_class(j, tb[i], row[i][x]);
+  }
+}
+
+typedef struct jallp {
+  jpg_t   *j;
+  uint32_t per_row, rows, rpi, ints, step;
+} jallp_t;
+
+/* restart intervals [item × step, …), each from its restart as the scan
+   in order has it */
+static bool
+ll_item(void *arg, uint32_t worker, uint32_t item) {
+  jallp_t *pa = arg;
+  jpg_t   *j  = pa->j;
+  jac_t   *e;
+  jloss_t  L;
+  uint8_t *ab[J_COMPS] = { NULL };
+  int32_t *row[J_COMPS];
+  uint32_t ci[J_COMPS], k = item * pa->step, end = k + pa->step, i, r, n = j->nscomp;
+  bool     ok = false;
+
+  (void)worker;
+  memset(&L, 0, sizeof(L));
+  if (!(e = calloc(1, sizeof(*e)))) return false;
+  e->j = j;
+  if (!jpg_loss_start(j, &L)) goto done;
+  for (i = 0; i < n; i++) {
+    ci[i]  = j->scomp[i];
+    row[i] = L.diff[ci[i]];
+    if (!(ab[i] = malloc(j->comp[ci[i]].bw))) goto done;
+  }
+  for (; k < end && k < pa->ints; k++) {
+    uint32_t r1 = (k + 1u) * pa->rpi < pa->rows ? (k + 1u) * pa->rpi : pa->rows;
+
+    memset(e->ll_stats, 0, sizeof(e->ll_stats));
+    seg_at(e, k);
+    for (i = 0; i < J_COMPS; i++) {
+      L.first[i] = true;
+      L.y[i]     = k * pa->rpi;
+    }
+    for (i = 0; i < n; i++) memset(ab[i], 0, j->comp[ci[i]].bw);
+    for (r = k * pa->rpi; r < r1; r++) {
+      jacs_t s = e->s;
+
+      ll_row(j, &s, e, n, pa->per_row, row, ab, ci);
+      e->s = s;
+      for (i = 0; i < n; i++) jpg_undiff(j, &L, ci[i], row[i]);
+    }
+  }
+  ok = true;
+
+done:
+  for (i = 0; i < J_COMPS; i++) free(ab[i]);
+  jpg_loss_end(&L);
+  free(e);
+  return ok;
+}
+
+static bool ll_seq(jpg_t *j);
+
+/* on threads where its restart intervals are each one's segment, the RSTs
+   in order, and a sample a component an MCU; else in order */
+IM_HIDE bool
+jpg_scan_arith_lossless(jpg_t *j, im_pool_t *pool) {
+  uint32_t per_row, rows, i;
+  bool     single = j->nscomp == 1u, full = true;
+
+  for (i = 0; i < j->nscomp; i++) full = full && j->comp[j->scomp[i]].h == 1u && j->comp[j->scomp[i]].v == 1u;
+  per_row = single ? j->comp[j->scomp[0]].cw : j->mcux;
+  rows    = single ? j->comp[j->scomp[0]].ch : j->mcuy;
+  if (pool && (single || full) && !j->diff && !j->hier && j->restart && !(j->restart % per_row) && rows > j->restart / per_row) {
+    jallp_t  pa;
+    uint32_t nw = im_pool_size(pool), items, k;
+    bool     valid;
+
+    pa.rpi  = j->restart / per_row;
+    pa.ints = (rows + pa.rpi - 1u) / pa.rpi;
+    valid   = j->sd.nseg >= pa.ints;
+    for (k = 0; valid && k + 1u < pa.ints; k++) valid = j->sd.seg[k].marker == 0xD0u + (k & 7u);
+    if (valid) {
+      pa.j       = j;
+      pa.per_row = per_row;
+      pa.rows    = rows;
+      items      = nw * 4u < pa.ints ? nw * 4u : pa.ints;
+      pa.step    = (pa.ints + items - 1u) / items;
+      items      = (pa.ints + pa.step - 1u) / pa.step;
+      if (!im_pool_run(pool, ll_item, &pa, items)) return false;
+      j->last_good = (single ? (rows + j->comp[j->scomp[0]].v - 1u) / j->comp[j->scomp[0]].v : rows) - 1u;
+      return true;
+    }
+  }
+  return ll_seq(j);
+}
+
 /* Row by row as the Huffman one's (jpg_scan_lossless): each difference
    conditioned on those coded to its left and above in its component, the
    left zero at a row's start, the above zero on a scan's or a restart's
    first row; the statistics reset with the coder. Past the data zeros
    are read; a magnitude past 15 bits (damage) zeros to the next restart */
-IM_HIDE bool
-jpg_scan_arith_lossless(jpg_t *j) {
+static bool
+ll_seq(jpg_t *j) {
   jac_t   *e;
   jloss_t  L;
   uint8_t *above[J_COMPS] = { NULL };
