@@ -49,9 +49,14 @@
 #endif
 
 /* a sequential scan's blocks from which its AC tables get two-symbol
-   look-ups (a test build can lower it) */
+   look-ups, and its data's bytes a block (their making, ~40K cycles, pays
+   where blocks hold many symbols: 3 bytes a block and more; at 1.5 and
+   less it doesn't); a test build can lower them */
 #ifndef J_PAIR_MIN
 #  define J_PAIR_MIN 4096u
+#endif
+#ifndef J_PAIR_BYTES
+#  define J_PAIR_BYTES 2u
 #endif
 
 /* a cold path kept out of its caller (whose fast path then saves no

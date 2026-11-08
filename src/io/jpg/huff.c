@@ -2871,7 +2871,8 @@ jpg_scan_huff(jpg_t *j, im_pool_t *pool) {
       d->pair_ac = NULL;
     }
   }
-  if (j->process == J_SEQUENTIAL && (uint64_t)total * blocks >= J_PAIR_MIN) {
+  if (j->process == J_SEQUENTIAL && (uint64_t)total * blocks >= J_PAIR_MIN && j->sd.nseg
+      && (uint64_t)(j->sd.seg[j->sd.nseg - 1u].end - j->sd.seg[0].start) >= (uint64_t)J_PAIR_BYTES * total * blocks) {
     for (i = 0; i < j->nscomp; i++) {
       jhuff_t *a = j->ac[j->comp[j->scomp[i]].ta & 3u];
 
