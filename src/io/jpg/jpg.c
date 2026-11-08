@@ -1393,7 +1393,10 @@ decode_stream(jpg_t *j, ImImage *im, ImByteOrder order, uint8_t **padp) {
     uint32_t       m = marker_at(&p, end), len;
     const uint8_t *s;
 
-    if (m == 0xD9u) break;
+    if (m == 0xD9u) {
+      j->used = (size_t)(p - j->data); /* past the EOI (or the data's end) */
+      break;
+    }
     if ((m >= 0xD0u && m <= 0xD7u) || m == 0x01u) continue; /* parameterless */
     {
       size_t have = (size_t)(end - p);
@@ -1665,6 +1668,7 @@ jpg_decode_mem(const uint8_t *data, size_t len, ImImage *im, const jopts_t *o) {
   j->mem_limit        = o->mem_limit;
   ok                = decode(j, im, o->order);
   if (o->over) *o->over = j->over;
+  if (ok && o->used) *o->used = j->used ? j->used : len;
   im_pool_free(j->pool);
   jpg_free(j);
   free(j);
@@ -1692,6 +1696,7 @@ opts_of(const im_open_config_t *c) {
   o.rh          = c->regionH;
   o.mem_limit   = c->memoryLimit;
   o.over        = NULL;
+  o.used        = c->bytesRead;
   return o;
 }
 

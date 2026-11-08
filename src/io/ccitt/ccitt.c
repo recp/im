@@ -537,6 +537,38 @@ decode_rows(ccr_t *r, const im_ccitt_t *pa, uint8_t *out, size_t stride, uint32_
   return ok_any || !rows ? (int64_t)kept : -1;
 }
 
+/* an RTC or EOFB right after the last row taken (where Rows ended the
+   rows before it was looked at; on a byte where rows are): its bytes the
+   image's too, for IM_OPTION_BYTES_READ */
+static void
+past_end(ccs_t *s, const im_ccitt_t *pa) {
+  uint64_t at = s->bit;
+  uint32_t pass, n;
+
+  if (!pa->end_of_block) return;
+  for (pass = 0; pass < 2u; pass++) {
+    s->bit = pass ? (at + 7u) / 8u * 8u : at;
+    if (pass && (!pa->byte_align || s->bit == at)) break;
+    if (pa->k < 0) {
+      if (peek(s, 24u) == 0x001001u) {
+        s->bit += 24u;
+        return;
+      }
+      continue;
+    }
+    /* six EOLs; two-dimensional ones each with its tag (a 1) after */
+    for (n = 0; n < 6u; n++) {
+      if (!eol(s)) break;
+      if (pa->k > 0) {
+        if (exhausted(s) || !(peek32(s) >> 31)) break;
+        s->bit++;
+      }
+    }
+    if (n == 6u) return;
+  }
+  s->bit = at;
+}
+
 /* T.6 as JBIG2's MMR regions have it: w × h rows into out (stride a row),
    1 black, bits past w 0; rows the data doesn't reach left as they are.
    The rows decoded (-1 none) and the bytes taken, an EOFB after them too */
@@ -606,6 +638,14 @@ ccitt_dec_mem(ImImage **dest, const uint8_t *data, size_t len, const im_open_con
   reader_init(r, data, len);
   n = decode_rows(r, pa, out, conf->dest ? conf->destStride : stride, y0, h ? maxrows : 0u, x0, w, eight,
                   h ? NULL : &grown, &cap, conf->memoryLimit);
+  if (n > 0 && conf->bytesRead) {
+    uint64_t took;
+
+    past_end(&r->s, pa);
+    took             = (r->s.bit + 7u) / 8u;
+    *conf->bytesRead = took < len ? (size_t)took : len;
+    if (!*conf->bytesRead) *conf->bytesRead = 1u;
+  }
   free(r);
   if (!h) out = grown;
   if (n <= 0 || !(im = calloc(1, sizeof(*im)))) {

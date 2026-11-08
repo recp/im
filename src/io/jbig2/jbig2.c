@@ -2187,11 +2187,17 @@ jbig2_info(const uint8_t *p, size_t len, ImInfo *info) {
       seg_t *s = &j.segs[i];
 
       if (s->type == 48u && s->len >= 8u && s->data) {
+        uint32_t k;
+        bool     seen = false;
+
+        /* the pages: one a page number its information segments give */
+        for (k = 0; k < i && !seen; k++) seen = j.segs[k].type == 48u && j.segs[k].page == s->page;
+        if (!seen) info->pages++;
+        if (ok || info->pages > 1u) continue;
         info->width  = (uint32_t)s->data[0] << 24 | (uint32_t)s->data[1] << 16 | (uint32_t)s->data[2] << 8 | s->data[3];
         info->height = (uint32_t)s->data[4] << 24 | (uint32_t)s->data[5] << 16 | (uint32_t)s->data[6] << 8 | s->data[7];
         if (info->height == 0xFFFFFFFFu) info->height = 0u;
         ok = info->width && info->width <= JB_MAX_SIDE && info->height <= JB_MAX_SIDE;
-        break;
       }
     }
   }
@@ -2227,7 +2233,10 @@ jbig2_dec_mem(ImImage **dest, const uint8_t *data, size_t len, const im_open_con
     res = j.nomem ? IM_ENOMEM : IM_EBADF;
   }
   if (res == IM_OK && !read_segments(&j, data, len, first)) res = j.nomem ? IM_ENOMEM : IM_EBADF;
-  if (res == IM_OK && file) {
+  if (res == IM_OK && conf->page) {
+    /* the page asked for (IM_OPTION_PAGE), as its segments number it */
+    j.page_number = conf->page;
+  } else if (res == IM_OK && file) {
     /* a file: its first page */
     for (i = 0; i < j.nsegs; i++) {
       if (j.segs[i].type == 48u && j.segs[i].page) {

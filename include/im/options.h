@@ -128,6 +128,19 @@ typedef enum im_option_type_t {
      a pixel, 0 black (rows (width + 7) / 8 bytes, first pixel the top
      bit); IM_OPTION_EIGHT_BITS: a byte a pixel, 255 white */
   IM_OPTION_JBIG2_GLOBALS,
+
+  /* a file of pages, the one decoded (int, from 1; 0 or none: the first).
+     JBIG2: the page as its segments number it (a stream's embedded
+     segments too); one that isn't there fails. ImInfo's `pages` counts
+     them */
+  IM_OPTION_PAGE,
+
+  /* the data's bytes the decode read (im_option_bytes_read), set where it
+     succeeds: CCITT fax through its last row and an RTC or EOFB right
+     after it, the last byte taken whole; JPEG through its EOI (or all of
+     it, none there); the others all of it. An image inline in other data
+     (a PDF content stream's) ends there */
+  IM_OPTION_BYTES_READ,
 } im_option_type_t;
 
 
@@ -197,6 +210,11 @@ typedef struct im_option_size_t {
   im_option_base_t base;
   size_t           value;
 } im_option_size_t;
+
+typedef struct im_option_bytes_t {
+  im_option_base_t base;
+  size_t          *bytes;
+} im_option_bytes_t;
 
 typedef struct im_option_region_t {
   im_option_base_t base;
@@ -307,6 +325,18 @@ im_option_jbig2_globals(const void *data, size_t len) {
   opt.base.type = IM_OPTION_JBIG2_GLOBALS;
   opt.data      = data;
   opt.len       = len;
+
+  return opt;
+}
+
+/* where the bytes a decode read go (IM_OPTION_BYTES_READ) */
+IM_INLINE
+im_option_bytes_t
+im_option_bytes_read(size_t *bytes) {
+  im_option_bytes_t opt;
+
+  opt.base.type = IM_OPTION_BYTES_READ;
+  opt.bytes     = bytes;
 
   return opt;
 }

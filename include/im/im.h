@@ -283,6 +283,7 @@ typedef struct ImInfo {
   uint32_t         levels;           /* JPEG 2000: resolution levels, the main header's decompositions + 1 */
   bool             arithmetic;       /* JPEG: arithmetic coded */
   bool             opacity;          /* JPEG 2000: a channel of opacity (cdef, or more than the colours) */
+  uint32_t         pages;            /* a JBIG2 file's (IM_OPTION_PAGE); 1 the others */
 } ImInfo;
 
 IM_EXPORT

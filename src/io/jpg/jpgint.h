@@ -177,6 +177,7 @@ typedef struct jpg {
   uint32_t  reg_x, reg_y, reg_w, reg_h;
   size_t    mem_limit;        /* IM_OPTION_MEMORY_LIMIT's bytes; 0: none */
   bool      over;             /* refused for it */
+  size_t    used;             /* the data's bytes the markers were read to */
   uint32_t  hmax, vmax, mcux, mcuy;
   uint32_t  process;          /* J_SEQUENTIAL, J_PROGRESSIVE, J_LOSSLESS */
   bool      arith, frame, multiscan;
@@ -263,6 +264,7 @@ typedef struct jopts {
   uint32_t    rx, ry, rw, rh;
   size_t      mem_limit;   /* bytes the image may take; 0: no limit */
   bool       *over;        /* set where refused for mem_limit (NULL: none) */
+  size_t     *used;        /* the bytes through EOI (all, none there) where it decodes (NULL: none) */
 } jopts_t;
 
 IM_HIDE bool jpg_decode_mem(const uint8_t *data, size_t len, ImImage *im, const jopts_t *o);

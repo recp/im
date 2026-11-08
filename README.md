@@ -22,7 +22,8 @@ TODO
       a JPEG's colour transform said by its container, CMYK as stored, RGB padded to RGB0, a palette's
       indexes, 8 bits by OpenJPEG's rounding, the opacity apart (or not decoded), decoded ½, ¼ or ⅛ the
       size, a region alone (`im_option_region`), a memory limit (`im_option_memory`: `IM_ENOMEM` before
-      allocating what wouldn't fit)
+      allocating what wouldn't fit), a page of a file of them (`IM_OPTION_PAGE`; `ImInfo.pages`), the bytes
+      the decode read (`im_option_bytes_read`: where an image inline in other data ends)
 - [x] Formats picked at build time: `-DIM_FORMATS="jpg;jp2"` (default `all`); only png needs the
       defl and huff submodules
 - [x] WebAssembly (WASI): wasi-sdk's toolchain file, `-DIM_STATIC=ON` (`-msimd128` for SIMD128);

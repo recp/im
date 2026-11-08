@@ -81,6 +81,8 @@ im_config(im_option_base_t *options[], ImOpenIntent openIntent) {
           conf.jbig2Globals    = ((im_option_data_t*)opt)->data;
           conf.jbig2GlobalsLen = ((im_option_data_t*)opt)->len;
           break;
+        case IM_OPTION_PAGE:                 conf.page           = (uint32_t)((im_option_int_t*)opt)->value; break;
+        case IM_OPTION_BYTES_READ:           conf.bytesRead      = ((im_option_bytes_t*)opt)->bytes;     break;
         case IM_OPTION_DEST:
           conf.dest       = ((im_option_dest_t*)opt)->pixels;
           conf.destStride = ((im_option_dest_t*)opt)->stride;
@@ -104,11 +106,11 @@ im_info_mem(ImInfo * __restrict info, const void * __restrict data, size_t len) 
   memset(info, 0, sizeof(*info));
   if (!p || len < 4u) return IM_EBADF;
 #if IM_WITH_JPG
-  if (p[0] == 0xFFu && p[1] == 0xD8u) return jpg_info(p, len, info) ? IM_OK : IM_EBADF;
+  if (p[0] == 0xFFu && p[1] == 0xD8u) return jpg_info(p, len, info) ? (info->pages = 1u, IM_OK) : IM_EBADF;
 #endif
 #if IM_WITH_JP2
   if ((len >= 12u && !memcmp(p, jp2sig, 12u)) || (p[0] == 0xFFu && p[1] == 0x4Fu && p[2] == 0xFFu && p[3] == 0x51u)) {
-    return jp2_info(p, len, info) ? IM_OK : IM_EBADF;
+    return jp2_info(p, len, info) ? (info->pages = 1u, IM_OK) : IM_EBADF;
   }
 #endif
 #if IM_WITH_JBIG2
@@ -117,6 +119,13 @@ im_info_mem(ImInfo * __restrict info, const void * __restrict data, size_t len) 
   (void)jp2sig;
   (void)jbig2sig;
   return IM_EBADF;
+}
+
+/* the bytes read, where the decoder didn't say: all of them */
+static ImResult
+read_all(const im_open_config_t *conf, size_t len, ImResult res) {
+  if (res == IM_OK && conf->bytesRead && !*conf->bytesRead) *conf->bytesRead = len;
+  return res;
 }
 
 IM_EXPORT
@@ -135,24 +144,27 @@ im_load_mem(ImImage         ** __restrict dest,
   *dest = NULL;
   if (!p || !len) return IM_EBADF;
   conf = im_config(options, openIntent);
+  if (conf.bytesRead) *conf.bytesRead = 0u;
 
   /* where the caller says what it is (no signature to tell it by; a
      stream of a byte or two can be a whole image) */
 #if IM_WITH_CCITT
-  if (conf.format == IM_FILEFORMATTYPE_CCITT) return ccitt_dec_mem(dest, p, len, &conf);
+  if (conf.format == IM_FILEFORMATTYPE_CCITT) return read_all(&conf, len, ccitt_dec_mem(dest, p, len, &conf));
 #endif
 #if IM_WITH_JBIG2
-  if (conf.format == IM_FILEFORMATTYPE_JBIG2 || (len >= 9u && !memcmp(p, jbig2sig, 8u))) return jbig2_dec_mem(dest, p, len, &conf);
+  if (conf.format == IM_FILEFORMATTYPE_JBIG2 || (len >= 9u && !memcmp(p, jbig2sig, 8u))) {
+    return read_all(&conf, len, jbig2_dec_mem(dest, p, len, &conf));
+  }
 #endif
   if (len < 4u) return IM_EBADF;
 
   /* by its first bytes */
 #if IM_WITH_JPG
-  if (p[0] == 0xFFu && p[1] == 0xD8u) return jpg_dec_mem(dest, p, len, &conf);
+  if (p[0] == 0xFFu && p[1] == 0xD8u) return read_all(&conf, len, jpg_dec_mem(dest, p, len, &conf));
 #endif
 #if IM_WITH_JP2
   if ((len >= 12u && !memcmp(p, jp2sig, 12u)) || (p[0] == 0xFFu && p[1] == 0x4Fu && p[2] == 0xFFu && p[3] == 0x51u)) {
-    return jp2_dec_mem(dest, p, len, &conf);
+    return read_all(&conf, len, jp2_dec_mem(dest, p, len, &conf));
   }
 #endif
   (void)jp2sig;

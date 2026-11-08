@@ -424,6 +424,27 @@ TEST_IMPL(info_mem) {
     ASSERT(info.levels == cases[i].levels && info.arithmetic == cases[i].arith && info.opacity == cases[i].opacity);
     ASSERT(info.fileFormatType == (!strcmp(cases[i].dir, "jpg") ? IM_FILEFORMATTYPE_JPEG
                                    : strstr(cases[i].name, ".j2k") ? IM_FILEFORMATTYPE_J2K : IM_FILEFORMATTYPE_JP2));
+    ASSERT(info.pages == 1u);
+    /* the bytes a decode read: a JPEG through its EOI, an inline image's
+       end after it or not; a JPEG 2000 all of it */
+    {
+      size_t            got = 0;
+      im_option_bytes_t br = im_option_bytes_read(&got);
+      im_option_base_t *o[2] = { &br.base, NULL };
+      uint8_t          *more = malloc(len + 6u);
+      ImImage          *b;
+      bool              eoi = len >= 2u && d[len - 2u] == 0xFFu && d[len - 1u] == 0xD9u;
+
+      ASSERT(more);
+      memcpy(more, d, len);
+      memcpy(more + len, "\nEI Q\n", 6u);
+      ASSERT(im_load_mem(&b, d, len, o, IM_OPEN_INTENT_READONLY) == IM_OK && b && got == len);
+      im_free(b);
+      ASSERT(im_load_mem(&b, more, len + 6u, o, IM_OPEN_INTENT_READONLY) == IM_OK && b);
+      ASSERT(!strcmp(cases[i].dir, "jpg") && eoi ? got == len : got == len + 6u);
+      im_free(b);
+      free(more);
+    }
     /* the first half alone (its headers whole) says the same */
     if (len > 8192u) {
       ImInfo head;
@@ -878,6 +899,22 @@ TEST_IMPL(ccitt) {
     ASSERT(fax_load(data, len, cases[i].k, cases[i].w, 0u, cases[i].f, NULL, &b) == IM_OK && b);
     ASSERT(b->height == a->height && b->len == a->len && !memcmp(a->data.data, b->data.data, a->len));
     im_free(b);
+    /* the bytes read with its rows given: the stream's own (its RTC or
+       EOFB too), an inline image's end after it or not */
+    {
+      size_t            got = 0;
+      im_option_bytes_t br = im_option_bytes_read(&got);
+      uint8_t          *more = malloc(len + 6u);
+
+      ASSERT(more);
+      memcpy(more, data, len);
+      memcpy(more + len, "\nEI Q\n", 6u);
+      ASSERT(fax_load(data, len, cases[i].k, cases[i].w, cases[i].h, cases[i].f, &br.base, &b) == IM_OK && b && got == len);
+      im_free(b);
+      ASSERT(fax_load(more, len + 6u, cases[i].k, cases[i].w, cases[i].h, cases[i].f, &br.base, &b) == IM_OK && b && got == len);
+      im_free(b);
+      free(more);
+    }
     /* a byte a pixel */
     {
       im_option_bool_t e8 = im_option_bool(IM_OPTION_EIGHT_BITS, true);
@@ -954,6 +991,7 @@ TEST_IMPL(jbig2) {
     { "stripes",      0,   31,   29, 0xFECE813Cu },
     { "refine",       0,  304,   61, 0x23E63090u },
     { "page",         0, 2480, 3508, 0x3BEEE73Bu },
+    { "ext",          0,   96,   48, 0x05DD094Fu }, /* the extended template (Amd. 2), typical prediction */
   };
   size_t i;
 
@@ -1026,6 +1064,36 @@ TEST_IMPL(jbig2) {
     im_free(a);
     free(data);
     free(glob);
+  }
+  /* a file of three pages (random access): counted, each by
+     IM_OPTION_PAGE (none: the first), one past them refused */
+  {
+    static const uint32_t pw[3] = { 40u, 23u, 64u }, ph[3] = { 20u, 37u, 9u };
+    static const uint32_t phash[3] = { 0x2EBA5AD1u, 0x248BBB50u, 0x23419779u };
+    size_t                len = 0;
+    uint8_t              *data = read_all("jbig2", "pages.jb2", &len);
+    ImInfo                info;
+    int32_t               pg;
+
+    ASSERT(data && im_info_mem(&info, data, len) == IM_OK);
+    ASSERT(info.pages == 3u && info.width == pw[0] && info.height == ph[0]);
+    for (pg = 0; pg <= 4; pg++) {
+      im_option_int_t po = im_option_int(IM_OPTION_PAGE, pg);
+      uint32_t        k = pg ? (uint32_t)pg - 1u : 0u, h;
+      ImImage        *b;
+      ImResult        r = jb2_load(data, len, NULL, 0u, false, &po.base, &b);
+
+      if (pg == 4) {
+        ASSERT(r != IM_OK && !b);
+        continue;
+      }
+      ASSERT(r == IM_OK && b && b->width == pw[k] && b->height == ph[k]);
+      h = fnv1a(b->data.data, b->len);
+      if (h != phash[k]) fprintf(stderr, "  pages.jb2 page %u: 0x%08X\n", k + 1u, h);
+      ASSERT(h == phash[k]);
+      im_free(b);
+    }
+    free(data);
   }
   /* not JBIG2 */
   {
