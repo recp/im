@@ -3237,7 +3237,9 @@ ring_row(const xring_t *r, uint32_t i) {
 }
 
 /* cols97's steps [t0, t1) on rings: the lows' rows in L, the highs' in H,
-   the level's rows out to D, columns [x, x + n) */
+   the level's rows out to D, columns [x, x + n). A time's four steps each
+   read and write their rows' column k alone, so where all four run they
+   run as one pass, a column's four in turn (NEON): each row read once */
 static void
 ring97(const xring_t *Lr, const xring_t *Hr, const xring_t *Dr, uint32_t sn, uint32_t dn, uint32_t cas, size_t x, size_t n,
        uint32_t t0, uint32_t t1) {
@@ -3245,55 +3247,81 @@ ring97(const xring_t *Lr, const xring_t *Hr, const xring_t *Dr, uint32_t sn, uin
   size_t  k;
 
   for (t = t0; t < (int64_t)t1; t++) {
-    int64_t i = t, jj = t + (int64_t)cas - 1, a, b;
+    int64_t      i = t, jj = t + (int64_t)cas - 1, a, b;
+    float       *x1 = NULL, *x2 = NULL, *x3 = NULL, *o3 = NULL, *o4 = NULL;
+    const float *a1 = NULL, *b1 = NULL, *a2 = NULL, *b2 = NULL, *a3 = NULL, *b3 = NULL, *x4 = NULL, *a4 = NULL, *b4 = NULL;
 
     if (i < (int64_t)sn) {
-      float       *xr = (float *)(void *)ring_row(Lr, (uint32_t)i) + x;
-      const float *ya, *yb;
-
       a = i + (int64_t)cas - 1;
       b = a + 1;
       MIRROR(a, b, dn);
-      ya = (const float *)(void *)ring_row(Hr, (uint32_t)a) + x;
-      yb = (const float *)(void *)ring_row(Hr, (uint32_t)b) + x;
-      for (k = 0; k < n; k++) xr[k] = xr[k] * KL + (ya[k] * KH + yb[k] * KH) * -0.443506852f;
+      x1 = (float *)(void *)ring_row(Lr, (uint32_t)i) + x;
+      a1 = (const float *)(void *)ring_row(Hr, (uint32_t)a) + x;
+      b1 = (const float *)(void *)ring_row(Hr, (uint32_t)b) + x;
     }
     if (jj >= 0 && jj < (int64_t)dn) {
-      float       *xr = (float *)(void *)ring_row(Hr, (uint32_t)jj) + x;
-      const float *ya, *yb;
-
       a = jj - (int64_t)cas;
       b = a + 1;
       MIRROR(a, b, sn);
-      ya = (const float *)(void *)ring_row(Lr, (uint32_t)a) + x;
-      yb = (const float *)(void *)ring_row(Lr, (uint32_t)b) + x;
-      for (k = 0; k < n; k++) xr[k] = xr[k] * KH + (ya[k] + yb[k]) * -0.882911075f;
+      x2 = (float *)(void *)ring_row(Hr, (uint32_t)jj) + x;
+      a2 = (const float *)(void *)ring_row(Lr, (uint32_t)a) + x;
+      b2 = (const float *)(void *)ring_row(Lr, (uint32_t)b) + x;
     }
     i = t - 1;
     if (i >= 0 && i < (int64_t)sn) {
-      float       *xr = (float *)(void *)ring_row(Lr, (uint32_t)i) + x;
-      float       *o  = (float *)(void *)ring_row(Dr, cas + 2u * (uint32_t)i) + x;
-      const float *ya, *yb;
-
       a = i + (int64_t)cas - 1;
       b = a + 1;
       MIRROR(a, b, dn);
-      ya = (const float *)(void *)ring_row(Hr, (uint32_t)a) + x;
-      yb = (const float *)(void *)ring_row(Hr, (uint32_t)b) + x;
-      for (k = 0; k < n; k++) o[k] = xr[k] = xr[k] + (ya[k] + yb[k]) * 0.052980118f;
+      x3 = (float *)(void *)ring_row(Lr, (uint32_t)i) + x;
+      o3 = (float *)(void *)ring_row(Dr, cas + 2u * (uint32_t)i) + x;
+      a3 = (const float *)(void *)ring_row(Hr, (uint32_t)a) + x;
+      b3 = (const float *)(void *)ring_row(Hr, (uint32_t)b) + x;
     }
     jj = t + (int64_t)cas - 2;
     if (jj >= 0 && jj < (int64_t)dn) {
-      const float *xr = (const float *)(void *)ring_row(Hr, (uint32_t)jj) + x, *ya, *yb;
-      float       *o  = (float *)(void *)ring_row(Dr, 1u - cas + 2u * (uint32_t)jj) + x;
-
       a = jj - (int64_t)cas;
       b = a + 1;
       MIRROR(a, b, sn);
-      ya = (const float *)(void *)ring_row(Lr, (uint32_t)a) + x;
-      yb = (const float *)(void *)ring_row(Lr, (uint32_t)b) + x;
-      for (k = 0; k < n; k++) o[k] = xr[k] + (ya[k] + yb[k]) * 1.586134342f;
+      x4 = (const float *)(void *)ring_row(Hr, (uint32_t)jj) + x;
+      o4 = (float *)(void *)ring_row(Dr, 1u - cas + 2u * (uint32_t)jj) + x;
+      a4 = (const float *)(void *)ring_row(Lr, (uint32_t)a) + x;
+      b4 = (const float *)(void *)ring_row(Lr, (uint32_t)b) + x;
     }
+#if X_NEON
+    /* inside the level: step 2's second low is step 1's, step 3's row its
+       first low and its second high step 2's, step 4's its first high and
+       its second low step 3's: each value passed on, not read again (step
+       4's first low none of these: at the top it's mirrored onto step 3's) */
+    if (x1 && x2 && x3 && x4 && b2 == x1 && a2 == x3 && b3 == x2 && x4 == a3 && b4 == x3 && a4 != x3 && a4 != x1) {
+      const float32x4_t kl = vdupq_n_f32(KL), kh = vdupq_n_f32(KH), c1 = vdupq_n_f32(-0.443506852f);
+      const float32x4_t c2 = vdupq_n_f32(-0.882911075f), c3 = vdupq_n_f32(0.052980118f), c4 = vdupq_n_f32(1.586134342f);
+
+      for (k = 0; k + 4u <= n; k += 4u) {
+        float32x4_t l = vld1q_f32(x1 + k), ha = vld1q_f32(a1 + k), hb = vld1q_f32(b1 + k), h = vld1q_f32(x2 + k);
+        float32x4_t lp = vld1q_f32(x3 + k), hp = vld1q_f32(x4 + k), lpp = vld1q_f32(a4 + k), v1, v2, v3;
+
+        v1 = vaddq_f32(vmulq_f32(l, kl), vmulq_f32(vaddq_f32(vmulq_f32(ha, kh), vmulq_f32(hb, kh)), c1));
+        v2 = vaddq_f32(vmulq_f32(h, kh), vmulq_f32(vaddq_f32(lp, v1), c2));
+        v3 = vaddq_f32(lp, vmulq_f32(vaddq_f32(hp, v2), c3));
+        vst1q_f32(x1 + k, v1);
+        vst1q_f32(x2 + k, v2);
+        vst1q_f32(x3 + k, v3);
+        vst1q_f32(o3 + k, v3);
+        vst1q_f32(o4 + k, vaddq_f32(hp, vmulq_f32(vaddq_f32(lpp, v3), c4)));
+      }
+      for (; k < n; k++) {
+        x1[k] = x1[k] * KL + (a1[k] * KH + b1[k] * KH) * -0.443506852f;
+        x2[k] = x2[k] * KH + (a2[k] + b2[k]) * -0.882911075f;
+        o3[k] = x3[k] = x3[k] + (a3[k] + b3[k]) * 0.052980118f;
+        o4[k] = x4[k] + (a4[k] + b4[k]) * 1.586134342f;
+      }
+      continue;
+    }
+#endif
+    if (x1) for (k = 0; k < n; k++) x1[k] = x1[k] * KL + (a1[k] * KH + b1[k] * KH) * -0.443506852f;
+    if (x2) for (k = 0; k < n; k++) x2[k] = x2[k] * KH + (a2[k] + b2[k]) * -0.882911075f;
+    if (x3) for (k = 0; k < n; k++) o3[k] = x3[k] = x3[k] + (a3[k] + b3[k]) * 0.052980118f;
+    if (x4) for (k = 0; k < n; k++) o4[k] = x4[k] + (a4[k] + b4[k]) * 1.586134342f;
   }
 }
 
@@ -3790,6 +3818,55 @@ place_samples(const jpx_t *j, uint32_t c, bool reversible, const void *src, uint
   }
 }
 
+#if X_NEON
+/* place_samples' limits for a component, as vectors */
+typedef struct xplk {
+  float32x4_t fl, fh;
+  int32x4_t   il, ih, sh, lf;
+} xplk_t;
+
+static xplk_t
+plk(const jpx_t *j, uint32_t c) {
+  int32_t prec = j->prec[c], lo = j->sgnd[c] ? -(1 << (prec - 1)) : 0, hi = j->sgnd[c] ? (1 << (prec - 1)) - 1 : (1 << prec) - 1;
+  int32_t shift = j->sgnd[c] ? 0 : 1 << (prec - 1), lift = j->sgnd[c] ? 1 << (prec - 1) : 0;
+  xplk_t  k;
+
+  k.fl = vdupq_n_f32((float)(lo - shift - 1));
+  k.fh = vdupq_n_f32((float)(hi - shift + 1));
+  k.il = vdupq_n_s32(lo);
+  k.ih = vdupq_n_s32(hi);
+  k.sh = vdupq_n_s32(shift);
+  k.lf = vdupq_n_s32(lift);
+  return k;
+}
+
+static JPX_INLINE uint16x4_t
+plk_one(const xplk_t *k, float32x4_t f) {
+  int32x4_t a = vcvtnq_s32_f32(vminq_f32(vmaxq_f32(f, k->fl), k->fh));
+
+  return vmovn_u32(vreinterpretq_u32_s32(vaddq_s32(vminq_s32(vmaxq_s32(vaddq_s32(a, k->sh), k->il), k->ih), k->lf)));
+}
+
+/* the irreversible colour transform and place_samples' 9/7 rounding in
+   one pass, four pixels at a time (the same operations); returns how many
+   it did */
+static uint32_t
+place_ict(const jpx_t *j, const float *c0, const float *c1, const float *c2, uint16_t *const *out, uint32_t w) {
+  const xplk_t      k0 = plk(j, 0u), k1 = plk(j, 1u), k2 = plk(j, 2u);
+  const float32x4_t vr = vdupq_n_f32(1.402f), ug = vdupq_n_f32(0.34413f), vg = vdupq_n_f32(0.71414f), ub = vdupq_n_f32(1.772f);
+  uint32_t          x;
+
+  for (x = 0; x + 4u <= w; x += 4u) {
+    float32x4_t yy = vld1q_f32(c0 + x), u = vld1q_f32(c1 + x), v = vld1q_f32(c2 + x);
+
+    vst1_u16(out[0] + x, plk_one(&k0, vaddq_f32(yy, vmulq_f32(v, vr))));
+    vst1_u16(out[1] + x, plk_one(&k1, vsubq_f32(vsubq_f32(yy, vmulq_f32(u, ug)), vmulq_f32(v, vg))));
+    vst1_u16(out[2] + x, plk_one(&k2, vaddq_f32(yy, vmulq_f32(u, ub))));
+  }
+  return x;
+}
+#endif
+
 /* a tile-component's resolution decoded last: its samples' region (made
    smaller, a coarser level's; the rows still the whole one's apart) */
 static const xres_t*
@@ -3832,6 +3909,17 @@ place_row(jpx_t *j, xscratch_t *s, void *ctx, uint32_t item) {
       const float *c0 = tc_row(j, t, 0u, y), *c1 = tc_row(j, t, 1u, y), *c2 = tc_row(j, t, 2u, y);
       float       *r = row, *g = r + w, *b = g + w;
 
+#if X_NEON
+      x = place_ict(j, c0, c1, c2, out, w);
+      if (x == w) goto rest;
+      c0 += x;
+      c1 += x;
+      c2 += x;
+      for (c = 0; c < 3u; c++) out[c] += x;
+      w -= x;
+      g = r + w;
+      b = g + w;
+#endif
       for (x = 0; x < w; x++) {
         float yy = c0[x], u = c1[x], v = c2[x];
 
@@ -3841,6 +3929,10 @@ place_row(jpx_t *j, xscratch_t *s, void *ctx, uint32_t item) {
       }
     }
     for (c = 0; c < 3u; c++) place_samples(j, c, tc->cc->reversible, (uint32_t *)row + (size_t)c * w, out[c], w);
+#if X_NEON
+  rest:
+    c = 3u;
+#endif
   }
   for (; c < j->ncomp; c++) {
     const xtc_t  *tc = &t->tc[c];
@@ -4461,16 +4553,20 @@ stream_to(jpx_t *j, const uint32_t *need) {
     for (c = 0; c < j->ncomp; c++) {
       xscomp_t *sc = &st->c[c];
       xslv_t   *lv = &sc->lv[r];
-      uint32_t  x;
+      uint32_t  x, sw;
 
       if (!sc->on || sc->top < r || lv->t1 <= lv->t || !lv->w) continue;
-      if (!grow((void **)&st->strips, &st->scap, (uint64_t)st->nstrips + (lv->w + STRIP - 1u) / STRIP, sizeof(*st->strips))) return false;
-      for (x = 0; x < lv->w; x += STRIP) {
+      /* the rows are rings, a band's few: strips as wide as the threads
+         let them be (one thread: the whole row; a step's loop long) */
+      sw = j->workers ? (lv->w + 2u * (j->workers + 1u) - 1u) / (2u * (j->workers + 1u)) : lv->w;
+      sw = sw < STRIP ? STRIP : (sw + 15u) & ~15u;
+      if (!grow((void **)&st->strips, &st->scap, (uint64_t)st->nstrips + (lv->w + sw - 1u) / sw, sizeof(*st->strips))) return false;
+      for (x = 0; x < lv->w; x += sw) {
         xsstrip_t *sp = &st->strips[st->nstrips++];
 
         sp->lv  = lv;
         sp->x   = x;
-        sp->n   = lv->w - x < STRIP ? lv->w - x : STRIP;
+        sp->n   = lv->w - x < sw ? lv->w - x : sw;
         sp->rev = t->tc[c].cc->reversible;
       }
     }
