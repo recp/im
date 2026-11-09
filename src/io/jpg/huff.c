@@ -2130,7 +2130,7 @@ spec_pass3(void *arg, uint32_t worker, uint32_t item) {
       jcomp_t       *c  = e->c;
       uint32_t       bx = mx * e->nh + e->dx, by = my * e->nv + e->dy, n = (uint16_t)rec[0], q;
 
-      if (bx < c->sw && by < c->sh) {
+      if (bx >= c->rbx0 && bx < c->rbx1 && by >= c->rby0 && by < c->rby1) {
         memset(blk, 0, sizeof(blk));
         blk[0] = (int16_t)(uint16_t)((uint16_t)rec[1] + off[sp->slot_ci[slot]]);
         for (q = 0; q < n; q++) blk[(uint16_t)rec[2u + 2u * q]] = rec[3u + 2u * q];
