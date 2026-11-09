@@ -675,16 +675,16 @@ out_band(void *arg, uint32_t worker, uint32_t item) {
   return true;
 }
 
-/* whether the frame is one jpg_out gives: its colours (two components
-   none), the caller's memory enough for it */
+/* whether the frame is one jpg_out gives: its colours (2 components and
+   5 or more as they are, libjpeg's JCS_UNKNOWN), the caller's memory
+   enough for it */
 IM_HIDE bool
 jpg_out_ok(const jpg_t *j, jspace_t space) {
   uint32_t n = j->ncomp;
   size_t   unit = j->prec > 8u ? 2u : 1u, pitch;
 
-  if (n == 2u || (n == 3u && space != J_RGB && space != J_YCC) || (n == 4u && space != J_CMYK && space != J_YCCK)) {
-    return false;
-  }
+  if ((n == 3u && space != J_RGB && space != J_YCC) || (n == 4u && space != J_CMYK && space != J_YCCK)) return false;
+  if ((n == 2u || n > 4u) && space != J_OTHER) return false;
   if (!j->dest) return true;
   pitch = (size_t)j->reg_w * (n == 3u && j->rgb_pad ? 4u : n) * unit;
   return j->dest_stride >= pitch && j->dest_size >= j->dest_stride * (j->reg_h - 1u) + pitch
@@ -800,8 +800,11 @@ jpg_out_end(jsout_t *o, ImImage *im, bool run) {
   im->bytesPerPixel      = im->bitsPerPixel / 8u;
   im->byteOrder          = order;
   im->alphaInfo          = o->pad ? IM_ALPHA_NONE_SKIP_LAST : IM_ALPHA_NONE;
-  im->format             = n == 1u ? IM_FORMAT_GRAY : n == 3u ? (o->pad ? IM_FORMAT_RGB0 : IM_FORMAT_RGB) : IM_FORMAT_CMYK;
-  im->colorSpace         = n == 1u ? IM_COLORSPACE_GRAY : n == 3u ? IM_COLORSPACE_sRGB : IM_COLORSPACE_CMYK;
+  im->format             = n == 1u   ? IM_FORMAT_GRAY
+                           : n == 3u ? (o->pad ? IM_FORMAT_RGB0 : IM_FORMAT_RGB)
+                           : n == 4u ? IM_FORMAT_CMYK
+                                     : IM_FORMAT_NONE; /* 2, 5 or more: the components as they are */
+  im->colorSpace         = n == 1u ? IM_COLORSPACE_GRAY : n == 3u ? IM_COLORSPACE_sRGB : n == 4u ? IM_COLORSPACE_CMYK : IM_COLORSPACE_UNKNOWN;
   o->own                 = false; /* im's now */
   out_free(o);
   return true;

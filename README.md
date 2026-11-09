@@ -42,7 +42,8 @@ TODO
 - [x] JPEG (libjpeg-turbo's pixels, to the byte)
   - [x] baseline, extended (8 and 12 bits), progressive; Huffman and arithmetic coding
   - [x] lossless, 2 to 16 bits; Huffman and arithmetic coding
-  - [x] every sampling, restarts, Adobe/JFIF, CMYK and YCCK, ICC profile
+  - [x] every sampling, restarts, Adobe/JFIF, CMYK and YCCK, ICC profile; up to 10 components (2 and 5 or
+        more as they are, libjpeg's JCS_UNKNOWN)
   - [x] cut streams and damage as libjpeg reads them, block smoothing
   - [x] NEON, SSE4.1/AVX2 and WebAssembly SIMD128 IDCT, upsampling, colour
   - [x] on threads: restart intervals, speculative Huffman, progressive scans row by row

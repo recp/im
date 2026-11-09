@@ -68,7 +68,8 @@
 #endif
 
 enum {
-  J_COMPS   = 4,         /* components a frame; more aren't decoded */
+  J_COMPS   = 10,        /* components a frame, as libjpeg's (more refused);
+                            2 and 5 or more come out as they are */
   J_HBITS   = 11,        /* bits a Huffman table's one look takes */
   J_HSIZE   = 1 << J_HBITS,
   J_SAMPLES = 1u << 30,  /* a component's samples at most */
@@ -188,7 +189,6 @@ typedef struct jpg {
   bool      arith, frame, multiscan;
   bool      big;              /* its working memory given back as it goes
                                  (mm/mmap.h's im_big_alloc) */
-  jcomp_t   comp[J_COMPS];
 
   /* hierarchical (Annex J): DHP's frame; each of its components' samples
      as the frames so far made them (modulo 2^16), at their size */
@@ -197,7 +197,7 @@ typedef struct jpg {
   uint8_t   expand;           /* EXP's for the next frame: 1 across, 2 down */
   uint8_t   grow;             /* and this frame's */
   uint32_t  nframes;
-  uint8_t   hseen;            /* DHP's components a first frame has had (a mask) */
+  uint16_t  hseen;            /* DHP's components a first frame has had (a mask) */
   uint32_t  hprec, hwidth, hheight, hncomp;
   uint8_t   hid[J_COMPS], hh[J_COMPS], hv[J_COMPS];
   uint16_t *ref[J_COMPS];
@@ -251,6 +251,8 @@ typedef struct jpg {
   uint32_t   flow_self;
   uint64_t   flow_deps;
 
+  /* the components, last (the fields above near the struct's start) */
+  jcomp_t   comp[J_COMPS];
 } jpg_t;
 
 /* jpg.c */

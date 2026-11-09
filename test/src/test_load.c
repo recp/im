@@ -236,6 +236,31 @@ TEST_IMPL(jpg_options) {
   im_free(a);
   im_free(b);
 
+  /* 2 and 5 components (libjpeg-turbo's encoder, JCS_UNKNOWN): as they
+     are, no colour; 5 in two scans (4 interleaved, then 1) with restarts,
+     2 progressive. Each the samples its components cut out alone decode
+     to (libjpeg-turbo's) */
+  {
+    static const struct { const char *name; uint32_t n, hash; } nc[] = {
+      { "ncomp2.jpg", 2u, 0xC10FEC9Bu },
+      { "ncomp5.jpg", 5u, 0xE49B8409u },
+    };
+
+    for (i = 0; i < sizeof(nc) / sizeof(nc[0]); i++) {
+      uint32_t h = 2166136261u;
+
+      a = mem("jpg", nc[i].name, NULL, NULL);
+      ASSERT(a && a->width == 37u && a->height == 23u && a->componentsPerPixel == nc[i].n && a->bitsPerComponent == 8u);
+      ASSERT(a->format == IM_FORMAT_NONE && a->colorSpace == IM_COLORSPACE_UNKNOWN && a->len == (size_t)37u * 23u * nc[i].n);
+      for (n = 0; n < a->len; n++) h = (h ^ ((const uint8_t *)a->data.data)[n]) * 16777619u;
+      if (h != nc[i].hash) fprintf(stderr, "  %s: 0x%08X\n", nc[i].name, h);
+      ASSERT(h == nc[i].hash);
+      ASSERT(same(a, b = mem("jpg", nc[i].name, &one.base, NULL)));
+      im_free(a);
+      im_free(b);
+    }
+  }
+
   TEST_SUCCESS
 }
 
