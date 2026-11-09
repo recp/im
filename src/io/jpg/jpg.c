@@ -395,8 +395,11 @@ region_size(jpg_t *j) {
   return true;
 }
 
-/* the frame's MCUs and planes' sizes, its size known; past J_SAMPLES a
-   component, refused (nothing made: the planes at the first scan).
+/* the frame's MCUs and planes' sizes, its size known; a hierarchical
+   sequence's past J_SAMPLES a component refused (nothing made: the planes
+   at the first scan), others as big as the format's 65535² (the caller's
+   IM_OPTION_MEMORY_LIMIT, or a region, bounds what's made; a small stream
+   that can't hold so many blocks is read through and refused first).
 
    Decoded smaller (libjpeg's jdmaster.c): the pixels the size over the
    scale, rounded up, a block 8 / scale samples across; a component
@@ -436,7 +439,7 @@ frame_size(jpg_t *j) {
     c->idct   = j->diff ? jpg_idct_diff(j->prec) : jpg_idct_for(c->ss, j->prec);
     c->stride = (size_t)c->bw * c->ss;
     samples   = (uint64_t)c->bw * unit * c->bh * unit;
-    if (samples > J_SAMPLES) return false;
+    if (j->hier && samples > J_SAMPLES) return false;
     memset(c->bits, -1, sizeof(c->bits));
   }
   return region_size(j);

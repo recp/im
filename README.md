@@ -51,6 +51,7 @@ TODO
   - [x] hierarchical: DHP's frames one after another, differential frames (DCT, progressive, lossless;
         either coding) on the references grown as EXP says (J.1.1.2's filter)
   - [x] decoded smaller (`IM_OPTION_SCALE`): ½, ¼, ⅛ by a smaller IDCT, libjpeg's scaled decode to the byte
+  - [x] as big as the format allows (65535²; a hierarchical sequence 2^30 samples a component)
 - [x] JPEG-LS (T.87; `.jls`, or a JPEG stream whose frame is SOF55)
   - [x] lossless and near-lossless, 2 to 16 bits, up to 255 components (2 and 5 or more as they are)
   - [x] each interleave (none, by lines, by samples), sampling factors, restart intervals, DNL

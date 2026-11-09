@@ -72,7 +72,7 @@ enum {
                             2 and 5 or more come out as they are */
   J_HBITS   = 11,        /* bits a Huffman table's one look takes */
   J_HSIZE   = 1 << J_HBITS,
-  J_SAMPLES = 1u << 30,  /* a component's samples at most */
+  J_SAMPLES = 1u << 30,  /* a hierarchical sequence's component's samples at most */
   J_TAIL    = 64          /* bytes readable past a segment's end */
 };
 
