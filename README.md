@@ -82,6 +82,8 @@ TODO
         passes, JPH files; OpenJPEG's samples
   - [ ] Part 2 (Apple's decoder reads it on Apple platforms)
   - [x] decoded smaller (`IM_OPTION_SCALE`): the finest levels left out, OpenJPEG's `reduce` to the sample
+  - [x] a region (`IM_OPTION_REGION`): tiles outside it never decoded; one much smaller than its tile by
+        windows, each level's reach of it alone (a 512² region of a 20000² one-tile image: ~35 ms, was ~0.9 s)
   - [ ] SIMD
 - [x] CCITT fax, raw (`IM_OPTION_FORMAT` `IM_FILEFORMATTYPE_CCITT`, its parameters by `im_option_ccitt`)
   - [x] T.4 Group 3, one- and two-dimensional (K), T.6 Group 4; EOLs, byte alignment, RTC and EOFB

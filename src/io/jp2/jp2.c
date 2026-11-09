@@ -310,6 +310,8 @@ typedef struct jpx {
   arena_t   arena;
   uint32_t  x1, y1, x0, y0, tw, th, tx0, ty0, ntx, nty, ncomp;
   uint32_t  reduce;        /* the finest levels left out: the image that many halvings smaller */
+  bool      win;           /* a one-tile image's small region: by windows
+                              (tile_window), not bands */
   bool      region;        /* only rgx0 … rgy1 composed (IM_OPTION_REGION): the
                               reduced grid's, the tiles and code-blocks
                               outside it not decoded */
@@ -4134,13 +4136,274 @@ tile_whole(jpx_t *j, xtile_t *t) {
   return true;
 }
 
+/* -- a region of a big tile, by windows ---------------------------------------------- */
+
+/* A region much smaller than its tile: each level's window of it, the
+   region at the top widened by 8 · 2^levels samples (the filters' reach
+   over the levels below, as cblk_wanted's) and cut to the level, each
+   level below the one above's halved as the levels themselves are (its
+   lows'); each window made from the one below and its bands' samples
+   there (the code-blocks under them decoded, their part inside copied
+   in). A window's cut edge is mirrored as the level's is: its samples
+   wrong within a few of it, the errors doubling a level, none of them
+   reaching the region. The windows kept in the tile's own shape, in a
+   stand-in tile-component whose levels are they, so the rows, columns
+   and placing are tile_whole's: a window into its plane, the region
+   there as the whole tile's */
+
+/* the window of component c at the tile's top level decoded: [*x0, *x1) ×
+   [*y0, *y1) on its grid; false: the region not on this tile-component */
+static bool
+win_top(const jpx_t *j, const xtc_t *tc, uint32_t c, int64_t *x0, int64_t *y0, int64_t *x1, int64_t *y1) {
+  const xres_t *tr = &tc->res[tc->nuse - 1u];
+  int64_t       X0, Y0, X1, Y1, m = (int64_t)8 << (tc->nuse - 1u < 40u ? tc->nuse - 1u : 40u);
+
+  region_rect(j, c, &X0, &Y0, &X1, &Y1);
+  X0 += j->px0[c];
+  X1 += j->px0[c];
+  Y0 += j->py0[c];
+  Y1 += j->py0[c];
+  if (X1 <= tr->x0 || X0 >= tr->x1 || Y1 <= tr->y0 || Y0 >= tr->y1) return false;
+  m += 4;
+  *x0 = X0 - m > tr->x0 ? X0 - m : tr->x0;
+  *y0 = Y0 - m > tr->y0 ? Y0 - m : tr->y0;
+  *x1 = X1 + m < tr->x1 ? X1 + m : tr->x1;
+  *y1 = Y1 + m < tr->y1 ? Y1 + m : tr->y1;
+  return true;
+}
+
+/* windows, where theirs are 1 / X_WIN of a tile's samples at most (a
+   test build can make it every region's: 0) */
+#ifndef X_WIN
+#  define X_WIN 4u
+#endif
+
+/* a one-tile image's windows' samples, before the tile is read (its
+   levels as the main header has them), where they're few enough; 0
+   otherwise */
+static uint64_t
+win_small(const jpx_t *j) {
+  uint64_t win = 0u, all = 0u;
+  uint32_t c;
+
+  if (!j->region) return 0u;
+  for (c = 0; c < j->ncomp; c++) {
+    uint32_t T = j->cod.cc[c].levels - j->reduce;
+    int64_t  X0, Y0, X1, Y1, m = ((int64_t)8 << (T < 40u ? T : 40u)) + 4;
+
+    region_rect(j, c, &X0, &Y0, &X1, &Y1);
+    X0 = X0 - m > 0 ? X0 - m : 0;
+    Y0 = Y0 - m > 0 ? Y0 - m : 0;
+    X1 = X1 + m < (int64_t)j->pw[c] ? X1 + m : (int64_t)j->pw[c];
+    Y1 = Y1 + m < (int64_t)j->ph[c] ? Y1 + m : (int64_t)j->ph[c];
+    all += (uint64_t)j->pw[c] * j->ph[c];
+    if (X1 > X0 && Y1 > Y0) win += (uint64_t)(X1 - X0) * (uint64_t)(Y1 - Y0);
+  }
+  return !X_WIN || win * X_WIN <= all ? (win ? win : 1u) : 0u;
+}
+
+/* whether a tile's windows are worth it: few enough of its samples */
+static bool
+win_pays(const jpx_t *j, const xtile_t *t) {
+  uint64_t win = 0u, all = 0u;
+  uint32_t c;
+
+  if (!j->region) return false;
+  for (c = 0; c < j->ncomp; c++) {
+    const xtc_t  *tc = &t->tc[c];
+    const xres_t *tr = &tc->res[tc->nuse - 1u];
+    int64_t       x0, y0, x1, y1;
+
+    if (j->skip[c]) continue;
+    all += (uint64_t)(tr->x1 - tr->x0) * (uint64_t)(tr->y1 - tr->y0);
+    if (win_top(j, tc, c, &x0, &y0, &x1, &y1)) win += (uint64_t)(x1 - x0) * (uint64_t)(y1 - y0);
+  }
+  return !X_WIN || win * X_WIN <= all;
+}
+
+/* a code-block of a band, decoded aside, its part in the band's window
+   (band coordinates [bx0, bx1) × [by0, by1)) copied to the window's
+   samples, that part's place there (offx, offy) */
+typedef struct xwjob {
+  xcblk_t       *b;
+  const xband_t *band;
+  const xcc_t   *cc;
+  uint32_t      *win;
+  size_t         stride;
+  int64_t        bx0, by0, bx1, by1;
+  uint32_t       offx, offy;
+} xwjob_t;
+
+static bool
+win_job(jpx_t *j, xscratch_t *s, void *ctx, uint32_t item) {
+  const xwjob_t *jb = (const xwjob_t *)ctx + item;
+  const xcblk_t *b  = jb->b;
+  uint32_t       w = (uint32_t)(b->x1 - b->x0), h = (uint32_t)(b->y1 - b->y0);
+  int64_t        x0 = b->x0 > jb->bx0 ? b->x0 : jb->bx0, x1 = b->x1 < jb->bx1 ? b->x1 : jb->bx1;
+  int64_t        y0 = b->y0 > jb->by0 ? b->y0 : jb->by0, y1 = b->y1 < jb->by1 ? b->y1 : jb->by1, y;
+  uint32_t      *tmp = lanes(s, (size_t)w * h);
+
+  if (!tmp || !t1_block(j, s, jb->b, jb->band, jb->cc, tmp, w, true)) return false;
+  for (y = y0; y < y1; y++) {
+    memcpy(jb->win + (size_t)(jb->offy + (uint64_t)(y - jb->by0)) * jb->stride + jb->offx + (size_t)(x0 - jb->bx0),
+           tmp + (size_t)(y - b->y0) * w + (size_t)(x0 - b->x0), (size_t)(x1 - x0) * 4u);
+  }
+  return true;
+}
+
+static int64_t
+half_up(int64_t v) {
+  return v >= 0 ? (v + 1) / 2 : -((-v) / 2);
+}
+
+static int64_t
+half_down(int64_t v) {
+  return v >= 0 ? v / 2 : -((-v + 1) / 2);
+}
+
+static bool
+tile_window(jpx_t *j, xtile_t *t) {
+  xtile_t   wt = *t;
+  xtc_t    *wtc;
+  xwjob_t  *jobs = NULL;
+  uint32_t  n = 0, cap = 0, c, r;
+  bool      ok = false;
+
+  if (!(wtc = zget(&t->arena, (uint64_t)j->ncomp * sizeof(*wtc)))) return false;
+  wt.tc = wtc;
+  for (c = 0; c < j->ncomp; c++) {
+    const xtc_t *tc = &t->tc[c];
+    xtc_t       *w  = &wtc[c];
+    int64_t      x0, y0, x1, y1;
+    uint32_t     T = tc->nuse - 1u;
+
+    *w        = *tc;
+    w->data   = NULL;
+    w->mapped = 0u;
+    if (j->skip[c] || !win_top(j, tc, c, &x0, &y0, &x1, &y1)) {
+      /* nothing of it here: an empty top level, nothing placed */
+      if (!(w->res = zget(&t->arena, (uint64_t)tc->nuse * sizeof(*w->res)))) goto done;
+      memcpy(w->res, tc->res, (size_t)tc->nuse * sizeof(*w->res));
+      w->res[T].x1 = w->res[T].x0;
+      w->res[T].y1 = w->res[T].y0;
+      w->x1 = w->x0;
+      w->y1 = w->y0;
+      continue;
+    }
+    /* the levels' windows, the top's down */
+    if (!(w->res = zget(&t->arena, (uint64_t)tc->nuse * sizeof(*w->res)))) goto done;
+    memcpy(w->res, tc->res, (size_t)tc->nuse * sizeof(*w->res));
+    for (r = T + 1u; r-- > 0;) {
+      xres_t *wr = &w->res[r];
+
+      wr->x0 = (int32_t)x0;
+      wr->y0 = (int32_t)y0;
+      wr->x1 = (int32_t)x1;
+      wr->y1 = (int32_t)y1;
+      x0 = half_up(x0);
+      y0 = half_up(y0);
+      x1 = half_up(x1);
+      y1 = half_up(y1);
+    }
+    w->x0 = w->res[T].x0;
+    w->y0 = w->res[T].y0;
+    w->x1 = w->res[T].x1;
+    w->y1 = w->res[T].y1;
+    if (!(w->data = zget(&t->arena, (uint64_t)(w->x1 - w->x0) * (uint64_t)(w->y1 - w->y0) * 4u))) goto done;
+
+    /* the code-blocks under each band's window */
+    for (r = 0; r <= T; r++) {
+      const xres_t *res = &tc->res[r], *wr = &w->res[r];
+      size_t        stride = (size_t)(w->x1 - w->x0);
+      uint32_t      k, b, m;
+      /* the window's lows and highs, as band coordinates; the lows' count */
+      int64_t       lx0 = r ? half_up(wr->x0) : wr->x0, lx1 = r ? half_up(wr->x1) : wr->x1;
+      int64_t       ly0 = r ? half_up(wr->y0) : wr->y0, ly1 = r ? half_up(wr->y1) : wr->y1;
+      int64_t       hx0 = half_down(wr->x0), hx1 = half_down(wr->x1), hy0 = half_down(wr->y0), hy1 = half_down(wr->y1);
+      uint32_t      sw = (uint32_t)(lx1 - lx0), sh = (uint32_t)(ly1 - ly0);
+
+      for (k = 0; k < res->pw * res->ph; k++) {
+        for (b = 0; b < res->nbands; b++) {
+          xpband_t      *pb = &res->prec[k * res->nbands + b];
+          const xband_t *band = &res->band[b];
+          bool           hx = r && b != 1u, hy = r && b != 0u; /* HL, LH, HH: b 0, 1, 2 */
+          int64_t        bx0 = hx ? hx0 : lx0, bx1 = hx ? hx1 : lx1, by0 = hy ? hy0 : ly0, by1 = hy ? hy1 : ly1;
+
+          if (bx1 <= bx0 || by1 <= by0) continue;
+          for (m = 0; m < pb->cw * pb->ch; m++) {
+            xcblk_t *kb = &pb->blk[m];
+            xwjob_t *jb;
+
+            if (!kb->nsegs || kb->x1 <= bx0 || kb->x0 >= bx1 || kb->y1 <= by0 || kb->y0 >= by1) continue;
+            if (n == cap) {
+              uint32_t g = cap ? cap * 2u : 256u;
+              xwjob_t *q = realloc(jobs, (size_t)g * sizeof(*q));
+
+              if (!q) goto done;
+              jobs = q;
+              cap  = g;
+            }
+            jb         = &jobs[n++];
+            jb->b      = kb;
+            jb->band   = band;
+            jb->cc     = tc->cc;
+            jb->win    = w->data;
+            jb->stride = stride;
+            jb->bx0    = bx0;
+            jb->by0    = by0;
+            jb->bx1    = bx1;
+            jb->by1    = by1;
+            jb->offx   = hx ? sw : 0u;
+            jb->offy   = hy ? sh : 0u;
+          }
+        }
+      }
+    }
+  }
+  if (!pool_run(j, win_job, jobs, n)) goto done;
+
+  /* each level's rows and columns, its window's */
+  for (c = 0; c < j->ncomp; c++) {
+    xtc_t *w = &wtc[c];
+
+    if (!w->data) continue;
+    for (r = 1; r < w->nuse; r++) {
+      xlevel_t lv;
+      uint32_t ww = (uint32_t)(w->res[r].x1 - w->res[r].x0), wh = (uint32_t)(w->res[r].y1 - w->res[r].y0);
+
+      lv.tc = w;
+      lv.r  = r;
+      if (!ww || !wh) continue;
+      if (!pool_run(j, idwt_rows, &lv, (wh + V - 1u) / V) || !pool_run(j, idwt_cols, &lv, (ww + STRIP - 1u) / STRIP)) goto done;
+    }
+  }
+
+  /* the colour transform, the DC level shift, the windows into the planes */
+  {
+    xplace_t pl;
+
+    memset(&pl, 0, sizeof(pl));
+    pl.t   = &wt;
+    pl.mct = tile_mct(j, t);
+    for (c = 0; c < j->ncomp; c++) {
+      pl.hi[c] = wtc[c].data ? (uint32_t)(top(&wtc[c])->y1 - top(&wtc[c])->y0) : 0u;
+      if (pl.hi[c] > pl.rows) pl.rows = pl.hi[c];
+    }
+    ok = !pl.rows || pool_run(j, place_row, &pl, pl.rows);
+  }
+
+done:
+  free(jobs);
+  return ok;
+}
+
 static bool
 tile_decode(jpx_t *j, uint32_t tile) {
   xtile_t *t;
   bool     ok;
 
   if (!tile_open(j, tile, &t)) return false;
-  ok = !t || tile_whole(j, t);
+  ok = !t || (win_pays(j, t) ? tile_window(j, t) : tile_whole(j, t));
   tile_close(t);
   return ok;
 }
@@ -5840,6 +6103,12 @@ jpx_decode(const uint8_t *data, size_t len, ImImage *im, const jxopts_t *o) {
        tiles tall; else its planes mapped, given back as composed */
     j->big  = all + tile >= X_BIG;
     bands   = j->big && j->ntx == 1u && j->nty == 1u;
+    /* a small region of one big tile: its windows alone (tile_window), the
+       planes mapped (only the region's pages touched) */
+    if (bands && (j->win = win_small(j) != 0u)) {
+      bands = false;
+      tile  = win_small(j) * 4u;
+    }
     j->rows = j->big && !bands && j->nty > 1u;
     j->pmap = j->big && !bands && !j->rows;
     for (c = 0; c < j->ncomp; c++) {

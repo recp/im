@@ -1412,3 +1412,53 @@ TEST_IMPL(jpg_index) {
   im_index_free(NULL);
   TEST_SUCCESS
 }
+
+/* a JPEG 2000 region much smaller than its tile, by windows (its levels'
+   reach of it alone, jp2.c's tile_window): 640×480, two levels, 5/3 and
+   9/7; each scale's regions, at the corners, edges and inside, against the
+   whole decode cut there, on one thread and many */
+TEST_IMPL(jp2_window) {
+  static const char *names[] = { "win.j2k", "win97.j2k" };
+  size_t             i;
+
+  for (i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+    size_t   len = 0;
+    uint8_t *d = read_all("jp2", names[i], &len);
+    uint32_t sc, th, k;
+
+    ASSERT(d);
+    for (sc = 1; sc <= 8u; sc *= 2u) {
+      ImImage *a = ix_dec(d, len, 1u, sc, 0, 0, 0, 0, NULL);
+      uint32_t W, H, bpp;
+
+      ASSERT(a);
+      W   = a->width;
+      H   = a->height;
+      bpp = a->bytesPerPixel;
+      {
+        const uint32_t reg[8][4] = { { 0, 0, 9, 7 }, { W - 5u, H - 3u, 5, 3 }, { W / 2u, H / 2u, 17, 13 }, { 0, H / 3u, 3, 40 },
+                                     { W - 1u, 0, 1, 1 }, { W / 3u, H - 1u, 30, 1 }, { 1, 1, 1, 1 }, { W / 4u + 1u, H / 5u, 11, 11 } };
+
+        for (k = 0; k < 8u; k++) {
+          for (th = 0; th < 2u; th++) {
+            ImImage *b = ix_dec(d, len, th ? 0u : 1u, sc, reg[k][0], reg[k][1], reg[k][2], reg[k][3], NULL);
+            uint32_t y, w, h;
+
+            ASSERT(b);
+            w = reg[k][2] < W - reg[k][0] ? reg[k][2] : W - reg[k][0];
+            h = reg[k][3] < H - reg[k][1] ? reg[k][3] : H - reg[k][1];
+            ASSERT(b->width == w && b->height == h);
+            for (y = 0; y < h; y++) {
+              ASSERT(!memcmp((uint8_t *)b->data.data + (size_t)y * w * bpp,
+                             (uint8_t *)a->data.data + ((size_t)(reg[k][1] + y) * W + reg[k][0]) * bpp, (size_t)w * bpp));
+            }
+            im_free(b);
+          }
+        }
+      }
+      im_free(a);
+    }
+    free(d);
+  }
+  TEST_SUCCESS
+}

@@ -103,8 +103,10 @@ typedef enum im_option_type_t {
      out where the format allows (JPEG: blocks outside not transformed,
      colours made only inside, the rows below never decoded, restart
      intervals above passed over, with an index (IM_OPTION_INDEX) the rows
-     above it too; JPEG-LS: the rows below and the restart intervals above
-     too) */
+     above it too; JPEG 2000: tiles outside it never decoded, code-blocks
+     that can't reach it left out, one much smaller than its tile made by
+     each level's window of it alone; JPEG-LS: the rows below and the
+     restart intervals above too) */
   IM_OPTION_REGION,
 
   /* the most memory a decode may make for the image (im_option_memory,
