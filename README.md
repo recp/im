@@ -18,7 +18,7 @@ TODO
       upsampling and colour; JPEG 2000's wavelet and colour), on the GPU for big images; the Huffman and MQ
       decoding stays on the CPU's threads
 - [x] Cocoa and Win32 helpers
-- [x] From memory (`im_load_mem`, `im_info_mem`: JPEG, JPEG 2000, JBIG2; raw CCITT fax), with options: threads,
+- [x] From memory (`im_load_mem`, `im_info_mem`: JPEG, JPEG-LS, JPEG 2000, JBIG2; raw CCITT fax), with options: threads,
       a JPEG's colour transform said by its container, CMYK as stored, RGB padded to RGB0, a palette's
       indexes, 8 bits by OpenJPEG's rounding, the opacity apart (or not decoded), decoded ½, ¼ or ⅛ the
       size, a region alone (`im_option_region`), a memory limit (`im_option_memory`: `IM_ENOMEM` before
@@ -28,10 +28,10 @@ TODO
       defl and huff submodules
 - [x] WebAssembly (WASI): wasi-sdk's toolchain file, `-DIM_STATIC=ON` (`-msimd128` for SIMD128);
       one thread, files read (no mmap)
-- [x] The codecs alone (`-DIM_CODECS_ONLY=ON`): JPEG, JPEG 2000, CCITT fax and JBIG2 from memory (`im_load_mem`,
+- [x] The codecs alone (`-DIM_CODECS_ONLY=ON`): JPEG, JPEG-LS, JPEG 2000, CCITT fax and JBIG2 from memory (`im_load_mem`,
       `im_info_mem`, `im_free`), no file layer, other formats, submodules or frameworks; `-DIM_NO_THREADS=ON`
       (WASI without `-pthread` on its own) leaves the thread layer out, decoders on the caller's thread.
-      Built by hand: `src/load.c`, `src/io/jpg/{jpg,arith,huff,idct,sample}.c`, `src/io/jp2/jp2.c`,
+      Built by hand: `src/load.c`, `src/io/jpg/{jpg,arith,huff,idct,sample,jls}.c`, `src/io/jp2/jp2.c`,
       `src/io/ccitt/ccitt.c`, `src/io/jbig2/jbig2.c`, `src/thread/pool.c`, and `src/posix/thread.c` or `src/win/thread.c` (none without threads), with
       `IM_CODECS_ONLY=1`, `IM_STATIC`, `include/` and `src/` on the include path
 - [x] `-DIM_PREFIX=app_`: a codec-only build's every symbol under that prefix (callers' names unchanged,
@@ -51,6 +51,13 @@ TODO
   - [x] hierarchical: DHP's frames one after another, differential frames (DCT, progressive, lossless;
         either coding) on the references grown as EXP says (J.1.1.2's filter)
   - [x] decoded smaller (`IM_OPTION_SCALE`): ½, ¼, ⅛ by a smaller IDCT, libjpeg's scaled decode to the byte
+- [x] JPEG-LS (T.87; `.jls`, or a JPEG stream whose frame is SOF55)
+  - [x] lossless and near-lossless, 2 to 16 bits, up to 255 components (2 and 5 or more as they are)
+  - [x] each interleave (none, by lines, by samples), sampling factors, restart intervals, DNL
+  - [x] LSE: preset parameters, mapping tables (a byte or two an entry; three: RGB), oversize dimensions
+  - [x] HP's colour transforms (CharLS's APP8 "mrfx"); SPIFF's colour space and resolution, Adobe's YCbCr
+  - [x] on threads: restart intervals and scans; a region's rows below never decoded
+  - [x] CharLS's pixels; T.87 where CharLS isn't (a preset MAXVAL below 2^P - 1, RESET past 255)
 - [x] PNG (In Progress)
   - [x] palette
   - [x] color types

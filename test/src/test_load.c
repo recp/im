@@ -1131,3 +1131,174 @@ TEST_IMPL(jbig2) {
   TEST_SUCCESS
 }
 
+
+/* JPEG-LS: T.87's example; one 37×23 crop coded by CharLS (by components,
+   lines, samples; HP's colour transforms) and by the JPEG XT reference
+   software (restart intervals, a DNL), each to its same pixels; the rest
+   hashed (NEAR 3; 4, 12 and 16 bits; 2 and 5 components as they are;
+   chroma subsampled 2×2, by components and by lines; a preset MAXVAL of
+   200, a RESET of 1000; checked against the crop where lossless); a
+   mapping table; the options */
+TEST_IMPL(jls) {
+  /* H.3's image, H.4.1's stream */
+  static const uint8_t h4[] = {
+    0xFF, 0xD8, 0xFF, 0xF7, 0x00, 0x0B, 0x08, 0x00, 0x04, 0x00, 0x04, 0x01, 0x01, 0x11, 0x00, 0xFF,
+    0xDA, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x6C, 0x80, 0x20, 0x8E,
+    0x01, 0xC0, 0x00, 0x00, 0x57, 0x40, 0x00, 0x00, 0x6E, 0xE6, 0x00, 0x00, 0x01, 0xBC, 0x18, 0x00,
+    0x00, 0x05, 0xD8, 0x00, 0x00, 0x91, 0x60, 0xFF, 0xD9
+  };
+  static const uint8_t h4px[16] = { 0, 0, 90, 74, 68, 50, 43, 205, 64, 145, 145, 145, 100, 145, 145, 145 };
+  static const char   *rgb[] = { "rgb0", "rgb1", "rgb2", "rst0", "rst1", "rst2", "dnl", "hp1", "hp2", "hp3" };
+  static const struct {
+    const char *name;
+    uint32_t    w, h, comps, bits;
+    ImFormat    format;
+    uint32_t    hash;
+  } cases[] = {
+    { "gray8",  37, 23, 1,  8, IM_FORMAT_GRAY, 0x52365CE9u },
+    { "near",   37, 23, 3,  8, IM_FORMAT_RGB,  0x0AA86516u },
+    { "p4",     37, 23, 1,  8, IM_FORMAT_GRAY, 0x557A23ECu },
+    { "p12",    37, 23, 1, 16, IM_FORMAT_GRAY, 0x1C768B5Du },
+    { "p16",    37, 23, 3, 16, IM_FORMAT_RGB,  0x6ED128FCu },
+    { "c2",     37, 23, 2,  8, IM_FORMAT_NONE, 0x275C2D6Bu },
+    { "c5",     37, 23, 5,  8, IM_FORMAT_NONE, 0xA9CDA332u },
+    { "sub0",   37, 24, 3,  8, IM_FORMAT_RGB,  0x37F24AF2u }, /* by lines the same */
+    { "sub1",   37, 24, 3,  8, IM_FORMAT_RGB,  0x37F24AF2u },
+    { "maxval", 37, 23, 1,  8, IM_FORMAT_GRAY, 0x56684E23u },
+    { "reset",  37, 23, 1, 16, IM_FORMAT_GRAY, 0x5980D223u },
+  };
+  im_option_int_t one = im_option_int(IM_OPTION_THREADS, 1);
+  ImImage        *a, *b;
+  ImInfo          info;
+  size_t          i, k;
+
+  ASSERT(im_load_mem(&a, h4, sizeof(h4), NULL, IM_OPEN_INTENT_READONLY) == IM_OK && a);
+  ASSERT(a->width == 4u && a->height == 4u && a->format == IM_FORMAT_GRAY && a->bitsPerComponent == 8u);
+  ASSERT(a->fileFormatType == IM_FILEFORMATTYPE_JLS && a->len == 16u && !memcmp(a->data.data, h4px, 16));
+  im_free(a);
+  ASSERT(im_info_mem(&info, h4, sizeof(h4)) == IM_OK && info.fileFormatType == IM_FILEFORMATTYPE_JLS);
+  ASSERT(info.coding == IM_CODING_JPEGLS && info.width == 4u && info.height == 4u && info.components == 1u);
+  ASSERT(info.bitsPerComponent == 8u && info.pages == 1u);
+
+  /* one image, however coded */
+  a = mem("jls", "rgb0.jls", NULL, NULL);
+  ASSERT(a && a->width == 37u && a->height == 23u && a->format == IM_FORMAT_RGB && a->bitsPerComponent == 8u);
+  for (i = 0; i < sizeof(rgb) / sizeof(rgb[0]); i++) {
+    char name[32];
+
+    snprintf(name, sizeof(name), "%s.jls", rgb[i]);
+    ASSERT(same(a, b = mem("jls", name, NULL, NULL)));
+    im_free(b);
+    ASSERT(same(a, b = mem("jls", name, &one.base, NULL)));
+    im_free(b);
+  }
+
+  for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+    char     name[32];
+    uint32_t h;
+
+    snprintf(name, sizeof(name), "%s.jls", cases[i].name);
+    b = mem("jls", name, NULL, NULL);
+    ASSERT(b && b->width == cases[i].w && b->height == cases[i].h && b->componentsPerPixel == cases[i].comps);
+    ASSERT(b->bitsPerComponent == cases[i].bits && b->format == cases[i].format);
+    ASSERT(b->len == (size_t)b->width * b->height * b->componentsPerPixel * (b->bitsPerComponent / 8u));
+    h = fnv1a(b->data.data, b->len);
+    if (h != cases[i].hash) fprintf(stderr, "  %s: 0x%08X\n", name, h);
+    ASSERT(h == cases[i].hash);
+    im_free(b);
+  }
+
+  /* a mapping table (255 - v, a byte an entry): each sample through it */
+  {
+    ImImage *g = mem("jls", "gray8.jls", NULL, NULL), *m = mem("jls", "map.jls", NULL, NULL);
+
+    ASSERT(g && m && m->len == g->len && m->format == IM_FORMAT_GRAY);
+    for (k = 0; k < g->len; k++) ASSERT(((uint8_t *)m->data.data)[k] == 255u - ((uint8_t *)g->data.data)[k]);
+    im_free(g);
+    im_free(m);
+  }
+
+  /* a region: the whole image's pixels there */
+  {
+    im_option_region_t rg = im_option_region(5u, 7u, 20u, 9u);
+    uint32_t           y;
+
+    ASSERT((b = mem("jls", "rst2.jls", &rg.base, NULL)) && b->width == 20u && b->height == 9u);
+    for (y = 0; y < 9u; y++) {
+      ASSERT(!memcmp((uint8_t *)b->data.data + (size_t)y * 60u, (uint8_t *)a->data.data + ((size_t)(y + 7u) * 37u + 5u) * 3u, 60u));
+    }
+    im_free(b);
+  }
+  /* RGB padded; the caller's memory */
+  {
+    im_option_bool_t pad = im_option_bool(IM_OPTION_RGB_PADDED, true);
+    size_t           stride = 37u * 3u + 5u, size = stride * 22u + 37u * 3u, y;
+    uint8_t         *buf = malloc(size);
+
+    ASSERT((b = mem("jls", "rgb1.jls", &pad.base, NULL)) && b->format == IM_FORMAT_RGB0 && b->componentsPerPixel == 4u);
+    for (k = 0; k < 37u * 23u; k++) {
+      ASSERT(!memcmp((uint8_t *)b->data.data + k * 4u, (uint8_t *)a->data.data + k * 3u, 3u));
+      ASSERT(((uint8_t *)b->data.data)[k * 4u + 3u] == 0xFFu);
+    }
+    im_free(b);
+    ASSERT(buf);
+    {
+      im_option_dest_t d = im_option_dest(buf, stride, size);
+
+      ASSERT((b = mem("jls", "rgb0.jls", &d.base, NULL)) && !b->data.data && b->row_pad_last == 5u);
+      for (y = 0; y < 23u; y++) ASSERT(!memcmp(buf + y * stride, (uint8_t *)a->data.data + y * 111u, 111u));
+      im_free(b);
+    }
+    {
+      im_option_dest_t d = im_option_dest(buf, stride, size - 1u);
+
+      ASSERT(!mem("jls", "rgb0.jls", &d.base, NULL));
+    }
+    free(buf);
+  }
+  /* 16 bits in the order asked */
+  {
+    im_option_byteorder_t be = im_option_row_byteorder(IM_BYTEORDER_BIG), le = im_option_row_byteorder(IM_BYTEORDER_LITTLE);
+    ImImage              *x = mem("jls", "p16.jls", &be.base, NULL), *y = mem("jls", "p16.jls", &le.base, NULL);
+
+    ASSERT(x && y && x->len == y->len && x->byteOrder == IM_BYTEORDER_BIG && y->byteOrder == IM_BYTEORDER_LITTLE);
+    for (k = 0; k < x->len; k += 2u) {
+      ASSERT(((uint8_t *)x->data.data)[k] == ((uint8_t *)y->data.data)[k + 1u]);
+      ASSERT(((uint8_t *)x->data.data)[k + 1u] == ((uint8_t *)y->data.data)[k]);
+    }
+    im_free(x);
+    im_free(y);
+  }
+  /* a limit it doesn't fit; the bytes read (past EOI, not what follows);
+     cut short anywhere: an image or none, nothing worse */
+  {
+    im_option_size_t  tiny = im_option_memory(256u);
+    size_t            len = 0, used = 0;
+    uint8_t          *d = read_all("jls", "rst1.jls", &len), *more;
+    im_option_bytes_t br = im_option_bytes_read(&used);
+
+    ASSERT(d && im_load_mem(&b, d, len, (im_option_base_t *[]){ &tiny.base, NULL }, IM_OPEN_INTENT_READONLY) == IM_ENOMEM);
+    ASSERT((more = malloc(len + 7u)));
+    memcpy(more, d, len);
+    memset(more + len, 0x5A, 7u);
+    ASSERT(im_load_mem(&b, more, len + 7u, (im_option_base_t *[]){ &br.base, NULL }, IM_OPEN_INTENT_READONLY) == IM_OK);
+    ASSERT(used == len && same(a, b));
+    im_free(b);
+    for (k = 2; k < len; k++) {
+      if (im_load_mem(&b, d, k, NULL, IM_OPEN_INTENT_READONLY) == IM_OK) im_free(b);
+    }
+    ASSERT(im_info_mem(&info, d, len) == IM_OK && info.width == 37u && info.height == 23u && info.components == 3u);
+    free(more);
+    free(d);
+  }
+  /* the DNL's height */
+  {
+    size_t   len = 0;
+    uint8_t *d = read_all("jls", "dnl.jls", &len);
+
+    ASSERT(d && im_info_mem(&info, d, len) == IM_OK && info.height == 23u && info.coding == IM_CODING_JPEGLS);
+    free(d);
+  }
+  im_free(a);
+  TEST_SUCCESS
+}

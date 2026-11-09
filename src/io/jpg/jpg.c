@@ -1596,6 +1596,7 @@ jpg_info(const uint8_t *data, size_t len, ImInfo *info) {
 
   memset(info, 0, sizeof(*info));
   if (len < 4u || p[0] != 0xFFu || p[1] != 0xD8u) return false;
+  if (jls_is(data, len)) return jls_info(data, len, info);
   p += 2;
   for (;;) {
     uint32_t m = marker_at(&p, end), l;
@@ -1648,6 +1649,7 @@ jpg_decode_mem(const uint8_t *data, size_t len, ImImage *im, const jopts_t *o) {
   jpg_t *j;
   bool   ok;
 
+  if (jls_is(data, len)) return jls_decode_mem(data, len, im, o);
   if (!(j = calloc(1, sizeof(*j)))) return false;
   j->data           = data;
   j->end            = data + len;
@@ -1720,7 +1722,7 @@ dec(const uint8_t *data, size_t len, const im_open_config_t *conf, ImResult *res
   if (im) {
     im->openIntent     = conf->openIntent;
     im->ori            = IM_ORIENTATION_UP;
-    im->fileFormatType = IM_FILEFORMATTYPE_JPEG;
+    im->fileFormatType = jls_is(data, len) ? IM_FILEFORMATTYPE_JLS : IM_FILEFORMATTYPE_JPEG;
   }
   return im;
 }

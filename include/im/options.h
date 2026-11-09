@@ -90,7 +90,7 @@ typedef enum im_option_type_t {
 
   /* decoded smaller (uint): the width and height over 1 (the default), 2,
      4 or 8, rounded up; other values 1. JPEG by a smaller IDCT (libjpeg's
-     scaled decode; a lossless one keeps its size); JPEG 2000 its finest
+     scaled decode; a lossless one keeps its size, as JPEG-LS does); JPEG 2000 its finest
      resolution levels left out (OpenJPEG's reduce; no more than it has;
      one a palette maps at its size). The image's width and height say
      what came */
@@ -102,7 +102,8 @@ typedef enum im_option_type_t {
      rectangle (IM_OPTION_DEST's memory holds it). Work outside it is left
      out where the format allows (JPEG: blocks outside not transformed,
      colours made only inside, the rows below never decoded, restart
-     intervals above passed over) */
+     intervals above passed over; JPEG-LS: the rows below and the restart
+     intervals above too) */
   IM_OPTION_REGION,
 
   /* the most memory a decode may make for the image (im_option_memory,

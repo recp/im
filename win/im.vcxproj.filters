@@ -262,6 +262,9 @@
     <ClCompile Include="..\src\io\jpg\huff.c">
       <Filter>src\io\jpg</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\io\jpg\jls.c">
+      <Filter>src\io\jpg</Filter>
+    </ClCompile>
     <ClCompile Include="..\src\io\jpg\idct.c">
       <Filter>src\io\jpg</Filter>
     </ClCompile>

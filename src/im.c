@@ -198,6 +198,9 @@ static const imloader extmap[256] = {
 #if IM_WITH_JP2
   [0xBB] = jp2_dec,         /* jpc  */
 #endif
+#if IM_WITH_JPG
+  [0xC1] = jpg_dec,         /* jls  */
+#endif
 #if IM_WITH_JP2
   [0xD8] = jp2_dec,         /* jhc  */
 #endif

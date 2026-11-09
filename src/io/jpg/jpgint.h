@@ -279,6 +279,11 @@ IM_HIDE bool jpg_region_cut(jpg_t *j);
 IM_HIDE uint64_t jpg_frame_bytes(const jpg_t *j);
 IM_HIDE uint32_t jpg_region_rows(const jpg_t *j, uint32_t w, uint32_t h, uint32_t *first);
 
+/* jls.c: JPEG-LS (T.87), whose first frame is SOF55 */
+IM_HIDE bool jls_is(const uint8_t *data, size_t len);
+IM_HIDE bool jls_info(const uint8_t *data, size_t len, ImInfo *info);
+IM_HIDE bool jls_decode_mem(const uint8_t *data, size_t len, ImImage *im, const jopts_t *o);
+
 /* huff.c */
 IM_HIDE bool jpg_huff_build(jhuff_t *h, const uint8_t counts[16], const uint8_t *vals, bool dc, bool lossless);
 IM_HIDE void jpg_huff_free(jhuff_t *h);

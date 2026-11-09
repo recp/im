@@ -57,6 +57,7 @@ TEST_DECLARE(region)
 TEST_DECLARE(memory_limit)
 TEST_DECLARE(ccitt)
 TEST_DECLARE(jbig2)
+TEST_DECLARE(jls)
 #endif
 
 /*****************************************************************************/
@@ -94,6 +95,7 @@ TEST_LIST {
   TEST_ENTRY(memory_limit)
   TEST_ENTRY(ccitt)
   TEST_ENTRY(jbig2)
+  TEST_ENTRY(jls)
 #endif
 };
 

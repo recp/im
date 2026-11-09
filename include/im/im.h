@@ -115,7 +115,8 @@ typedef enum ImFileFormatType {
   IM_FILEFORMATTYPE_JP2,
   IM_FILEFORMATTYPE_J2K,  /* a bare JPEG 2000 codestream */
   IM_FILEFORMATTYPE_CCITT, /* raw CCITT fax: Group 3 or 4 (IM_OPTION_CCITT) */
-  IM_FILEFORMATTYPE_JBIG2  /* JBIG2: a file, or a stream's embedded segments */
+  IM_FILEFORMATTYPE_JBIG2, /* JBIG2: a file, or a stream's embedded segments */
+  IM_FILEFORMATTYPE_JLS    /* JPEG-LS */
 } ImFileFormatType;
 
 typedef enum ImColorSpace {
@@ -270,12 +271,13 @@ typedef enum ImCoding {
   IM_CODING_PROGRESSIVE,  /* SOF2, SOF10 */
   IM_CODING_LOSSLESS,     /* SOF3, SOF11 */
   IM_CODING_HIERARCHICAL, /* DHP's frames: then SOF5–7, SOF13–15 ones */
-  IM_CODING_JPEG2000
+  IM_CODING_JPEG2000,
+  IM_CODING_JPEGLS        /* SOF55: lossless or near-lossless */
 } ImCoding;
 
 /* what an image's headers say, nothing decoded */
 typedef struct ImInfo {
-  ImFileFormatType fileFormatType;   /* JPEG, JP2 or J2K */
+  ImFileFormatType fileFormatType;   /* JPEG, JLS, JP2, J2K or JBIG2 */
   ImCoding         coding;
   uint32_t         width, height;    /* a JPEG's height from its DNL where the frame has none */
   uint32_t         components;       /* in the file (JPEG 2000: the codestream's) */

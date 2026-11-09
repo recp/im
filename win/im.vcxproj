@@ -207,6 +207,7 @@
     <ClCompile Include="..\src\io\jpg\arith.c" />
     <ClCompile Include="..\src\io\jpg\huff.c" />
     <ClCompile Include="..\src\io\jpg\idct.c" />
+    <ClCompile Include="..\src\io\jpg\jls.c" />
     <ClCompile Include="..\src\io\jpg\jpg.c" />
     <ClCompile Include="..\src\io\jpg\sample.c" />
     <ClCompile Include="..\src\io\png\png.c" />
