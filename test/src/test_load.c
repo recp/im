@@ -1302,3 +1302,113 @@ TEST_IMPL(jls) {
   im_free(a);
   TEST_SUCCESS
 }
+
+/* a JPEG's index (IM_OPTION_INDEX, im_index_mem): with it every scale's
+   regions and the whole are the pixels without it, on one thread and on
+   many; one a decode makes as it reads is the skim's; one a region decode
+   made (its rows to the region's) serves below them too; another file's,
+   or one whose headers changed, is passed over; streams it isn't for have
+   none */
+static ImImage*
+ix_dec(const uint8_t *d, size_t len, uint32_t th, uint32_t sc, uint32_t x, uint32_t y, uint32_t w, uint32_t h, ImIndex **ix) {
+  im_option_int_t    t = im_option_int(IM_OPTION_THREADS, (int32_t)th), s = im_option_int(IM_OPTION_SCALE, (int32_t)sc);
+  im_option_region_t g = im_option_region(x, y, w, h);
+  im_option_index_t  o = im_option_index(ix);
+  im_option_base_t  *opts[5] = { &t.base, &s.base, NULL, NULL, NULL };
+  ImImage           *im = NULL;
+  size_t             k = 2;
+
+  if (w) opts[k++] = &g.base;
+  if (ix) opts[k++] = &o.base;
+  return im_load_mem(&im, d, len, opts, IM_OPEN_INTENT_READONLY) == IM_OK ? im : NULL;
+}
+
+TEST_IMPL(jpg_index) {
+  static const char *with[] = { "420.jpg", "444.jpg", "411.jpg", "gray.jpg", "p12.jpg", "cmyk.jpg", "dnl.jpg",
+                                "420-cut.jpg", "tiny.jpg", "mixed.jpg" };
+  static const char *none[] = { "prog.jpg", "arith.jpg", "rst.jpg", "ll1.jpg", "hier.jpg", "threads.jpg" };
+  ImIndex           *other = NULL;
+  size_t             i;
+
+  for (i = 0; i < sizeof(with) / sizeof(with[0]); i++) {
+    size_t   len = 0;
+    uint8_t *d = read_all("jpg", with[i], &len);
+    ImIndex *ix = NULL, *made = NULL, *part = NULL;
+    ImImage *a, *b;
+    uint32_t sc, th, k, W, H;
+
+    ASSERT(d && im_index_mem(&ix, d, len, NULL) == IM_OK && ix && im_index_size(ix) > 0u);
+    a = mem("jpg", with[i], NULL, NULL);
+    ASSERT(a);
+    for (sc = 1; sc <= 8u; sc *= 2u) {
+      W = (a->width + sc - 1u) / sc;
+      H = (a->height + sc - 1u) / sc;
+      {
+        const uint32_t reg[6][4] = { { 0, 0, 0, 0 }, { 0, H - 1u, W, 1 }, { W / 2u, H / 2u, W, H }, { W - 1u, 0, 1, H },
+                                     { 1u < W ? 1u : 0u, H / 3u, W / 3u + 1u, 2 }, { W / 4u, H > 2u ? H - 2u : 0u, 3, 7 } };
+
+        for (k = 0; k < 6u; k++) {
+          for (th = 0; th < 2u; th++) {
+            ImImage *x = ix_dec(d, len, th ? 0u : 1u, sc, reg[k][0], reg[k][1], reg[k][2], reg[k][3], NULL);
+
+            ASSERT(x && same(x, b = ix_dec(d, len, th ? 0u : 1u, sc, reg[k][0], reg[k][1], reg[k][2], reg[k][3], &ix)));
+            im_free(b);
+            if (other) {
+              ASSERT(same(x, b = ix_dec(d, len, th ? 0u : 1u, sc, reg[k][0], reg[k][1], reg[k][2], reg[k][3], &other)));
+              im_free(b);
+            }
+            im_free(x);
+          }
+        }
+      }
+    }
+    /* made as a decode reads: the skim's */
+    ASSERT((b = ix_dec(d, len, 0u, 8u, 0, 0, 0, 0, &made)) && made && im_index_size(made) == im_index_size(ix));
+    im_free(b);
+    ASSERT(same(a, b = ix_dec(d, len, 0u, 1u, 0, 0, 0, 0, &made)));
+    im_free(b);
+    /* a region's (rows to its bottom), used for the last row */
+    ASSERT((b = ix_dec(d, len, 1u, 1u, 0, a->height / 3u, 5, 1, &part)) && part);
+    im_free(b);
+    ASSERT(im_index_size(part) <= im_index_size(ix));
+    {
+      ImImage *x = ix_dec(d, len, 1u, 1u, 0, a->height - 1u, a->width, 1, NULL);
+
+      ASSERT(x && same(x, b = ix_dec(d, len, 0u, 1u, 0, a->height - 1u, a->width, 1, &part)));
+      im_free(x);
+      im_free(b);
+    }
+    /* headers changed (a COM's byte, past its marker): the index passed over */
+    {
+      uint8_t *e = malloc(len + 6u);
+
+      ASSERT(e);
+      memcpy(e, d, 2u);
+      memcpy(e + 2u, "\xFF\xFE\x00\x04hi", 6u);
+      memcpy(e + 8u, d + 2u, len - 2u);
+      ASSERT(same(a, b = ix_dec(e, len + 6u, 1u, 1u, 0, 0, 0, 0, &ix)));
+      im_free(b);
+      free(e);
+    }
+    im_free(a);
+    im_index_free(made);
+    im_index_free(part);
+    im_index_free(other);
+    other = ix;
+    free(d);
+  }
+  im_index_free(other);
+  for (i = 0; i < sizeof(none) / sizeof(none[0]); i++) {
+    size_t   len = 0;
+    uint8_t *d = read_all("jpg", none[i], &len);
+    ImIndex *ix = NULL;
+    ImImage *b;
+
+    ASSERT(d && im_index_mem(&ix, d, len, NULL) == IM_EBADF && !ix);
+    ASSERT((b = ix_dec(d, len, 1u, 1u, 0, 0, 0, 0, &ix)) && !ix);
+    im_free(b);
+    free(d);
+  }
+  im_index_free(NULL);
+  TEST_SUCCESS
+}

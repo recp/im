@@ -36,6 +36,9 @@
 #  define im_init_data   IM_PFX(im_init_data)
 #  define im_load_hex    IM_PFX(im_load_hex)
 #  define im_load_base64 IM_PFX(im_load_base64)
+#  define im_index_mem   IM_PFX(im_index_mem)
+#  define im_index_size  IM_PFX(im_index_size)
+#  define im_index_free  IM_PFX(im_index_free)
 #endif
 
 #endif /* im_prefix_h */

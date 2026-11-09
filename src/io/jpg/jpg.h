@@ -38,4 +38,9 @@ jpg_dec_mem(ImImage               ** __restrict dest,
            size_t                              len,
            const im_open_config_t * __restrict open_config);
 
+/* a JPEG's index (im_index_mem, IM_OPTION_INDEX): made, its bytes, freed */
+IM_HIDE ImResult jpg_index_mem(ImIndex **dest, const uint8_t *data, size_t len, const im_open_config_t *conf);
+IM_HIDE size_t   jpg_index_size(const ImIndex *ix);
+IM_HIDE void     jpg_index_free(ImIndex *ix);
+
 #endif /* src_jpg_h */

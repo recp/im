@@ -303,6 +303,36 @@ im_load_mem(ImImage         ** __restrict dest,
             im_option_base_t *            options[],
             ImOpenIntent                  openIntent);
 
+/* A JPEG's entropy-coded data indexed: the state at each MCU row's start
+   (where its bits start, the DC predictions), some 24 bytes a row, so a
+   decode of the same bytes (IM_OPTION_INDEX) starts at the row a region
+   needs, not the first, and on threads each worker at its own rows. For
+   a one-pass sequential Huffman scan (baseline and extended JPEG) without
+   restart markers (they mark their intervals already); other streams have
+   none. Read only once made: one serves decodes running at once. Tied to
+   the bytes it was made from: their length and headers checked, other
+   bytes decoded as if none were given */
+
+/* the index of `data`: its entropy-coded data read through and nothing
+   else (on threads as IM_OPTION_THREADS, IM_OPTION_RUNNER say), the
+   caller's (im_index_free); IM_EBADF where it has none (not such a JPEG,
+   or damaged before its end) */
+IM_EXPORT
+ImResult
+im_index_mem(ImIndex         ** __restrict dest,
+             const void       * __restrict data,
+             size_t                        len,
+             im_option_base_t *            options[]);
+
+/* its bytes */
+IM_EXPORT
+size_t
+im_index_size(const ImIndex * __restrict index);
+
+IM_EXPORT
+void
+im_index_free(ImIndex * __restrict index);
+
 IM_EXPORT
 ImImage*
 im_load_hex(const char * __restrict hexdata);

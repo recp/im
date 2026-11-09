@@ -91,6 +91,7 @@ typedef struct im_open_config_t {
   size_t            jbig2GlobalsLen;
   uint32_t          page;           /* IM_OPTION_PAGE's (0: the first) */
   size_t           *bytesRead;      /* IM_OPTION_BYTES_READ's (NULL: none) */
+  ImIndex         **index;          /* IM_OPTION_INDEX's (NULL: none) */
 } im_open_config_t;
 
 /* the options as a decoder reads them (load.c) */

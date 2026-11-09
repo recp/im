@@ -1391,6 +1391,7 @@ seq_range(jctx_t *x, const jsblk_t *list, uint32_t nb, uint32_t w, uint32_t b0, 
   uint32_t vdiv = j->nscomp == 1u ? j->comp[j->scomp[0]].v : 1u, row = my / vdiv;
   size_t   es = j->diff ? 4u : j->prec <= 8u ? 1u : 2u;
   bool     diff = j->diff;
+  jcp_t   *rec = j->rec; /* an index made: each row's start kept */
 
   for (b = b0; b < b1; b++) {
     const jsblk_t *s = &list[slot];
@@ -1399,7 +1400,15 @@ seq_range(jctx_t *x, const jsblk_t *list, uint32_t nb, uint32_t w, uint32_t b0, 
 
     memset(blk, 0, sizeof(blk));
     if (!x->lacking) {
-      if (!slot) x->last_good = row;
+      if (!slot) {
+        x->last_good = row;
+        if (rec && !mx && my < j->nrec) {
+          uint32_t i;
+
+          rec[my].at = ((uint64_t)(bs.p - x->r.org) + x->r.pre) * 8u - bs.n;
+          for (i = 0; i < j->nscomp; i++) rec[my].dc[i] = x->dc[j->scomp[i]];
+        }
+      }
       if (!x->r.tail && bs.p >= x->r.lim) {
         x->r.b = bs;
         rd_tail(x);
@@ -2281,7 +2290,7 @@ scan_spec(jpg_t *j, im_pool_t *pool, uint32_t w, uint32_t h, size_t margin, bool
   /* blocks kept where decoding them again would cost most: their data 4
      bytes a block or more (less: the pages they'd take cost more than the
      decoding they'd save, most on many threads) */
-  keep = J_KEEP && len >= (size_t)sp.total * 4u;
+  keep = J_KEEP && !j->rec && len >= (size_t)sp.total * 4u;
   /* under a memory limit the records take what the frame leaves of it,
      shared (too little: none kept, all decoded again) */
   sp.room = SIZE_MAX;
@@ -2827,6 +2836,97 @@ jpg_scan_lossless(jpg_t *j, im_pool_t *pool) {
   return loss_seq(j);
 }
 
+/* -- from an index (IM_OPTION_INDEX) -------------------------------------------- */
+
+/* the rows wanted in parts, each from its row's start as the index has it:
+   its bytes, to the next part's row and a little past (its last MCU's bits
+   end there; the scan's end for the last), unstuffed on its own, its DCs
+   and bit set, its rows decoded (a region's blocks alone transformed) */
+typedef struct jix {
+  jpg_t    *j;
+  jctx_t   *ctx;              /* a worker's */
+  jdata_t  *data;             /* a worker's bytes */
+  uint32_t  w, items;
+  uint32_t  row[IM_POOL_MAX * 4u + 1u];
+  uint32_t  last_good;        /* the last part's */
+} jix_t;
+
+static bool
+ix_item(void *arg, uint32_t worker, uint32_t item) {
+  jix_t         *ix = arg;
+  jpg_t         *j  = ix->j;
+  const ImIndex *in = j->idx_in;
+  jctx_t        *x  = &ix->ctx[worker];
+  jdata_t       *d  = &ix->data[worker];
+  jrd_t         *r  = &x->r;
+  uint32_t       r0 = ix->row[item], r1 = ix->row[item + 1u], i, nb;
+  const jcp_t   *cp = &in->cp[r0];
+  const uint8_t *from = j->data + (cp->at >> 3), *to = j->data + in->end;
+  jsblk_t        list[J_MCU_BLOCKS];
+
+  if (r1 < in->rows && (in->cp[r1].at >> 3) + 16u < in->end) to = j->data + (in->cp[r1].at >> 3) + 16u;
+  if (!jpg_unstuff(d, from, to)) return false;
+  nb = seq_list(x, list);
+  for (i = 0; i < J_COMPS; i++) x->dc[i] = 0;
+  for (i = 0; i < j->nscomp; i++) x->dc[j->scomp[i]] = cp->dc[i];
+  x->eobrun  = 0u;
+  x->lacking = false;
+  r->b.buf   = 0u;
+  r->b.n     = 0u;
+  r->pre     = 0u;
+  r->org     = d->buf;
+  r->len     = d->nseg ? d->seg[0].end - d->seg[0].start : 0u;
+  r->tail    = false;
+  r->b.p     = r->org;
+  r->lim     = r->len > x->margin ? r->org + (r->len - x->margin) : r->org;
+  if (r->b.p >= r->lim) rd_tail(x);
+  refill(&r->b);
+  DROP(&r->b, (uint32_t)(cp->at & 7u));
+  seq_range(x, list, nb, ix->w, r0 * ix->w * nb, r1 * ix->w * nb);
+  if (item + 1u == ix->items) ix->last_good = x->last_good;
+  return true;
+}
+
+IM_HIDE bool
+jpg_scan_index(jpg_t *j, im_pool_t *pool, uint32_t w, uint32_t h, uint32_t r0, size_t margin) {
+  const ImIndex *in = j->idx_in;
+  jix_t          ix;
+  jctx_t         ctx[IM_POOL_MAX];
+  jdata_t        data[IM_POOL_MAX];
+  uint32_t       nw = im_pool_size(pool), a, top, k, i;
+  bool           ok = true;
+
+  /* from the region's first row, or the index's last before it */
+  a = r0 < in->rows ? r0 : in->rows - 1u;
+  if (a >= h) return true;
+  top = h < in->rows ? h : in->rows;
+  memset(&ix, 0, sizeof(ix));
+  ix.j     = j;
+  ix.w     = w;
+  ix.items = nw > 1u ? nw * 4u : 1u;
+  if (ix.items > top - a) ix.items = top - a;
+  for (k = 0; k < ix.items; k++) ix.row[k] = a + (uint32_t)((uint64_t)(top - a) * k / ix.items);
+  ix.row[ix.items] = h;
+  memset(data, 0, sizeof(data));
+  for (i = 0; i < nw; i++) {
+    if (!ctx_init(&ctx[i], j, margin)) {
+      while (i--) free(ctx[i].tail);
+      return false;
+    }
+  }
+  ix.ctx  = ctx;
+  ix.data = data;
+  ok      = im_pool_run(pool, ix_item, &ix, ix.items);
+  j->last_good = ix.last_good;
+  for (i = 0; i < nw; i++) {
+    free(ctx[i].tail);
+    free(data[i].buf);
+    free(data[i].seg);
+  }
+  return ok;
+}
+
+
 /* the scan whose data `j->sd` holds; `pool` its threads, if any */
 IM_HIDE bool
 jpg_scan_huff(jpg_t *j, im_pool_t *pool) {
@@ -2871,8 +2971,10 @@ jpg_scan_huff(jpg_t *j, im_pool_t *pool) {
       d->pair_ac = NULL;
     }
   }
-  if (j->process == J_SEQUENTIAL && (uint64_t)total * blocks >= J_PAIR_MIN && j->sd.nseg
-      && (uint64_t)(j->sd.seg[j->sd.nseg - 1u].end - j->sd.seg[0].start) >= (uint64_t)J_PAIR_BYTES * total * blocks) {
+  if (j->process == J_SEQUENTIAL && (uint64_t)total * blocks >= J_PAIR_MIN
+      && (j->via_index ? (uint64_t)(j->idx_in->end - j->idx_in->scan)
+          : j->sd.nseg ? (uint64_t)(j->sd.seg[j->sd.nseg - 1u].end - j->sd.seg[0].start) : 0u)
+         >= (uint64_t)J_PAIR_BYTES * hfull * w * blocks) {
     for (i = 0; i < j->nscomp; i++) {
       jhuff_t *a = j->ac[j->comp[j->scomp[i]].ta & 3u];
 
@@ -2893,6 +2995,9 @@ jpg_scan_huff(jpg_t *j, im_pool_t *pool) {
       if (one && d && d->ok && a && a->pair && !d->pair && (d->pair = huff_dcac(d, a))) d->pair_ac = a;
     }
   }
+
+  /* from the index: the rows wanted (and their parts on threads) alone */
+  if (j->via_index) return jpg_scan_index(j, pool, w, h, w ? first / w : 0u, margin);
 
   /* in parallel: where every interval has its segment, ended by the RST
      the next restart expects */

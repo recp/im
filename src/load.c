@@ -83,6 +83,7 @@ im_config(im_option_base_t *options[], ImOpenIntent openIntent) {
           break;
         case IM_OPTION_PAGE:                 conf.page           = (uint32_t)((im_option_int_t*)opt)->value; break;
         case IM_OPTION_BYTES_READ:           conf.bytesRead      = ((im_option_bytes_t*)opt)->bytes;     break;
+        case IM_OPTION_INDEX:                conf.index          = ((im_option_index_t*)opt)->index;     break;
         case IM_OPTION_DEST:
           conf.dest       = ((im_option_dest_t*)opt)->pixels;
           conf.destStride = ((im_option_dest_t*)opt)->stride;
@@ -170,6 +171,48 @@ im_load_mem(ImImage         ** __restrict dest,
   (void)jp2sig;
   (void)conf;
   return IM_EBADF;
+}
+
+/* a JPEG's index (jpg.c); none for the other formats */
+IM_EXPORT
+ImResult
+im_index_mem(ImIndex         ** __restrict dest,
+             const void       * __restrict data,
+             size_t                        len,
+             im_option_base_t *            options[]) {
+  const uint8_t   *p = data;
+  im_open_config_t conf;
+
+  if (!dest) return IM_EBADF;
+  *dest = NULL;
+  if (!p || len < 4u) return IM_EBADF;
+  conf = im_config(options, IM_OPEN_INTENT_READONLY);
+#if IM_WITH_JPG
+  if (p[0] == 0xFFu && p[1] == 0xD8u) return jpg_index_mem(dest, p, len, &conf);
+#endif
+  (void)conf;
+  return IM_EBADF;
+}
+
+IM_EXPORT
+size_t
+im_index_size(const ImIndex * __restrict index) {
+#if IM_WITH_JPG
+  return jpg_index_size(index);
+#else
+  (void)index;
+  return 0u;
+#endif
+}
+
+IM_EXPORT
+void
+im_index_free(ImIndex * __restrict index) {
+#if IM_WITH_JPG
+  jpg_index_free(index);
+#else
+  (void)index;
+#endif
 }
 
 IM_EXPORT

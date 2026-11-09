@@ -169,6 +169,24 @@ typedef struct jcomp {
   int8_t    prev[10];         /* bits[1–9] before the last scan of it */
 } jcomp_t;
 
+/* an MCU row's start, as an index keeps it: where its bits start (the
+   byte's offset in the data << 3 | the bits of it already taken), the DC
+   predictions of the scan's components */
+typedef struct jcp {
+  uint64_t at;
+  int32_t  dc[4];
+} jcp_t;
+
+/* IM_OPTION_INDEX's (im.h): rows 0 … rows - 1 of the one-pass sequential
+   Huffman scan of the bytes it's for: `len` of them, `scan` the offset of
+   the scan's data (the headers before it hashed: FNV-1a 64), `end` its
+   marker's */
+struct ImIndex {
+  uint64_t len, hash, scan, end;
+  uint32_t w, rows, nscomp;
+  jcp_t   *cp;
+};
+
 typedef struct jpg {
   const uint8_t *data, *end;
 
@@ -251,6 +269,18 @@ typedef struct jpg {
   uint32_t   flow_self;
   uint64_t   flow_deps;
 
+  /* an index (IM_OPTION_INDEX): the one the scan starts from (its rows,
+     not the data before them, read: via_index), or the one made: each
+     row's start as decoded (`at` in the unstuffed scan's bits; UINT64_MAX
+     none yet); `skim`: the scan read for it alone, nothing out */
+  const ImIndex *idx_in;
+  ImIndex      **idx_out;
+  ImIndex       *made;
+  jcp_t         *rec;
+  uint32_t       nrec;
+  const uint8_t *scan_at;       /* the first scan's data in `data` */
+  bool           via_index, skim;
+
   /* the components, last (the fields above near the struct's start) */
   jcomp_t   comp[J_COMPS];
 } jpg_t;
@@ -271,10 +301,13 @@ typedef struct jopts {
   uint32_t    rx, ry, rw, rh;
   size_t      mem_limit;   /* bytes the image may take; 0: no limit */
   bool       *over;        /* set where refused for mem_limit (NULL: none) */
+  ImIndex   **index;       /* IM_OPTION_INDEX's (NULL: none) */
+  bool        skim;        /* the entropy-coded data read for an index alone */
   size_t     *used;        /* the bytes through EOI (all, none there) where it decodes (NULL: none) */
 } jopts_t;
 
 IM_HIDE bool jpg_decode_mem(const uint8_t *data, size_t len, ImImage *im, const jopts_t *o);
+/* the index of `data` (im_index_mem, jpg.h): its scan read, nothing else */
 IM_HIDE bool jpg_region_cut(jpg_t *j);
 IM_HIDE uint64_t jpg_frame_bytes(const jpg_t *j);
 IM_HIDE uint32_t jpg_region_rows(const jpg_t *j, uint32_t w, uint32_t h, uint32_t *first);
@@ -291,6 +324,9 @@ IM_HIDE void jpg_huff_std(jpg_t *j);
 IM_HIDE bool jpg_unstuff(jdata_t *d, const uint8_t *p, const uint8_t *end);
 IM_HIDE const uint8_t *jpg_scan_end(const uint8_t *p, const uint8_t *end);
 IM_HIDE bool jpg_scan_huff(jpg_t *j, im_pool_t *pool);
+/* a scan's rows from the index's (j->idx_in): each part's bytes unstuffed
+   on its own, its rows decoded from its row's start */
+IM_HIDE bool jpg_scan_index(jpg_t *j, im_pool_t *pool, uint32_t w, uint32_t h, uint32_t r0, size_t margin);
 IM_HIDE bool jpg_resync(const jdata_t *d, uint32_t *next_rst, uint32_t *cur);
 
 /* lossless (H.2): a scan's components' rows of differences, the

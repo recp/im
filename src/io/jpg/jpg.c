@@ -376,6 +376,7 @@ region_size(jpg_t *j) {
     c->rbx0 = c->rby0 = 0u;
     c->rbx1 = c->sw;
     c->rby1 = c->sh;
+    if (j->skim) c->rbx1 = c->rby1 = 0u; /* read for an index: no block made */
     if (!j->region || j->hier || j->process == J_LOSSLESS) continue;
     /* its samples under the region: x × uh / hmax (UP_ANY's map, every
        other's too), a sample's neighbours either side */
@@ -445,6 +446,147 @@ frame_size(jpg_t *j) {
   return region_size(j);
 }
 
+/* -- the index (IM_OPTION_INDEX) ------------------------------------------------ */
+
+static uint64_t
+fnv64(const uint8_t *p, size_t n) {
+  uint64_t h = 14695981039346656037ull;
+  size_t   i;
+
+  for (i = 0; i < n; i++) h = (h ^ p[i]) * 1099511628211ull;
+  return h;
+}
+
+/* the scan's MCUs across and down (a single component's: its blocks) */
+static void
+scan_shape(const jpg_t *j, uint32_t *w, uint32_t *h) {
+  if (j->nscomp == 1u) {
+    *w = j->comp[j->scomp[0]].sw;
+    *h = j->comp[j->scomp[0]].sh;
+  } else {
+    *w = j->mcux;
+    *h = j->mcuy;
+  }
+}
+
+/* the first scan one an index is for: one pass, sequential, Huffman, no
+   restarts (their markers serve), not a hierarchical frame */
+static bool
+index_kind(const jpg_t *j) {
+  return !j->nscans && j->process == J_SEQUENTIAL && !j->arith && !j->hier && !j->restart && !j->multiscan
+         && j->nscomp <= 4u;
+}
+
+/* the index given is these bytes' and this scan's (`p` its data): their
+   length, the headers' hash, the scan's place and shape, each row's start
+   inside its data and after the one before */
+static bool
+index_fits(const jpg_t *j, const uint8_t *p) {
+  const ImIndex *in = j->idx_in;
+  uint32_t       w, h, r;
+
+  if (!in || !index_kind(j)) return false;
+  scan_shape(j, &w, &h);
+  if (in->len != (uint64_t)(j->end - j->data) || in->scan != (uint64_t)(p - j->data) || in->end > in->len
+      || in->end < in->scan || in->w != w || !in->rows || in->rows > h || in->nscomp != j->nscomp) {
+    return false;
+  }
+  for (r = 0; r < in->rows; r++) {
+    uint64_t at = in->cp[r].at >> 3;
+
+    if (at < in->scan || at >= in->end || (r && in->cp[r].at <= in->cp[r - 1u].at)) return false;
+  }
+  return fnv64(j->data, (size_t)in->scan) == in->hash;
+}
+
+/* the scan's bytes a decode from the index reads: from the row it starts
+   at to the one past its last (the scan's end past the index's), a
+   worker's slack each */
+static uint64_t
+index_span(const jpg_t *j) {
+  const ImIndex *in = j->idx_in;
+  uint32_t       w, h, first, a, b;
+
+  scan_shape(j, &w, &h);
+  h = jpg_region_rows(j, w, h, &first);
+  a = w && first / w < in->rows ? first / w : in->rows - 1u;
+  b = h < in->rows ? h : in->rows;
+  return (b < in->rows ? in->cp[b].at >> 3 : in->end) - (in->cp[a].at >> 3) + (uint64_t)IM_POOL_MAX * (J_TAIL + 16u);
+}
+
+/* each row's start kept as the scan's decoding finds it (one whose data is
+   one segment) */
+static bool
+index_start(jpg_t *j) {
+  uint32_t w, h, r;
+
+  if (!j->idx_out || !index_kind(j) || j->sd.nseg != 1u) return true;
+  scan_shape(j, &w, &h);
+  if (!(j->rec = malloc((size_t)h * sizeof(*j->rec)))) return false;
+  for (r = 0; r < h; r++) j->rec[r].at = UINT64_MAX;
+  j->nrec = h;
+  return true;
+}
+
+/* the index of the rows kept, from the first on: their starts as the
+   file's bytes (each unstuffed byte's place: a stuffed 0xFF's 0x00 and
+   fill bytes passed over as jpg_unstuff passes them) */
+static ImIndex*
+index_make(const jpg_t *j) {
+  const uint8_t *f = j->scan_at, *end = j->sd.next;
+  ImIndex       *ix;
+  uint64_t       u = 0u;
+  uint32_t       k = 0u, r, w, h;
+
+  while (k < j->nrec && j->rec[k].at != UINT64_MAX) k++;
+  if (!k || !(ix = calloc(1, sizeof(*ix)))) return NULL;
+  if (!(ix->cp = malloc((size_t)k * sizeof(*ix->cp)))) {
+    free(ix);
+    return NULL;
+  }
+  for (r = 0; r < k; r++) {
+    uint64_t want = j->rec[r].at >> 3;
+
+    while (u < want && f < end) {
+      size_t         n  = (size_t)(want - u < (uint64_t)(end - f) ? want - u : (uint64_t)(end - f));
+      const uint8_t *ff = memchr(f, 0xFF, n), *q;
+
+      if (!ff) {
+        f += n;
+        u += n;
+        continue;
+      }
+      for (q = ff + 1; q < end && *q == 0xFFu; q++) {
+      }
+      u += (uint64_t)(ff - f) + 1u;
+      f  = q < end && *q == 0x00u ? q + 1 : q;
+    }
+    ix->cp[r].at = (uint64_t)(f - j->data) << 3 | (j->rec[r].at & 7u);
+    memcpy(ix->cp[r].dc, j->rec[r].dc, sizeof(ix->cp[r].dc));
+  }
+  scan_shape(j, &w, &h);
+  ix->len    = (uint64_t)(j->end - j->data);
+  ix->scan   = (uint64_t)(j->scan_at - j->data);
+  ix->end    = (uint64_t)(j->sd.next - j->data);
+  ix->hash   = fnv64(j->data, (size_t)ix->scan);
+  ix->w      = w;
+  ix->rows   = k;
+  ix->nscomp = j->nscomp;
+  return ix;
+}
+
+IM_HIDE size_t
+jpg_index_size(const ImIndex *ix) {
+  return ix ? sizeof(*ix) + (size_t)ix->rows * sizeof(*ix->cp) : 0u;
+}
+
+IM_HIDE void
+jpg_index_free(ImIndex *ix) {
+  if (!ix) return;
+  free(ix->cp);
+  free(ix);
+}
+
 /* a component's coefficients' bytes */
 static size_t
 coef_size(const jcomp_t *c) {
@@ -464,7 +606,8 @@ jpg_frame_bytes(const jpg_t *j) {
   uint64_t rows = ((uint64_t)j->hmax * 8u * (j->mcux + 1u) + 16u) * (j->ncomp + 4u) * 2u;
   uint32_t i, n = j->ncomp == 3u && j->rgb_pad ? 4u : j->ncomp;
 
-  all = (uint64_t)(j->end - j->data) + rows * (j->pool ? im_pool_size(j->pool) : 1u) + (4u << 20);
+  all = (j->via_index ? index_span(j) : (uint64_t)(j->end - j->data)) + rows * (j->pool ? im_pool_size(j->pool) : 1u)
+      + (4u << 20);
 
   for (i = 0; i < j->ncomp; i++) {
     const jcomp_t *c   = &j->comp[i];
@@ -497,7 +640,7 @@ frame_alloc(jpg_t *j) {
     return false;
   }
   j->big = !j->hier && all >= J_BIG;
-  for (i = 0; i < j->ncomp; i++) {
+  for (i = 0; i < j->ncomp && !j->skim; i++) {
     jcomp_t *c = &j->comp[i];
 
     if (!(c->plane = im_big_alloc(c->plane_size, false, j->big))) return false;
@@ -951,6 +1094,8 @@ jpg_free(jpg_t *j) {
   free(j->icc);
   free(j->sd.buf);
   free(j->sd.seg);
+  free(j->rec);
+  jpg_index_free(j->made);
   free_deferred(j);
 }
 
@@ -1514,6 +1659,11 @@ decode_stream(jpg_t *j, ImImage *im, ImByteOrder order, uint8_t **padp) {
           }
         }
         j->multiscan = j->process != J_LOSSLESS && (j->process == J_PROGRESSIVE || j->nscomp < j->ncomp);
+        /* an index for these bytes: the rows wanted read from it alone */
+        j->scan_at   = p;
+        j->via_index = index_fits(j, p);
+        /* one wanted made: refused where the stream has no use for one */
+        if (j->skim && (!index_kind(j) || j->via_index)) return false;
         if (!frame_alloc(j)) return false;
         first = false;
       } else if (!j->multiscan && j->process != J_LOSSLESS) {
@@ -1540,7 +1690,21 @@ decode_stream(jpg_t *j, ImImage *im, ImByteOrder order, uint8_t **padp) {
         j->nscans++;
         break;
       }
-      if (!jpg_unstuff(&j->sd, p, end) || !scan(j)) return false;
+      if (j->via_index && !j->nscans) {
+        j->sd.nseg = 0u;
+        if (!scan(j)) return false;
+        j->nscans++;
+        p = j->data + j->idx_in->end;
+        break;
+      }
+      if (!jpg_unstuff(&j->sd, p, end) || (!j->nscans && !index_start(j)) || !scan(j)) return false;
+      if (j->rec && !j->made) {
+        /* made, the caller's where the decode succeeds */
+        j->made = index_make(j);
+        free(j->rec);
+        j->rec = NULL;
+        if (j->skim && !j->made) return false;
+      }
       j->nscans++;
       p = j->sd.next;
       break;
@@ -1550,7 +1714,7 @@ decode_stream(jpg_t *j, ImImage *im, ImByteOrder order, uint8_t **padp) {
     }
   }
   if (!j->nscans) return false;
-  if (j->dry) return true;
+  if (j->dry || j->skim) return true;
   if (j->hier) {
     if ((j->frame && !frame_done(j)) || !hier_planes(j)) return false;
   } else {
@@ -1671,9 +1835,16 @@ jpg_decode_mem(const uint8_t *data, size_t len, ImImage *im, const jopts_t *o) {
   j->reg_w            = o->rw;
   j->reg_h            = o->rh;
   j->mem_limit        = o->mem_limit;
+  j->skim             = o->skim;
+  if (o->index && *o->index) j->idx_in = *o->index;
+  else j->idx_out = o->index;
   ok                = decode(j, im, o->order);
   if (o->over) *o->over = j->over;
   if (ok && o->used) *o->used = j->used ? j->used : len;
+  if (ok && j->idx_out && j->made) {
+    *j->idx_out = j->made; /* the caller's */
+    j->made     = NULL;
+  }
   im_pool_free(j->pool);
   jpg_free(j);
   free(j);
@@ -1702,6 +1873,8 @@ opts_of(const im_open_config_t *c) {
   o.mem_limit   = c->memoryLimit;
   o.over        = NULL;
   o.used        = c->bytesRead;
+  o.index       = c->index;
+  o.skim        = false;
   return o;
 }
 
@@ -1728,6 +1901,33 @@ dec(const uint8_t *data, size_t len, const im_open_config_t *conf, ImResult *res
     im->fileFormatType = jls_is(data, len) ? IM_FILEFORMATTYPE_JLS : IM_FILEFORMATTYPE_JPEG;
   }
   return im;
+}
+
+/* the index of `data`: its scan read and nothing more (a decode's, its
+   blocks none, its pixels none) */
+IM_HIDE ImResult
+jpg_index_mem(ImIndex **dest, const uint8_t *data, size_t len, const im_open_config_t *conf) {
+  jopts_t  o = opts_of(conf);
+  ImImage  im;
+  ImIndex *ix = NULL;
+  bool     over = false;
+
+  *dest = NULL;
+  if (jls_is(data, len)) return IM_EBADF;
+  memset(&im, 0, sizeof(im));
+  o.index  = &ix;
+  o.skim   = true;
+  o.region = false;
+  o.scale  = 1u;
+  o.dest   = NULL;
+  o.over   = &over;
+  o.used   = NULL;
+  if (!jpg_decode_mem(data, len, &im, &o) || !ix) {
+    jpg_index_free(ix);
+    return over ? IM_ENOMEM : IM_EBADF;
+  }
+  *dest = ix;
+  return IM_OK;
 }
 
 IM_HIDE
