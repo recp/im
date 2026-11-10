@@ -1527,6 +1527,98 @@ decode(jpg_t *j, ImImage *im, ImByteOrder order) {
   return ok;
 }
 
+/* retain only the restart intervals a sequential region can read. every
+ * marker must match the complete scan; uncertain layouts keep the ordinary
+ * reader and its resynchronization behavior. empty descriptors preserve the
+ * original interval numbers, while bytes keeps the full table-admission cost.
+ */
+static bool
+unstuff_region(jpg_t *j, const uint8_t *p, const uint8_t *end) {
+  jdata_t       *d;
+  jseg_t        *grown;
+  const uint8_t *begin = NULL, *finish = NULL, *stop = NULL, *ff, *q;
+  size_t         bytes = 0u, payload, storage;
+  uint32_t       w, h, first, skip, limit, count, kept, i = 0u;
+
+  if (j->process != J_SEQUENTIAL || j->arith || j->hier || j->multiscan || j->skim)
+    return jpg_unstuff(&j->sd, p, end);
+
+  scan_shape(j, &w, &h);
+  count = (w * h + j->restart - 1u) / j->restart;
+  h     = jpg_region_rows(j, w, h, &first);
+  skip  = first / j->restart;
+  limit = (w * h + j->restart - 1u) / j->restart;
+  if ((!skip && limit == count) || skip >= limit)
+    return jpg_unstuff(&j->sd, p, end);
+
+  d = &j->sd;
+  if (!skip)
+    begin = p;
+  for (q = p; q < end;) {
+    ff = memchr(q, 0xFF, (size_t)(end - q));
+    if (!ff)
+      break;
+
+    bytes += (size_t)(ff - q);
+    for (q = ff + 1; q < end && *q == 0xFFu; q++) {
+    }
+    if (q == end)
+      break;
+
+    if (*q == 0x00u) {
+      bytes++;
+      q++;
+      continue;
+    }
+    if (*q == 0xD9u && i + 1u == count) {
+      if (limit == count)
+        finish = q + 1;
+      stop = q - 1;
+      break;
+    }
+    if (*q != 0xD0u + (i & 7u) || i + 1u >= count)
+      break;
+
+    i++;
+    if (i == skip)
+      begin = q + 1;
+
+    if (i == limit)
+      finish = q + 1;
+    q++;
+  }
+  if (!begin || !finish || !stop)
+    return jpg_unstuff(d, p, end);
+
+  if (!jpg_unstuff(d, begin, finish))
+    return false;
+
+  kept = limit - skip;
+  storage = (size_t)count * sizeof(*grown);
+  if (storage / sizeof(*grown) != count)
+    return false;
+
+  if (count > d->segcap) {
+    if (!(grown = realloc(d->seg, storage)))
+      return false;
+
+    d->seg    = grown;
+    d->segcap = count;
+  }
+  payload = d->seg[kept - 1u].end;
+  memmove(d->seg + skip, d->seg, (size_t)kept * sizeof(*d->seg));
+  for (i = 0u; i < skip; i++) {
+    d->seg[i] = (jseg_t){0u, 0u, 0xD0u + (i & 7u)};
+  }
+  for (i = limit; i < count; i++) {
+    d->seg[i] = (jseg_t){payload, payload, i + 1u == count ? 0xD9u : 0xD0u + (i & 7u)};
+  }
+  d->bytes = bytes;
+  d->nseg  = count;
+  d->next  = stop;
+  return true;
+}
+
 static bool
 decode_stream(jpg_t *j, ImImage *im, ImByteOrder order, uint8_t **padp) {
   const uint8_t *p = j->data, *end = j->end;
@@ -1697,7 +1789,13 @@ decode_stream(jpg_t *j, ImImage *im, ImByteOrder order, uint8_t **padp) {
         p = j->data + j->idx_in->end;
         break;
       }
-      if (!jpg_unstuff(&j->sd, p, end) || (!j->nscans && !index_start(j)) || !scan(j)) return false;
+      if (j->region && j->restart && !j->nscans) {
+        if (!unstuff_region(j, p, end))
+          return false;
+      } else if (!jpg_unstuff(&j->sd, p, end)) {
+        return false;
+      }
+      if ((!j->nscans && !index_start(j)) || !scan(j)) return false;
       if (j->rec && !j->made) {
         /* made, the caller's where the decode succeeds */
         j->made = index_make(j);

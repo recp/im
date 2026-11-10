@@ -54,6 +54,7 @@ TODO
   - [x] decoded smaller (`IM_OPTION_SCALE`): ½, ¼, ⅛ by a smaller IDCT, libjpeg's scaled decode to the byte
   - [x] an index of a sequential scan's MCU rows (`im_index_mem`, or made by a decode with `IM_OPTION_INDEX`;
         ~24 bytes a row): a region decoded from its own rows, a decode's threads each from theirs
+  - [x] sequential restart regions retain only their needed scan intervals; unusual marker layouts use the ordinary reader
   - [x] as big as the format allows (65535²; a hierarchical sequence 2^30 samples a component)
 - [x] JPEG-LS (T.87; `.jls`, or a JPEG stream whose frame is SOF55)
   - [x] lossless and near-lossless, 2 to 16 bits, up to 255 components (2 and 5 or more as they are)

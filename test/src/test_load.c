@@ -771,6 +771,86 @@ load_with(const uint8_t *data, size_t len, im_option_base_t **opts, ImImage **im
   return im_load_mem(im, data, len, opts, IM_OPEN_INTENT_READONLY);
 }
 
+/* restart-bounded regions keep the same pixels at each scale, on one and
+ * several threads, including padded RGB and caller-owned output rows.
+ */
+TEST_IMPL(jpg_restart_regions) {
+  static const char *names[] = {
+    "rst.jpg", "threads.jpg", "prog-rst.jpg", "arith-rst.jpg", "p12.jpg", "dnl.jpg", "prog-cut.jpg"
+  };
+  static const uint8_t padding[12] = {
+    0xA5, 0xA5, 0xA5, 0xA5, 0xA5, 0xA5, 0xA5, 0xA5, 0xA5, 0xA5, 0xA5, 0xA5
+  };
+  im_option_int_t    scale, threads;
+  im_option_bool_t   padded;
+  im_option_region_t region;
+  im_option_dest_t   dest;
+  im_option_base_t  *options[6];
+  ImImage           *full, *part;
+  const uint8_t     *expected;
+  uint8_t           *data, *buffer, *pixels;
+  size_t             len, pitch, bytes, i;
+  uint32_t           s, n, pad, k, x, y, w, h, row, bpp;
+  ImResult           result;
+
+  for (i = 0u; i < sizeof(names) / sizeof(*names); i++) {
+    len  = 0u;
+    data = read_all("jpg", names[i], &len);
+    ASSERT(data);
+    for (s = 1u; s <= 8u; s *= 2u) {
+      for (n = 1u; n <= 4u; n *= 4u) {
+        for (pad = 0u; pad < 2u; pad++) {
+          scale       = im_option_int(IM_OPTION_SCALE, (int32_t)s);
+          threads     = im_option_int(IM_OPTION_THREADS, (int32_t)n);
+          padded      = im_option_bool(IM_OPTION_RGB_PADDED, pad != 0u);
+          options[0]  = &scale.base;
+          options[1]  = &threads.base;
+          options[2]  = &padded.base;
+          options[3]  = options[4] = options[5] = NULL;
+          ASSERT(load_with(data, len, options, &full) == IM_OK && full);
+          bpp = full->bytesPerPixel;
+          for (k = 0u; k < 9u; k++) {
+            x = k % 3u == 0u ? 0u : k % 3u == 1u ? full->width / 2u : full->width - 1u;
+            y = k / 3u == 0u ? 0u : k / 3u == 1u ? full->height / 2u : full->height - 1u;
+            w = k & 1u ? full->width - x : 1u;
+            h = k & 1u ? 1u : full->height - y;
+
+            pitch  = (size_t)w * bpp + sizeof(padding);
+            bytes  = pitch * h;
+            buffer = malloc(bytes);
+            ASSERT(buffer);
+            memset(buffer, 0xA5, bytes);
+            region = im_option_region(x, y, w, h);
+            dest   = im_option_dest(buffer, pitch, bytes);
+
+            options[3] = &region.base;
+            options[4] = k & 1u ? &dest.base : NULL;
+            result = load_with(data, len, options, &part);
+            if (result != IM_OK)
+              fprintf(stderr, "region %s scale=%u threads=%u pad=%u case=%u pitch=%zu result=%d\n",
+                      names[i], s, n, pad, k, pitch, (int)result);
+            ASSERT(result == IM_OK && part);
+            ASSERT(part->width == w && part->height == h && part->bytesPerPixel == bpp);
+            for (row = 0u; row < h; row++) {
+              pixels   = k & 1u ? buffer + (size_t)row * pitch : (uint8_t *)part->data.data + (size_t)row * w * bpp;
+              expected = (const uint8_t *)full->data.data + ((size_t)(y + row) * full->width + x) * bpp;
+              ASSERT(!memcmp(pixels, expected, (size_t)w * bpp));
+              if (k & 1u) {
+                ASSERT(!memcmp(pixels + (size_t)w * bpp, padding, sizeof(padding)));
+              }
+            }
+            im_free(part);
+            free(buffer);
+          }
+          im_free(full);
+        }
+      }
+    }
+    free(data);
+  }
+  TEST_SUCCESS
+}
+
 TEST_IMPL(region) {
   static const char *names[] = {
     "420.jpg", "422.jpg", "440.jpg", "411.jpg", "311.jpg", "mixed.jpg", "444.jpg", "gray.jpg", "prog.jpg",

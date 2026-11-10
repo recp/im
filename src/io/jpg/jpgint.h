@@ -129,6 +129,7 @@ typedef struct jseg {
 typedef struct jdata {
   uint8_t       *buf;    /* J_TAIL bytes of room past the last */
   size_t         cap;
+  size_t         bytes;  /* logical scan bytes, including omitted intervals */
   jseg_t        *seg;
   uint32_t       nseg, segcap;
   const uint8_t *next;   /* the scan's ending marker in the file (its 0xFF) */

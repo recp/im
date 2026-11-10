@@ -126,6 +126,7 @@ jpg_unstuff(jdata_t *d, const uint8_t *p, const uint8_t *end) {
     d->next = q - 1;
     break;
   }
+  d->bytes = at;
   memset(o + at, 0, J_TAIL);
   return true;
 }
@@ -2973,7 +2974,7 @@ jpg_scan_huff(jpg_t *j, im_pool_t *pool) {
   }
   if (j->process == J_SEQUENTIAL && (uint64_t)total * blocks >= J_PAIR_MIN
       && (j->via_index ? (uint64_t)(j->idx_in->end - j->idx_in->scan)
-          : j->sd.nseg ? (uint64_t)(j->sd.seg[j->sd.nseg - 1u].end - j->sd.seg[0].start) : 0u)
+          : (uint64_t)j->sd.bytes)
          >= (uint64_t)J_PAIR_BYTES * hfull * w * blocks) {
     for (i = 0; i < j->nscomp; i++) {
       jhuff_t *a = j->ac[j->comp[j->scomp[i]].ta & 3u];
