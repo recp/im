@@ -2045,12 +2045,14 @@ rd_seek(jctx_t *x, uint64_t bit) {
    start): boundaries in its window kept, the first past its end */
 static bool
 spec_pass1(void *arg, uint32_t worker, uint32_t item) {
+  jsync_t   st;
+  jbits_t   bs;
   jspec_t  *sp = arg;
   jpg_t    *j  = sp->j;
   jctx_t   *x  = &sp->ctx[worker];
   jchunk_t *ch = &sp->ch[item];
-  jsync_t   st;
-  jbits_t   bs;
+  int16_t  *coef_next;
+  size_t    coef_cap;
   uint64_t  end = (uint64_t)ch->end * 8u, at;
   bool      last = item + 1u == sp->n;
 
@@ -2083,19 +2085,26 @@ spec_pass1(void *arg, uint32_t worker, uint32_t item) {
       /* room for the longest record (a DC and 63 pairs, and keep_pairs'
          one past them), else dropped as they come, decoded again in (3) */
       if (ch->ncoef + 130u > ch->coefcap) {
-        size_t   cap  = ch->coefcap * 2u;
-        int16_t *next = cap <= sp->room ? im_big_grow(ch->coef, ch->coefcap * sizeof(*next), cap * sizeof(*next), j->big)
-                                        : NULL; /* past its share: dropped */
+        coef_cap = ch->coefcap * 2u;
+        if (coef_cap <= sp->room) {
+          coef_next = im_big_grow(ch->coef,
+                                  ch->coefcap * sizeof(*coef_next),
+                                  coef_cap * sizeof(*coef_next),
+                                  j->big);
+        } else {
+          im_big_free(ch->coef, ch->coefcap * sizeof(*coef_next), j->big);
+          coef_next = NULL;
+        }
 
-        if (!next) {
+        if (!coef_next) {
           ch->coef = NULL;
           st.dc[ci] = (int32_t)((uint32_t)st.dc[ci] + (uint32_t)block_drop(&bs, j->dc[j->comp[ci].td], j->ac[j->comp[ci].ta]));
           st.blk++;
           st.slot = st.slot + 1u == sp->nblk ? 0u : st.slot + 1u;
           continue;
         }
-        ch->coef    = next;
-        ch->coefcap = cap;
+        ch->coef    = coef_next;
+        ch->coefcap = coef_cap;
       }
       ch->ncoef += block_keep(&bs, j->dc[j->comp[ci].td], j->ac[j->comp[ci].ta], &st.dc[ci], ch->coef + ch->ncoef);
       ch->nkept++;
@@ -2258,7 +2267,7 @@ scan_spec(jpg_t *j, im_pool_t *pool, uint32_t w, uint32_t h, size_t margin, bool
   jctx_t   ctx[IM_POOL_MAX];
   jchunk_t ch[J_CHUNKS * IM_POOL_MAX];
   size_t   len = j->sd.seg[0].end - j->sd.seg[0].start, part;
-  uint32_t nw = im_pool_size(pool), i, s = 0;
+  uint32_t nw = im_pool_size(pool), i, s = 0, nctx = 0;
   bool     ok = false, keep;
 
   *done = false;
@@ -2317,10 +2326,9 @@ scan_spec(jpg_t *j, im_pool_t *pool, uint32_t w, uint32_t h, size_t margin, bool
     }
   }
   for (i = 0; i < nw; i++) {
-    if (!ctx_init(&ctx[i], j, margin)) {
-      while (i--) free(ctx[i].tail);
-      return false;
-    }
+    if (!ctx_init(&ctx[i], j, margin))
+      goto cleanup;
+    nctx++;
   }
   sp.ctx = ctx;
   sp.ch  = ch;
@@ -2328,7 +2336,10 @@ scan_spec(jpg_t *j, im_pool_t *pool, uint32_t w, uint32_t h, size_t margin, bool
     ok    = im_pool_run(pool, spec_pass3, &sp, sp.n);
     *done = true;
   }
-  for (i = 0; i < nw; i++) free(ctx[i].tail);
+cleanup:
+  for (i = 0; i < nctx; i++) {
+    free(ctx[i].tail);
+  }
   for (i = 0; i < sp.n; i++) {
     free(ch[i].rec);
     im_big_free(ch[i].coef, ch[i].coefcap * sizeof(int16_t), j->big);
