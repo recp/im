@@ -577,13 +577,15 @@ index_make(const jpg_t *j) {
 
 IM_HIDE size_t
 jpg_index_size(const ImIndex *ix) {
-  return ix ? sizeof(*ix) + (size_t)ix->rows * sizeof(*ix->cp) : 0u;
+  return ix ? sizeof(*ix) + (size_t)ix->rows * sizeof(*ix->cp)
+              + (ix->offsets ? ((size_t)ix->intervals + 1u) * sizeof(*ix->offsets) : 0u) : 0u;
 }
 
 IM_HIDE void
 jpg_index_free(ImIndex *ix) {
   if (!ix) return;
   free(ix->cp);
+  free(ix->offsets);
   free(ix);
 }
 
@@ -1527,18 +1529,151 @@ decode(jpg_t *j, ImImage *im, ImByteOrder order) {
   return ok;
 }
 
-/* retain only the restart intervals a sequential region can read. every
- * marker must match the complete scan; uncertain layouts keep the ordinary
- * reader and its resynchronization behavior. empty descriptors preserve the
- * original interval numbers, while bytes keeps the full table-admission cost.
- */
+typedef struct RestartSpan {
+  const uint8_t *begin, *finish, *stop;
+  size_t         bytes;
+} RestartSpan;
+
+/* only a complete, ordinary sequential restart layout is indexed. */
+static bool
+restart_kind(const jpg_t *j) {
+  return !j->nscans && j->restart && j->process == J_SEQUENTIAL && !j->arith
+         && !j->hier && !j->multiscan && j->nscomp <= 4u;
+}
+
+static bool
+restart_scan(const jpg_t   *j,
+             const uint8_t *p,
+             const uint8_t *end,
+             uint32_t       skip,
+             uint32_t       limit,
+             uint64_t      *offsets,
+             RestartSpan   *span) {
+  const uint8_t *ff, *q;
+  uint32_t       w, h, count, i = 0u;
+
+  scan_shape(j, &w, &h);
+  count = (uint32_t)(((uint64_t)w * h + j->restart - 1u) / j->restart);
+  *span = (RestartSpan){0};
+  if (!skip)
+    span->begin = p;
+  if (offsets)
+    offsets[0] = (uint64_t)(p - j->data);
+
+  for (q = p; q < end;) {
+    ff = memchr(q, 0xFF, (size_t)(end - q));
+    if (!ff)
+      break;
+
+    span->bytes += (size_t)(ff - q);
+    for (q = ff + 1; q < end && *q == 0xFFu; q++) {
+    }
+    if (q == end)
+      break;
+
+    if (*q == 0x00u) {
+      span->bytes++;
+      q++;
+      continue;
+    }
+    if (*q == 0xD9u && i + 1u == count) {
+      if (limit == count)
+        span->finish = q + 1;
+      span->stop = q - 1;
+      if (offsets)
+        offsets[count] = (uint64_t)(q + 1 - j->data);
+      break;
+    }
+    if (*q != 0xD0u + (i & 7u) || i + 1u >= count)
+      break;
+
+    i++;
+    if (i == skip)
+      span->begin = q + 1;
+    if (i == limit)
+      span->finish = q + 1;
+    if (offsets)
+      offsets[i] = (uint64_t)(q + 1 - j->data);
+    q++;
+  }
+  return span->begin && span->finish && span->stop;
+}
+
+/* offsets own no input bytes; reuse requires the same immutable source. */
+static ImIndex*
+restart_make(jpg_t *j, const uint8_t *p, const uint8_t *end) {
+  RestartSpan span;
+  ImIndex    *ix;
+  uint64_t    count, bytes, frame;
+  uint32_t    w, h;
+
+  scan_shape(j, &w, &h);
+  count = ((uint64_t)w * h + j->restart - 1u) / j->restart;
+  bytes = (count + 1u) * sizeof(*ix->offsets);
+  if (!count || bytes > (64u << 20) - sizeof(*ix))
+    return NULL;
+
+  frame = jpg_frame_bytes(j);
+  if (j->mem_limit && (frame > j->mem_limit || bytes + sizeof(*ix) > j->mem_limit - frame)) {
+    if (j->skim)
+      j->over = true;
+    return NULL;
+  }
+
+  if (!(ix = calloc(1, sizeof(*ix))))
+    return NULL;
+  if (!(ix->offsets = malloc((size_t)bytes))
+      || !restart_scan(j, p, end, 0u, (uint32_t)count, ix->offsets, &span)) {
+    jpg_index_free(ix);
+    return NULL;
+  }
+  ix->len        = (uint64_t)(end - j->data);
+  ix->scan       = (uint64_t)(p - j->data);
+  ix->end        = (uint64_t)(span.stop - j->data);
+  ix->hash       = fnv64(j->data, (size_t)ix->scan);
+  ix->w          = w;
+  ix->nscomp     = j->nscomp;
+  ix->scan_bytes = span.bytes;
+  ix->restart    = j->restart;
+  ix->intervals  = (uint32_t)count;
+  return ix;
+}
+
+static bool
+restart_fits(const jpg_t *j, const uint8_t *p, uint32_t count, const ImIndex *ix) {
+  uint64_t       a, b;
+  uint32_t       w, h, i;
+
+  if (!ix || !restart_kind(j) || !ix->offsets || ix->restart != j->restart
+      || ix->intervals != count || ix->len != (uint64_t)(j->end - j->data)
+      || ix->scan != (uint64_t)(p - j->data) || ix->end < ix->scan
+      || ix->len < 2u || ix->end > ix->len - 2u || ix->nscomp != j->nscomp)
+    return false;
+
+  scan_shape(j, &w, &h);
+  if (ix->w != w || ix->offsets[0] != ix->scan
+      || ix->offsets[count] != ix->end + 2u || fnv64(j->data, (size_t)ix->scan) != ix->hash)
+    return false;
+
+  for (i = 0u; i < count; i++) {
+    a = ix->offsets[i];
+    b = ix->offsets[i + 1u];
+    if (b < a + 2u || b > ix->end + 2u || j->data[b - 2u] != 0xFFu
+        || j->data[b - 1u] != (i + 1u == count ? 0xD9u : 0xD0u + (i & 7u)))
+      return false;
+  }
+  return true;
+}
+
+/* retain only needed intervals, preserving complete-layout validation. */
 static bool
 unstuff_region(jpg_t *j, const uint8_t *p, const uint8_t *end) {
+  RestartSpan    span;
   jdata_t       *d;
   jseg_t        *grown;
-  const uint8_t *begin = NULL, *finish = NULL, *stop = NULL, *ff, *q;
-  size_t         bytes = 0u, payload, storage;
-  uint32_t       w, h, first, skip, limit, count, kept, i = 0u;
+  const ImIndex *ix;
+  size_t         payload, storage;
+  uint32_t       w, h, first, skip, limit, count, kept, i;
 
   if (j->process != J_SEQUENTIAL || j->arith || j->hier || j->multiscan || j->skim)
     return jpg_unstuff(&j->sd, p, end);
@@ -1552,56 +1687,28 @@ unstuff_region(jpg_t *j, const uint8_t *p, const uint8_t *end) {
     return jpg_unstuff(&j->sd, p, end);
 
   d = &j->sd;
-  if (!skip)
-    begin = p;
-  for (q = p; q < end;) {
-    ff = memchr(q, 0xFF, (size_t)(end - q));
-    if (!ff)
-      break;
-
-    bytes += (size_t)(ff - q);
-    for (q = ff + 1; q < end && *q == 0xFFu; q++) {
-    }
-    if (q == end)
-      break;
-
-    if (*q == 0x00u) {
-      bytes++;
-      q++;
-      continue;
-    }
-    if (*q == 0xD9u && i + 1u == count) {
-      if (limit == count)
-        finish = q + 1;
-      stop = q - 1;
-      break;
-    }
-    if (*q != 0xD0u + (i & 7u) || i + 1u >= count)
-      break;
-
-    i++;
-    if (i == skip)
-      begin = q + 1;
-
-    if (i == limit)
-      finish = q + 1;
-    q++;
-  }
-  if (!begin || !finish || !stop)
+  ix = j->idx_in ? j->idx_in : j->made;
+  if (restart_fits(j, p, count, ix)) {
+    span.begin  = j->data + ix->offsets[skip];
+    span.finish = j->data + ix->offsets[limit];
+    span.stop   = j->data + ix->end;
+    span.bytes  = (size_t)ix->scan_bytes;
+  } else if (!restart_scan(j, p, end, skip, limit, NULL, &span)) {
     return jpg_unstuff(d, p, end);
-
-  if (!jpg_unstuff(d, begin, finish))
+  }
+  if (!jpg_unstuff(d, span.begin, span.finish))
     return false;
 
   kept = limit - skip;
+  if (d->nseg < kept)
+    return jpg_unstuff(d, p, end);
+
   storage = (size_t)count * sizeof(*grown);
   if (storage / sizeof(*grown) != count)
     return false;
-
   if (count > d->segcap) {
     if (!(grown = realloc(d->seg, storage)))
       return false;
-
     d->seg    = grown;
     d->segcap = count;
   }
@@ -1613,9 +1720,9 @@ unstuff_region(jpg_t *j, const uint8_t *p, const uint8_t *end) {
   for (i = limit; i < count; i++) {
     d->seg[i] = (jseg_t){payload, payload, i + 1u == count ? 0xD9u : 0xD0u + (i & 7u)};
   }
-  d->bytes = bytes;
+  d->bytes = span.bytes;
   d->nseg  = count;
-  d->next  = stop;
+  d->next  = span.stop;
   return true;
 }
 
@@ -1755,7 +1862,7 @@ decode_stream(jpg_t *j, ImImage *im, ImByteOrder order, uint8_t **padp) {
         j->scan_at   = p;
         j->via_index = index_fits(j, p);
         /* one wanted made: refused where the stream has no use for one */
-        if (j->skim && (!index_kind(j) || j->via_index)) return false;
+        if (j->skim && ((!index_kind(j) && !restart_kind(j)) || j->via_index)) return false;
         if (!frame_alloc(j)) return false;
         first = false;
       } else if (!j->multiscan && j->process != J_LOSSLESS) {
@@ -1764,6 +1871,13 @@ decode_stream(jpg_t *j, ImImage *im, ImByteOrder order, uint8_t **padp) {
         if (!jpg_unstuff(&j->sd, p, end)) return false;
         p = j->sd.next;
         break;
+      }
+      if (j->skim && restart_kind(j)) {
+        if (!(j->made = restart_make(j, p, end)))
+          return false;
+        j->used = (size_t)j->made->end + 2u;
+        j->nscans++;
+        return true;
       }
       if (tail) {
         static const uint8_t fake[3] = { 0xD9u, 0xFFu, 0xD9u };
@@ -1782,6 +1896,8 @@ decode_stream(jpg_t *j, ImImage *im, ImByteOrder order, uint8_t **padp) {
         j->nscans++;
         break;
       }
+      if (!j->nscans && j->idx_out && restart_kind(j) && !j->made)
+        j->made = restart_make(j, p, end);
       if (j->via_index && !j->nscans) {
         j->sd.nseg = 0u;
         if (!scan(j)) return false;

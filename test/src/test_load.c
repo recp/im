@@ -1405,8 +1405,8 @@ ix_dec(const uint8_t *d, size_t len, uint32_t th, uint32_t sc, uint32_t x, uint3
 
 TEST_IMPL(jpg_index) {
   static const char *with[] = { "420.jpg", "444.jpg", "411.jpg", "gray.jpg", "p12.jpg", "cmyk.jpg", "dnl.jpg",
-                                "420-cut.jpg", "tiny.jpg", "mixed.jpg" };
-  static const char *none[] = { "prog.jpg", "arith.jpg", "rst.jpg", "ll1.jpg", "hier.jpg", "threads.jpg" };
+                                "420-cut.jpg", "tiny.jpg", "mixed.jpg", "rst.jpg", "threads.jpg" };
+  static const char *none[] = { "prog.jpg", "arith.jpg", "ll1.jpg", "hier.jpg" };
   ImIndex           *other = NULL;
   size_t             i;
 

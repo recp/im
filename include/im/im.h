@@ -308,13 +308,17 @@ im_load_mem(ImImage         ** __restrict dest,
    decode of the same bytes (IM_OPTION_INDEX) starts at the row a region
    needs, not the first, and on threads each worker at its own rows. For
    a one-pass sequential Huffman scan (baseline and extended JPEG) without
-   restart markers (they mark their intervals already); other streams have
-   none. Read only once made: one serves decodes running at once. Tied to
+   restart markers. Ordinary sequential restart streams instead keep validated
+   interval offsets (at most 64 MiB), without copying the scan; uncertain
+   marker layouts and other coding processes have none. Read only once made:
+   one serves decodes running at once. Tied to
    the bytes it was made from: their length and headers checked, other
-   bytes decoded as if none were given */
+   bytes decoded as if none were given. The caller keeps the indexed bytes
+   immutable while reusing an index; changed source bytes need a fresh index. */
 
 /* the index of `data`: its entropy-coded data read through and nothing
-   else (on threads as IM_OPTION_THREADS, IM_OPTION_RUNNER say), the
+   else (on threads as IM_OPTION_THREADS, IM_OPTION_RUNNER say; restart streams
+   validate markers without entropy decoding), the
    caller's (im_index_free); IM_EBADF where it has none (not such a JPEG,
    or damaged before its end) */
 IM_EXPORT

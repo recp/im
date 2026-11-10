@@ -186,6 +186,10 @@ struct ImIndex {
   uint64_t len, hash, scan, end;
   uint32_t w, rows, nscomp;
   jcp_t   *cp;
+
+  uint64_t *offsets;
+  uint64_t  scan_bytes;
+  uint32_t  restart, intervals;
 };
 
 typedef struct jpg {
