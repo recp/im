@@ -28,6 +28,89 @@
 #  include <io.h>
 #endif
 
+#if IM_RELEASE
+#  include <pthread.h>
+
+/* blocks let go, kept for the next image's (mmap.h) */
+enum { IM_KEPT_COUNT = 16u };
+#  define IM_KEPT_BYTES ((size_t)64u << 20)
+
+typedef struct im_kept_t {
+  uint8_t *p;
+  size_t   n;
+} im_kept_t;
+
+static pthread_mutex_t im_kept_lock = PTHREAD_MUTEX_INITIALIZER;
+static im_kept_t       im_kept[IM_KEPT_COUNT];
+static uint32_t        im_kept_count;
+static size_t          im_kept_bytes;
+
+IM_HIDE
+void*
+im_kept_take(size_t n) {
+  im_kept_t got = {NULL, 0u}, rest = {NULL, 0u};
+  uint32_t  i, best = IM_KEPT_COUNT;
+
+  pthread_mutex_lock(&im_kept_lock);
+  for (i = 0u; i < im_kept_count; i++) {
+    if (im_kept[i].n >= n && (best == IM_KEPT_COUNT || im_kept[i].n < im_kept[best].n)) best = i;
+  }
+  if (best != IM_KEPT_COUNT) {
+    got             = im_kept[best];
+    im_kept[best]   = im_kept[--im_kept_count];
+    im_kept_bytes  -= got.n;
+    if (got.n > n) { /* the rest kept apart, or let go when too small to keep */
+      rest = (im_kept_t){got.p + n, got.n - n};
+      if (rest.n >= IM_KEPT_MIN) {
+        im_kept[im_kept_count++] = rest;
+        im_kept_bytes           += rest.n;
+        rest                     = (im_kept_t){NULL, 0u};
+      }
+    }
+  }
+  pthread_mutex_unlock(&im_kept_lock);
+  if (rest.p) (void)munmap(rest.p, rest.n);
+  if (!got.p) return NULL;
+#  if defined(MADV_FREE_REUSE)
+  (void)madvise(got.p, n, MADV_FREE_REUSE); /* back in the footprint */
+#  endif
+  return got.p;
+}
+
+IM_HIDE
+void
+im_kept_give(void *p, size_t n) {
+  im_kept_t gone[IM_KEPT_COUNT];
+  uint32_t  i, smallest, count = 0u;
+  bool      kept = false;
+
+  if (n <= IM_KEPT_BYTES) {
+#  if defined(MADV_FREE_REUSABLE)
+    (void)madvise(p, n, MADV_FREE_REUSABLE); /* out of the footprint while kept */
+#  endif
+    pthread_mutex_lock(&im_kept_lock);
+    /* smaller ones let go to make room */
+    while (im_kept_count && (im_kept_count == IM_KEPT_COUNT || n > IM_KEPT_BYTES - im_kept_bytes)) {
+      for (i = 1u, smallest = 0u; i < im_kept_count; i++) {
+        if (im_kept[i].n < im_kept[smallest].n) smallest = i;
+      }
+      if (im_kept[smallest].n >= n) break;
+      gone[count++]      = im_kept[smallest];
+      im_kept_bytes     -= im_kept[smallest].n;
+      im_kept[smallest]  = im_kept[--im_kept_count];
+    }
+    if (im_kept_count < IM_KEPT_COUNT && n <= IM_KEPT_BYTES - im_kept_bytes) {
+      im_kept[im_kept_count++] = (im_kept_t){p, n};
+      im_kept_bytes           += n;
+      kept                     = true;
+    }
+    pthread_mutex_unlock(&im_kept_lock);
+  }
+  for (i = 0u; i < count; i++) (void)munmap(gone[i].p, gone[i].n);
+  if (!kept) (void)munmap(p, n);
+}
+#endif
+
 IM_HIDE
 void*
 im_mmap_rdonly(int fd, size_t size) {

@@ -203,7 +203,7 @@ if(IM_USE_TEST)
   # image's memory (mapped, given back as it goes; a one-tile JPEG 2000 by
   # bands of rows, a few rows a band) from fewer bytes, so those paths run
   # there too (the thresholds alone differ)
-  target_compile_definitions(${PROJECT_NAME} PRIVATE J_POOL_MIN=65536u X_POOL_MIN=65536u J_BIG=65536u X_BIG=8192u X_MAP_MIN=65536u X_STRIPE=8u)
+  target_compile_definitions(${PROJECT_NAME} PRIVATE J_POOL_MIN=65536u X_POOL_MIN=65536u J_BIG=65536u X_BIG=8192u X_MAP_MIN=65536u X_STRIPE=8u IM_KEPT_MIN=65536u)
   enable_testing()
   add_subdirectory(test)
 endif()

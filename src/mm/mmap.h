@@ -71,12 +71,47 @@ im_release(bool big, void *p, size_t len) {
 #endif
 }
 
+/* a block of IM_KEPT_MIN bytes or more (big or not) is mapped too, and kept when let go, out of the footprint
+   (MADV_FREE_REUSABLE) until the next image takes it back: its pages in, not faulted in and cleared by the system
+   again (the allocator hands blocks this large back to the system). IM_KEPT_BYTES of them kept at most */
+#ifndef IM_KEPT_MIN
+#  define IM_KEPT_MIN ((size_t)1u << 20)
+#endif
+
+#if IM_RELEASE
+/* a kept block of `n` bytes (whole pages); NULL: none fits */
+IM_HIDE
+void*
+im_kept_take(size_t n);
+
+/* `p` (`n` bytes, whole pages) kept; false: no room, unmapped */
+IM_HIDE
+void
+im_kept_give(void *p, size_t n);
+#endif
+
+IM_INLINE bool
+im_mapped(size_t n, bool big) {
+  return IM_RELEASE && n && (big || n >= IM_KEPT_MIN);
+}
+
+IM_INLINE size_t
+im_mapped_size(size_t n) {
+  return (n + IM_RELEASE_PAGE - 1u) & ~(size_t)(IM_RELEASE_PAGE - 1u);
+}
+
 IM_INLINE void*
 im_big_alloc(size_t n, bool zero, bool big) {
 #if IM_RELEASE
-  if (big && n) {
-    void *p = mmap(NULL, n, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+  if (im_mapped(n, big)) {
+    size_t m = im_mapped_size(n);
+    void  *p;
 
+    if ((p = im_kept_take(m))) {
+      if (zero) memset(p, 0, n);
+      return p;
+    }
+    p = mmap(NULL, m, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
     return p == MAP_FAILED ? NULL : p;
   }
 #endif
@@ -88,8 +123,8 @@ IM_INLINE void
 im_big_free(void *p, size_t n, bool big) {
   if (!p) return;
 #if IM_RELEASE
-  if (big && n) {
-    (void)munmap(p, n);
+  if (im_mapped(n, big)) {
+    im_kept_give(p, im_mapped_size(n));
     return;
   }
 #endif
@@ -104,9 +139,9 @@ IM_INLINE void*
 im_big_grow(void *p, size_t old, size_t n, bool big) {
   void *q;
 
-  if (IM_RELEASE && big) {
-    if ((q = im_big_alloc(n, false, true)) && p) memcpy(q, p, old < n ? old : n);
-    im_big_free(p, old, true);
+  if (im_mapped(n, big) || (p && im_mapped(old, big))) {
+    if ((q = im_big_alloc(n, false, big)) && p) memcpy(q, p, old < n ? old : n);
+    im_big_free(p, old, big);
     return q;
   }
   if (!(q = realloc(p, n))) free(p);
