@@ -133,7 +133,7 @@ if(IM_CODECS_ONLY)
     src/io/jpg/jpg.c src/io/jpg/arith.c src/io/jpg/huff.c src/io/jpg/idct.c src/io/jpg/sample.c src/io/jpg/jls.c
     src/io/jp2/jp2.c
     src/io/ccitt/ccitt.c src/io/jbig2/jbig2.c
-    src/thread/pool.c)
+    src/thread/pool.c src/mm/mmap.c)
   if(NOT IM_NO_THREADS)
     if(WIN32)
       target_sources(${PROJECT_NAME} PRIVATE src/win/thread.c)
