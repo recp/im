@@ -1595,6 +1595,46 @@ TEST_IMPL(jp2_index) {
   TEST_SUCCESS
 }
 
+#if IM_WITH_JXL
+/* JPEG XL from memory (the platform's decoder: ImageIO on Apple's): a bare
+   codestream and one in the container, the size and the pixels make.sh
+   wrote (lossless); the colours where opaque, the opacity everywhere */
+TEST_IMPL(jxl_mem) {
+  static const char *names[] = { "rgb.jxl", "rgba.jxl" };
+  size_t             i;
+
+  for (i = 0; i < 2u; i++) {
+    size_t   len = 0;
+    uint8_t *d = read_all("jxl", names[i], &len);
+    ImImage *im = NULL;
+    ImInfo   info;
+    uint32_t x, y, bpp;
+
+    ASSERT(d && im_info_mem(&info, d, len) == IM_OK && info.width == 37u && info.height == 23u);
+    ASSERT(info.fileFormatType == IM_FILEFORMATTYPE_JXL);
+    ASSERT(im_load_mem(&im, d, len, NULL, IM_OPEN_INTENT_READONLY) == IM_OK && im);
+    ASSERT(im->width == 37u && im->height == 23u && im->fileFormatType == IM_FILEFORMATTYPE_JXL);
+    bpp = im->bytesPerPixel;
+    ASSERT(bpp == 3u || bpp == 4u);
+    ASSERT(!i || bpp == 4u);
+    for (y = 0; y < 23u; y++) {
+      const uint8_t *row = (const uint8_t *)im->data.data + (size_t)y * (37u * bpp + im->row_pad_last);
+
+      for (x = 0; x < 37u; x++) {
+        const uint8_t *p = row + (size_t)x * bpp;
+        uint32_t       a = i && x >= 20u ? ((x * 9u + y) & 255u) : 255u;
+
+        if (i) ASSERT(p[3] == a);
+        if (a == 255u) ASSERT(p[0] == ((x * 7u) & 255u) && p[1] == ((y * 11u) & 255u) && p[2] == (((x + y) * 3u) & 255u));
+      }
+    }
+    im_free(im);
+    free(d);
+  }
+  TEST_SUCCESS
+}
+#endif
+
 /* a JPEG 2000 region much smaller than its tile, by windows (its levels'
    reach of it alone, jp2.c's tile_window): 640×480, two levels, 5/3 and
    9/7; each scale's regions, at the corners, edges and inside, against the

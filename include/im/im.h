@@ -292,7 +292,8 @@ IM_EXPORT
 ImResult
 im_info_mem(ImInfo * __restrict info, const void * __restrict data, size_t len);
 
-/* an image in memory: JPEG, JPEG 2000 (a JP2 file or a codestream).
+/* an image in memory: JPEG, JPEG-LS, JPEG 2000 (a JP2 file or a
+   codestream), JBIG2, JPEG XL (ImageIO's, on Apple's platforms).
    `data` is read, not kept: the image owns nothing of it. IM_EBADF where
    it isn't one of those or doesn't decode */
 IM_EXPORT

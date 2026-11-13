@@ -62,6 +62,9 @@ TEST_DECLARE(jls)
 TEST_DECLARE(jpg_index)
 TEST_DECLARE(jp2_window)
 TEST_DECLARE(jp2_index)
+#if IM_WITH_JXL
+TEST_DECLARE(jxl_mem)
+#endif
 #endif
 
 /*****************************************************************************/
@@ -104,6 +107,9 @@ TEST_LIST {
   TEST_ENTRY(jpg_index)
   TEST_ENTRY(jp2_window)
   TEST_ENTRY(jp2_index)
+#if IM_WITH_JXL
+  TEST_ENTRY(jxl_mem)
+#endif
 #endif
 };
 

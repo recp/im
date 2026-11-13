@@ -25,4 +25,27 @@ jxl_dec(ImImage         ** __restrict dest,
         const char       * __restrict path,
         im_open_config_t * __restrict open_config);
 
+/* from memory, through ImageIO: a JPEG XL (a bare codestream, or its
+   ISO BMFF container) */
+IM_HIDE
+ImResult
+jxl_dec_mem(ImImage               ** __restrict dest,
+            const uint8_t          * __restrict data,
+            size_t                              len,
+            const im_open_config_t * __restrict open_config);
+
+IM_HIDE
+bool
+jxl_info(const uint8_t *data, size_t len, ImInfo *info);
+
+/* whether `data` starts as a JPEG XL does: a codestream's FF 0A, or the
+   container's JXL box */
+IM_INLINE
+bool
+jxl_is(const uint8_t *data, size_t len) {
+  static const uint8_t box[12] = { 0, 0, 0, 12, 'J', 'X', 'L', ' ', 13, 10, 0x87, 10 };
+
+  return (len >= 2u && data[0] == 0xFFu && data[1] == 0x0Au) || (len >= 12u && !memcmp(data, box, 12u));
+}
+
 #endif /* src_jxl_h */

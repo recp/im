@@ -15,9 +15,9 @@
  */
 
 /*
- * From memory: im_load_mem (JPEG, JPEG 2000, JBIG2; raw CCITT fax and JBIG2's
- * embedded segments where the caller says so), im_info_mem (JPEG, JPEG 2000,
- * JBIG2), im_free, and the options as
+ * From memory: im_load_mem (JPEG, JPEG-LS, JPEG 2000, JBIG2, JPEG XL through
+ * ImageIO on Apple's platforms; raw CCITT fax and JBIG2's embedded segments
+ * where the caller says so), im_info_mem (the same), im_free, and the options as
  * decoders read them. All a codec-only build has
  * (IM_CODECS_ONLY: no file layer, no Core Image, no other formats).
  */
@@ -36,6 +36,9 @@
 #endif
 #if IM_WITH_JBIG2
 #  include "io/jbig2/jbig2.h"
+#endif
+#if IM_WITH_JXL
+#  include "io/jxl/jxl.h"
 #endif
 
 /* the options as a decoder reads them */
@@ -118,6 +121,9 @@ im_info_mem(ImInfo * __restrict info, const void * __restrict data, size_t len) 
 #if IM_WITH_JBIG2
   if (len >= 9u && !memcmp(p, jbig2sig, 8u)) return jbig2_info(p, len, info) ? IM_OK : IM_EBADF;
 #endif
+#if IM_WITH_JXL
+  if (jxl_is(p, len)) return jxl_info(p, len, info) ? IM_OK : IM_EBADF;
+#endif
   (void)jp2sig;
   (void)jbig2sig;
   return IM_EBADF;
@@ -168,6 +174,9 @@ im_load_mem(ImImage         ** __restrict dest,
   if ((len >= 12u && !memcmp(p, jp2sig, 12u)) || (p[0] == 0xFFu && p[1] == 0x4Fu && p[2] == 0xFFu && p[3] == 0x51u)) {
     return read_all(&conf, len, jp2_dec_mem(dest, p, len, &conf));
   }
+#endif
+#if IM_WITH_JXL
+  if (jxl_is(p, len)) return read_all(&conf, len, jxl_dec_mem(dest, p, len, &conf));
 #endif
   (void)jp2sig;
   (void)conf;

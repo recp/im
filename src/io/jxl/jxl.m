@@ -40,3 +40,23 @@ jxl_dec(ImImage         ** __restrict dest,
 
   return ret;
 }
+
+IM_HIDE
+ImResult
+jxl_dec_mem(ImImage               ** __restrict dest,
+            const uint8_t          * __restrict data,
+            size_t                              len,
+            const im_open_config_t * __restrict open_config) {
+  ImResult ret = coreimg_dec_mem(dest, data, len, open_config);
+
+  if (*dest) (*dest)->fileFormatType = IM_FILEFORMATTYPE_JXL;
+  return ret;
+}
+
+IM_HIDE
+bool
+jxl_info(const uint8_t *data, size_t len, ImInfo *info) {
+  if (!coreimg_info_mem(data, len, info)) return false;
+  info->fileFormatType = IM_FILEFORMATTYPE_JXL;
+  return true;
+}

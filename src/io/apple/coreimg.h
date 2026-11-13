@@ -25,4 +25,17 @@ coreimg_dec(ImImage         ** __restrict dest,
             const char       * __restrict path,
             im_open_config_t * __restrict open_config);
 
+/* from memory: an image ImageIO reads (its bytes not copied, not kept) */
+IM_HIDE
+ImResult
+coreimg_dec_mem(ImImage               ** __restrict dest,
+                const uint8_t          * __restrict data,
+                size_t                              len,
+                const im_open_config_t * __restrict open_config);
+
+/* its size, depth, opacity, images; false where ImageIO can't read it */
+IM_HIDE
+bool
+coreimg_info_mem(const uint8_t *data, size_t len, ImInfo *info);
+
 #endif /* src_coreimg_h */
