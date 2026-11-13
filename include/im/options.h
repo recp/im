@@ -146,12 +146,13 @@ typedef enum im_option_type_t {
      (a PDF content stream's) ends there */
   IM_OPTION_BYTES_READ,
 
-  /* a JPEG's index (im_option_index: an ImIndex * of the caller's, im.h):
-     one made for these bytes, the decode starts at the MCU row it needs
-     (a region below the first rows: none above it read), its threads each
-     at its own rows; NULL, the decode makes one as it reads the rows it
-     reads (the caller's then: im_index_free), where the stream is one an
-     index is for (im_index_mem) */
+  /* a JPEG's or a JPEG 2000's index (im_option_index: an ImIndex * of the
+     caller's, im.h): one made for these bytes, a JPEG's decode starts at
+     the MCU row it needs (a region below the first rows: none above it
+     read), its threads each at its own rows; a JPEG 2000's reads no packet
+     header again; NULL, the decode makes one as it reads (the rows, the
+     tiles it reads; the caller's then: im_index_free), where the stream is
+     one an index is for (im_index_mem) */
   IM_OPTION_INDEX,
 } im_option_type_t;
 
@@ -228,7 +229,7 @@ typedef struct im_option_bytes_t {
   size_t          *bytes;
 } im_option_bytes_t;
 
-/* a JPEG's entropy-coded data's index (im.h) */
+/* a JPEG's or a JPEG 2000's index (im.h) */
 typedef struct ImIndex ImIndex;
 
 typedef struct im_option_index_t {

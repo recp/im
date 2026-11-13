@@ -33,6 +33,7 @@
  */
 
 #include "jp2.h"
+#include "../../index.h"
 #include "../../thread/pool.h"
 #if defined(_MSC_VER) && !defined(__clang__)
 #  include <intrin.h>
@@ -337,6 +338,10 @@ typedef struct jpx {
   size_t    pmask[X_COMPS], psize[X_COMPS];
   bool      pmap;
   struct xstream *stream; /* the one tile, by bands (NULL: tiles whole) */
+  /* an index (IM_OPTION_INDEX): the one the tiles' packets come from, or
+     the one made as they're read */
+  const struct xindex *ix;
+  struct xindex       *ixmake;
   bool      rows;          /* tiles a row at a time, each row composed as it's
                               done (tiles_run); the planes rings */
   uint32_t  ox0, oy0, ox1, oy1; /* the grid as SIZ has it (x0 … y1 made
@@ -840,6 +845,170 @@ piece_add(xtile_t *t, xcblk_t *b, const uint8_t *p, uint32_t len) {
   b->pieces[b->npieces].p   = p;
   b->pieces[b->npieces].len = len;
   b->npieces++;
+  return true;
+}
+
+/* -- an index (IM_OPTION_INDEX): each tile's packets as read --------------------------- */
+
+/* A tile's code-blocks as its packets left them: their bit-planes, their
+   segments (kept as read, pointed to, never written) and their data's
+   pieces (offsets into the tile's body, made pointers again where it's
+   used), in the order tc_build makes them (each component's resolutions,
+   their precincts, bands, blocks). A decode whose tile the index has
+   builds the tile's structures and takes them from it, its packets' headers
+   not read again */
+typedef struct xixb {
+  int32_t  numbps;
+  uint32_t nsegs, seg, npieces, piece;
+} xixb_t;
+
+typedef struct xixp {
+  uint64_t off;
+  uint32_t len;
+} xixp_t;
+
+typedef struct xixt {
+  bool      have, stop;   /* read; its packets stopped short */
+  uint32_t  nblk, nseg, npiece;
+  uint64_t  body_len;
+  xixb_t   *blk;
+  xseg_t   *seg;
+  xixp_t   *piece;
+} xixt_t;
+
+struct xindex {
+  uint64_t len, hash;     /* the bytes': their count, their first 64K's FNV-1a 64 */
+  uint32_t ntiles;
+  xixt_t  *tile;
+};
+
+static uint64_t
+ix_hash(const uint8_t *p, size_t n) {
+  uint64_t h = 14695981039346656037ull;
+  size_t   i;
+
+  n = n < 65536u ? n : 65536u;
+  for (i = 0; i < n; i++) h = (h ^ p[i]) * 1099511628211ull;
+  return h;
+}
+
+static void
+ix_free(struct xindex *ix) {
+  uint32_t i;
+
+  if (!ix) return;
+  for (i = 0; ix->tile && i < ix->ntiles; i++) {
+    free(ix->tile[i].blk);
+    free(ix->tile[i].seg);
+    free(ix->tile[i].piece);
+  }
+  free(ix->tile);
+  free(ix);
+}
+
+/* each of the tile's code-blocks in tc_build's order, `fn` for each */
+#define IX_EACH(t, kb, body)                                                        \
+  do {                                                                              \
+    uint32_t ix_c, ix_r, ix_k, ix_b, ix_m;                                          \
+    for (ix_c = 0; ix_c < (t)->ncomp; ix_c++) {                                     \
+      const xtc_t *ix_tc = &(t)->tc[ix_c];                                          \
+      for (ix_r = 0; ix_r < ix_tc->nres; ix_r++) {                                  \
+        const xres_t *ix_res = &ix_tc->res[ix_r];                                   \
+        for (ix_k = 0; ix_k < ix_res->pw * ix_res->ph; ix_k++) {                    \
+          for (ix_b = 0; ix_b < ix_res->nbands; ix_b++) {                           \
+            xpband_t *ix_pb = &ix_res->prec[ix_k * ix_res->nbands + ix_b];          \
+            for (ix_m = 0; ix_m < ix_pb->cw * ix_pb->ch; ix_m++) {                  \
+              xcblk_t *kb = &ix_pb->blk[ix_m];                                      \
+              body                                                                  \
+            }                                                                       \
+          }                                                                         \
+        }                                                                           \
+      }                                                                             \
+    }                                                                               \
+  } while (0)
+
+/* the tile's packets as read, into `it` */
+static bool
+ix_record(const xtile_t *t, xixt_t *it) {
+  uint32_t nb = 0, ns = 0, np = 0, s;
+
+  IX_EACH(t, kb, {
+    nb++;
+    ns += kb->nsegs;
+    np += kb->npieces;
+  });
+  if (!(it->blk = malloc((size_t)(nb ? nb : 1u) * sizeof(*it->blk))) || !(it->seg = malloc((size_t)(ns ? ns : 1u) * sizeof(*it->seg)))
+      || !(it->piece = malloc((size_t)(np ? np : 1u) * sizeof(*it->piece)))) {
+    return false;
+  }
+  nb = ns = np = 0;
+  IX_EACH(t, kb, {
+    xixb_t *e = &it->blk[nb++];
+
+    e->numbps  = kb->numbps;
+    e->nsegs   = kb->nsegs;
+    e->seg     = ns;
+    e->npieces = kb->npieces;
+    e->piece   = np;
+    if (kb->nsegs) memcpy(it->seg + ns, kb->segs, (size_t)kb->nsegs * sizeof(*it->seg));
+    ns += kb->nsegs;
+    for (s = 0; s < kb->npieces; s++, np++) {
+      it->piece[np].off = (uint64_t)(kb->pieces[s].p - t->body);
+      it->piece[np].len = kb->pieces[s].len;
+    }
+  });
+  it->nblk     = nb;
+  it->nseg     = ns;
+  it->npiece   = np;
+  it->body_len = t->body_len;
+  it->stop     = t->stop;
+  it->have     = true;
+  return true;
+}
+
+/* the tile's code-blocks from `it` where it's this tile's (its blocks,
+   its body, each record inside its arrays); false: not, nothing set */
+static bool
+ix_fits(const xtile_t *t, const xixt_t *it) {
+  uint32_t i;
+
+  if (!it->have || it->nblk != t->blocks || it->body_len != t->body_len) return false;
+  for (i = 0; i < it->nblk; i++) {
+    const xixb_t *e = &it->blk[i];
+
+    if (e->seg > it->nseg || e->nsegs > it->nseg - e->seg || e->piece > it->npiece || e->npieces > it->npiece - e->piece) {
+      return false;
+    }
+  }
+  for (i = 0; i < it->npiece; i++) {
+    if (it->piece[i].off > t->body_len || it->piece[i].len > t->body_len - it->piece[i].off) return false;
+  }
+  return true;
+}
+
+static bool
+ix_fill(xtile_t *t, const xixt_t *it) {
+  xpiece_t *pcs = NULL;
+  uint32_t  i = 0;
+
+  if (it->npiece && !(pcs = arena_alloc(&t->arena, (uint64_t)it->npiece * sizeof(*pcs)))) return false;
+  for (i = 0; i < it->npiece; i++) {
+    pcs[i].p   = t->body + it->piece[i].off;
+    pcs[i].len = it->piece[i].len;
+  }
+  i = 0;
+  IX_EACH(t, kb, {
+    const xixb_t *e = &it->blk[i++];
+
+    kb->numbps   = e->numbps;
+    kb->nsegs    = e->nsegs;
+    kb->segcap   = e->nsegs;
+    kb->segs     = e->nsegs ? (xseg_t *)(uintptr_t)(it->seg + e->seg) : NULL;
+    kb->npieces  = e->npieces;
+    kb->piececap = e->npieces;
+    kb->pieces   = e->npieces ? pcs + e->piece : NULL;
+  });
+  t->stop = it->stop;
   return true;
 }
 
@@ -3983,15 +4152,21 @@ tile_open(jpx_t *j, uint32_t tile, xtile_t **out) {
     if (!tc_build(j, t, c)) goto fail;
   }
 
-  /* the packets */
-  if (t->cod.npoc) {
-    for (i = 0; i < t->cod.npoc && !t->stop; i++) {
-      const xpoc_t *v = &t->cod.poc[i];
-
-      progression(j, t, v->order, v->rs, v->re, v->cs, v->ce, v->le);
-    }
+  /* the packets: as an index has them, or read (and kept where one is
+     made) */
+  if (j->ix && tile < j->ix->ntiles && ix_fits(t, &j->ix->tile[tile])) {
+    if (!ix_fill(t, &j->ix->tile[tile])) goto fail;
   } else {
-    progression(j, t, t->cod.order, 0u, X_LEVELS + 1u, 0u, j->ncomp, t->cod.layers);
+    if (t->cod.npoc) {
+      for (i = 0; i < t->cod.npoc && !t->stop; i++) {
+        const xpoc_t *v = &t->cod.poc[i];
+
+        progression(j, t, v->order, v->rs, v->re, v->cs, v->ce, v->le);
+      }
+    } else {
+      progression(j, t, t->cod.order, 0u, X_LEVELS + 1u, 0u, j->ncomp, t->cod.layers);
+    }
+    if (j->ixmake && tile < j->ixmake->ntiles && !j->ixmake->tile[tile].have && !ix_record(t, &j->ixmake->tile[tile])) goto fail;
   }
   *out = t;
   return true;
@@ -5179,6 +5354,8 @@ typedef struct jxopts {
   uint32_t    rx, ry, rw, rh;
   size_t      mem_limit; /* bytes the image may take; 0: no limit */
   bool       *over;      /* set where refused for it (NULL: none) */
+  ImIndex   **index;     /* IM_OPTION_INDEX's (NULL: none) */
+  bool        skim;      /* the tiles' packets read for an index alone */
 } jxopts_t;
 
 /* which channel is which: through a palette where the JP2 maps one; the
@@ -6064,6 +6241,33 @@ jpx_decode(const uint8_t *data, size_t len, ImImage *im, const jxopts_t *o) {
   j->ox1 = j->x1;
   j->oy1 = j->y1;
 
+  /* an index: these bytes' (their count, their start's hash, the tiles'),
+     its tiles' packets taken from it; or one made as they're read */
+  if (o->index && *o->index) {
+    const struct xindex *ix = (*o->index)->kind == IM_INDEX_JP2 ? (*o->index)->jp2 : NULL;
+
+    if (ix && ix->len == len && ix->ntiles == j->ntx * j->nty && ix->hash == ix_hash(data, len)) j->ix = ix;
+  } else if (o->index) {
+    if (!(j->ixmake = calloc(1, sizeof(*j->ixmake))) || !(j->ixmake->tile = calloc(j->ntx * j->nty, sizeof(*j->ixmake->tile)))) {
+      goto done;
+    }
+    j->ixmake->ntiles = j->ntx * j->nty;
+    j->ixmake->len    = len;
+    j->ixmake->hash   = ix_hash(data, len);
+  }
+  if (o->skim) {
+    /* for an index alone: each tile's packets read, nothing decoded */
+    if (!j->ixmake) goto done;
+    for (tile = 0; tile < j->ntx * j->nty; tile++) {
+      xtile_t *t;
+
+      if (!tile_open(j, tile, &t)) goto done;
+      tile_close(t);
+    }
+    ok = true;
+    goto done;
+  }
+
   /* made smaller: a level left out for each halving asked, no more than
      every component has (a tile's own fewer: refused, as OpenJPEG); none
      where a palette maps a component (a coarser level's samples aren't
@@ -6175,6 +6379,21 @@ jpx_decode(const uint8_t *data, size_t len, ImImage *im, const jxopts_t *o) {
   ok = compose(j, &x, im, o);
 
 done:
+  /* the index made, the caller's where the decode succeeded (a tile of it
+     read at least) */
+  if (ok && j->ixmake && o->index) {
+    uint32_t k = 0;
+    ImIndex *w;
+
+    while (k < j->ixmake->ntiles && !j->ixmake->tile[k].have) k++;
+    if (k < j->ixmake->ntiles && (w = calloc(1, sizeof(*w)))) {
+      w->kind   = IM_INDEX_JP2;
+      w->jp2    = j->ixmake;
+      j->ixmake = NULL;
+      *o->index = w;
+    }
+  }
+  ix_free(j->ixmake);
   stream_close(j);
   pool_stop(j);
   for (c = 0; c < X_COMPS; c++) im_big_free(j->plane[c], j->psize[c], j->pmap);
@@ -6314,6 +6533,8 @@ opts_of(const im_open_config_t *c) {
   o.rh          = c->regionH;
   o.mem_limit   = c->memoryLimit;
   o.over        = NULL;
+  o.index       = c->index;
+  o.skim        = false;
   return o;
 }
 
@@ -6336,6 +6557,50 @@ dec(const uint8_t *data, size_t len, const im_open_config_t *conf, ImResult *res
     im->ori        = IM_ORIENTATION_UP;
   }
   return im;
+}
+
+/* the index of `data`: each tile's packets read, nothing decoded */
+IM_HIDE ImResult
+jp2_index_mem(ImIndex **dest, const uint8_t *data, size_t len, const im_open_config_t *conf) {
+  jxopts_t o = opts_of(conf);
+  ImImage  im;
+  ImIndex *ix = NULL;
+
+  *dest = NULL;
+  memset(&im, 0, sizeof(im));
+  o.index  = &ix;
+  o.skim   = true;
+  o.region = false;
+  o.scale  = 1u;
+  o.dest   = NULL;
+  if (!jpx_decode(data, len, &im, &o) || !ix) {
+    jp2_index_free(ix);
+    return IM_EBADF;
+  }
+  *dest = ix;
+  return IM_OK;
+}
+
+IM_HIDE size_t
+jp2_index_size(const ImIndex *ix) {
+  size_t   n;
+  uint32_t i;
+
+  if (!ix || !ix->jp2) return 0u;
+  n = sizeof(*ix) + sizeof(*ix->jp2) + (size_t)ix->jp2->ntiles * sizeof(*ix->jp2->tile);
+  for (i = 0; i < ix->jp2->ntiles; i++) {
+    const xixt_t *it = &ix->jp2->tile[i];
+
+    n += (size_t)it->nblk * sizeof(*it->blk) + (size_t)it->nseg * sizeof(*it->seg) + (size_t)it->npiece * sizeof(*it->piece);
+  }
+  return n;
+}
+
+IM_HIDE void
+jp2_index_free(ImIndex *ix) {
+  if (!ix) return;
+  ix_free(ix->jp2);
+  free(ix);
 }
 
 IM_HIDE

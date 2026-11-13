@@ -1493,6 +1493,108 @@ TEST_IMPL(jpg_index) {
   TEST_SUCCESS
 }
 
+/* a JPEG 2000's index (its tiles' packet headers as read, IM_OPTION_INDEX,
+   im_index_mem): with it every scale's regions and the whole are the
+   pixels without it, on one thread and on many, by windows too (win.j2k,
+   win97.j2k); one a region decode makes holds the tiles it read and the
+   whole is right with it; another file's, a JPEG's, or one whose bytes
+   changed is passed over */
+TEST_IMPL(jp2_index) {
+  static const char *names[] = { "win.j2k",     "win97.j2k",   "ict-tiles.j2k",   "ht-irv-tiles.j2c", "ht-rev.jph",
+                                 "ht-gray16.j2c", "poc.j2k",   "ppm.j2k",         "ppt.j2k",          "parts.j2k",
+                                 "rct.jp2",     "alpha.jp2",   "sycc420.jp2",     "gray16.jp2",       "styles.jp2",
+                                 "gray-layers.jp2", "palette.jp2", "cmyk.j2k",     "rgb10.jp2",        "premult.jp2" };
+  ImIndex           *other = NULL, *jpeg = NULL;
+  size_t             i, len = 0;
+  uint8_t           *d = read_all("jpg", "420.jpg", &len);
+
+  ASSERT(d && im_index_mem(&jpeg, d, len, NULL) == IM_OK && jpeg);
+  free(d);
+  for (i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+    ImIndex *ix = NULL, *made = NULL;
+    ImImage *a, *b;
+    uint32_t sc, th, k;
+
+    d = read_all("jp2", names[i], &len);
+    ASSERT(d && im_index_mem(&ix, d, len, NULL) == IM_OK && ix && im_index_size(ix) > 0u);
+    ASSERT((a = ix_dec(d, len, 1u, 1u, 0, 0, 0, 0, NULL)));
+    for (sc = 1; sc <= 8u; sc *= 2u) {
+      ImImage *s = ix_dec(d, len, 1u, sc, 0, 0, 0, 0, NULL);
+      uint32_t W, H;
+
+      ASSERT(s);
+      W = s->width;
+      H = s->height;
+      im_free(s);
+      {
+        const uint32_t reg[7][4] = { { 0, 0, 0, 0 },           { 0, H - 1u, W, 1 },  { W / 2u, H / 2u, W, H }, { W - 1u, 0, 1, H },
+                                     { 1u < W ? 1u : 0u, H / 3u, W / 3u + 1u, 2 }, { W / 4u, H > 2u ? H - 2u : 0u, 3, 7 },
+                                     { W / 3u, H / 3u, 5, 4 } };
+
+        for (k = 0; k < 7u; k++) {
+          for (th = 0; th < 2u; th++) {
+            ImImage *x = ix_dec(d, len, th ? 0u : 1u, sc, reg[k][0], reg[k][1], reg[k][2], reg[k][3], NULL);
+
+            ASSERT(x && same(x, b = ix_dec(d, len, th ? 0u : 1u, sc, reg[k][0], reg[k][1], reg[k][2], reg[k][3], &ix)));
+            im_free(b);
+            ASSERT(same(x, b = ix_dec(d, len, th ? 0u : 1u, sc, reg[k][0], reg[k][1], reg[k][2], reg[k][3], &jpeg)));
+            im_free(b);
+            if (other) {
+              ASSERT(same(x, b = ix_dec(d, len, th ? 0u : 1u, sc, reg[k][0], reg[k][1], reg[k][2], reg[k][3], &other)));
+              im_free(b);
+            }
+            im_free(x);
+          }
+        }
+      }
+    }
+    /* made as a region decode reads: its tiles' */
+    ASSERT((b = ix_dec(d, len, 1u, 1u, 0, 0, 3, 3, &made)) && made && im_index_size(made) <= im_index_size(ix));
+    im_free(b);
+    ASSERT(same(a, b = ix_dec(d, len, 0u, 1u, 0, 0, 0, 0, &made)));
+    im_free(b);
+    /* a byte near the end changed (a packet's, perhaps its header's) */
+    {
+      uint8_t *e = malloc(len);
+      ImImage *x;
+
+      ASSERT(e);
+      memcpy(e, d, len);
+      e[len - 3u] ^= 0x41u;
+      x = ix_dec(e, len, 1u, 1u, 0, 0, 0, 0, NULL);
+      b = ix_dec(e, len, 1u, 1u, 0, 0, 0, 0, &ix);
+      ASSERT(same(x, b));
+      im_free(x);
+      im_free(b);
+      free(e);
+    }
+    im_free(a);
+    im_index_free(made);
+    im_index_free(other);
+    other = ix;
+    free(d);
+  }
+  im_index_free(other);
+  /* a JPEG's decode with a JPEG 2000's index: passed over */
+  {
+    ImIndex *ix = NULL;
+    ImImage *x, *b;
+
+    d = read_all("jp2", "win.j2k", &len);
+    ASSERT(d && im_index_mem(&ix, d, len, NULL) == IM_OK);
+    free(d);
+    d = read_all("jpg", "420.jpg", &len);
+    ASSERT(d && (x = ix_dec(d, len, 1u, 1u, 0, 0, 0, 0, NULL)));
+    ASSERT(same(x, b = ix_dec(d, len, 1u, 1u, 0, 0, 0, 0, &ix)));
+    im_free(x);
+    im_free(b);
+    im_index_free(ix);
+    free(d);
+  }
+  im_index_free(jpeg);
+  TEST_SUCCESS
+}
+
 /* a JPEG 2000 region much smaller than its tile, by windows (its levels'
    reach of it alone, jp2.c's tile_window): 640×480, two levels, 5/3 and
    9/7; each scale's regions, at the corners, edges and inside, against the

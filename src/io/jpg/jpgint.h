@@ -28,6 +28,7 @@
 #define src_io_jpg_jpgint_h
 
 #include "../../common.h"
+#include "../../index.h"
 #include "../../thread/pool.h"
 
 /* pixels a thread at least: none below twice this, the rest one thread for
@@ -177,20 +178,6 @@ typedef struct jcp {
   uint64_t at;
   int32_t  dc[4];
 } jcp_t;
-
-/* IM_OPTION_INDEX's (im.h): rows 0 … rows - 1 of the one-pass sequential
-   Huffman scan of the bytes it's for: `len` of them, `scan` the offset of
-   the scan's data (the headers before it hashed: FNV-1a 64), `end` its
-   marker's */
-struct ImIndex {
-  uint64_t len, hash, scan, end;
-  uint32_t w, rows, nscomp;
-  jcp_t   *cp;
-
-  uint64_t *offsets;
-  uint64_t  scan_bytes;
-  uint32_t  restart, intervals;
-};
 
 typedef struct jpg {
   const uint8_t *data, *end;

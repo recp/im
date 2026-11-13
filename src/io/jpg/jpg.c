@@ -2050,7 +2050,7 @@ jpg_decode_mem(const uint8_t *data, size_t len, ImImage *im, const jopts_t *o) {
   j->reg_h            = o->rh;
   j->mem_limit        = o->mem_limit;
   j->skim             = o->skim;
-  if (o->index && *o->index) j->idx_in = *o->index;
+  if (o->index && *o->index) j->idx_in = (*o->index)->kind == IM_INDEX_JPEG ? *o->index : NULL;
   else j->idx_out = o->index;
   ok                = decode(j, im, o->order);
   if (o->over) *o->over = j->over;

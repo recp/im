@@ -314,13 +314,19 @@ im_load_mem(ImImage         ** __restrict dest,
    one serves decodes running at once. Tied to
    the bytes it was made from: their length and headers checked, other
    bytes decoded as if none were given. The caller keeps the indexed bytes
-   immutable while reusing an index; changed source bytes need a fresh index. */
+   immutable while reusing an index; changed source bytes need a fresh index.
+   A JPEG 2000's: each tile's packet headers as read (every code-block's
+   passes and where its bytes lie), so a decode of the same bytes reads
+   none of them again: a small region of a big tile touches its own
+   code-blocks alone. A few tens of bytes a code-block (20000 × 20000 RGB
+   in one tile: 12 MB). Tied to the bytes as a JPEG's is (their length,
+   the first 64 KiB hashed, each tile's body length) */
 
 /* the index of `data`: its entropy-coded data read through and nothing
    else (on threads as IM_OPTION_THREADS, IM_OPTION_RUNNER say; restart streams
    validate markers without entropy decoding), the
-   caller's (im_index_free); IM_EBADF where it has none (not such a JPEG,
-   or damaged before its end) */
+   caller's (im_index_free); IM_EBADF where it has none (not such a JPEG
+   or a JPEG 2000, or damaged before its end) */
 IM_EXPORT
 ImResult
 im_index_mem(ImIndex         ** __restrict dest,

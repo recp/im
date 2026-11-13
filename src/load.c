@@ -24,6 +24,7 @@
 
 #include "common.h"
 #include "formats.h"
+#include "index.h"
 #if IM_WITH_JPG
 #  include "io/jpg/jpg.h"
 #endif
@@ -173,15 +174,17 @@ im_load_mem(ImImage         ** __restrict dest,
   return IM_EBADF;
 }
 
-/* a JPEG's index (jpg.c); none for the other formats */
+/* an index: a JPEG's (jpg.c) or a JPEG 2000's (jp2.c); none for the
+   other formats */
 IM_EXPORT
 ImResult
 im_index_mem(ImIndex         ** __restrict dest,
              const void       * __restrict data,
              size_t                        len,
              im_option_base_t *            options[]) {
-  const uint8_t   *p = data;
-  im_open_config_t conf;
+  static const uint8_t jp2sig[12] = { 0, 0, 0, 12, 'j', 'P', ' ', ' ', 13, 10, 0x87, 10 };
+  const uint8_t       *p = data;
+  im_open_config_t     conf;
 
   if (!dest) return IM_EBADF;
   *dest = NULL;
@@ -190,6 +193,12 @@ im_index_mem(ImIndex         ** __restrict dest,
 #if IM_WITH_JPG
   if (p[0] == 0xFFu && p[1] == 0xD8u) return jpg_index_mem(dest, p, len, &conf);
 #endif
+#if IM_WITH_JP2
+  if ((len >= 12u && !memcmp(p, jp2sig, 12u)) || (p[0] == 0xFFu && p[1] == 0x4Fu && p[2] == 0xFFu && p[3] == 0x51u)) {
+    return jp2_index_mem(dest, p, len, &conf);
+  }
+#endif
+  (void)jp2sig;
   (void)conf;
   return IM_EBADF;
 }
@@ -197,21 +206,28 @@ im_index_mem(ImIndex         ** __restrict dest,
 IM_EXPORT
 size_t
 im_index_size(const ImIndex * __restrict index) {
-#if IM_WITH_JPG
-  return jpg_index_size(index);
-#else
-  (void)index;
-  return 0u;
+  if (!index) return 0u;
+#if IM_WITH_JP2
+  if (index->kind == IM_INDEX_JP2) return jp2_index_size(index);
 #endif
+#if IM_WITH_JPG
+  if (index->kind == IM_INDEX_JPEG) return jpg_index_size(index);
+#endif
+  return 0u;
 }
 
 IM_EXPORT
 void
 im_index_free(ImIndex * __restrict index) {
+  if (!index) return;
+#if IM_WITH_JP2
+  if (index->kind == IM_INDEX_JP2) {
+    jp2_index_free(index);
+    return;
+  }
+#endif
 #if IM_WITH_JPG
-  jpg_index_free(index);
-#else
-  (void)index;
+  if (index->kind == IM_INDEX_JPEG) jpg_index_free(index);
 #endif
 }
 
