@@ -55,7 +55,7 @@
  /* Exclude rarely-used stuff from Windows headers */
  /* Windows Header Files: */
 #  define WIN32_LEAN_AND_MEAN
-#  include <SDKDDKVer.h>
+#  include <sdkddkver.h> /* as mingw-w64 has it: a case-sensitive file system finds it so, Windows either way */
 #  include <windows.h>
 
 #endif
