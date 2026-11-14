@@ -179,6 +179,7 @@ im_load_mem(ImImage         ** __restrict dest,
   if (jxl_is(p, len)) return read_all(&conf, len, jxl_dec_mem(dest, p, len, &conf));
 #endif
   (void)jp2sig;
+  (void)jbig2sig;
   (void)conf;
   return IM_EBADF;
 }
