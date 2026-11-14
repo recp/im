@@ -71,9 +71,10 @@ im_release(bool big, void *p, size_t len) {
 #endif
 }
 
-/* a block of IM_KEPT_MIN bytes or more (big or not) is mapped too, and kept when let go, out of the footprint
-   (MADV_FREE_REUSABLE) until the next image takes it back: its pages in, not faulted in and cleared by the system
-   again (the allocator hands blocks this large back to the system). IM_KEPT_BYTES of them kept at most */
+/* a block of IM_KEPT_MIN bytes or more (big or not) is mapped too, and kept when let go until the next image takes
+   it back: its pages in, not faulted in and cleared by the system again (the allocator hands blocks this large back
+   to the system). IM_KEPT_BYTES of them kept at most; the newest IM_KEPT_WARM bytes as they are, the rest out of the
+   footprint (MADV_FREE_REUSABLE) while kept */
 #ifndef IM_KEPT_MIN
 #  define IM_KEPT_MIN ((size_t)1u << 20)
 #endif

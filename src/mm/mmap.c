@@ -31,24 +31,31 @@
 #if IM_RELEASE
 #  include <pthread.h>
 
-/* blocks let go, kept for the next image's (mmap.h) */
+/* blocks let go, kept for the next image's (mmap.h). IM_KEPT_WARM bytes of
+   them stay warm, in the footprint: no madvise either way (a small
+   image's decode spends more in those calls than in much of its work);
+   the rest out of it while kept */
 enum { IM_KEPT_COUNT = 16u };
 #  define IM_KEPT_BYTES ((size_t)64u << 20)
+#  ifndef IM_KEPT_WARM
+#    define IM_KEPT_WARM ((size_t)16u << 20)
+#  endif
 
 typedef struct im_kept_t {
   uint8_t *p;
   size_t   n;
+  bool     warm;
 } im_kept_t;
 
 static pthread_mutex_t im_kept_lock = PTHREAD_MUTEX_INITIALIZER;
 static im_kept_t       im_kept[IM_KEPT_COUNT];
 static uint32_t        im_kept_count;
-static size_t          im_kept_bytes;
+static size_t          im_kept_bytes, im_warm_bytes;
 
 IM_HIDE
 void*
 im_kept_take(size_t n) {
-  im_kept_t got = {NULL, 0u}, rest = {NULL, 0u};
+  im_kept_t got = {NULL, 0u, false}, rest = {NULL, 0u, false};
   uint32_t  i, best = IM_KEPT_COUNT;
 
   pthread_mutex_lock(&im_kept_lock);
@@ -59,12 +66,14 @@ im_kept_take(size_t n) {
     got             = im_kept[best];
     im_kept[best]   = im_kept[--im_kept_count];
     im_kept_bytes  -= got.n;
+    if (got.warm) im_warm_bytes -= got.n;
     if (got.n > n) { /* the rest kept apart, or let go when too small to keep */
-      rest = (im_kept_t){got.p + n, got.n - n};
+      rest = (im_kept_t){got.p + n, got.n - n, got.warm};
       if (rest.n >= IM_KEPT_MIN) {
         im_kept[im_kept_count++] = rest;
         im_kept_bytes           += rest.n;
-        rest                     = (im_kept_t){NULL, 0u};
+        if (rest.warm) im_warm_bytes += rest.n;
+        rest                     = (im_kept_t){NULL, 0u, false};
       }
     }
   }
@@ -72,7 +81,7 @@ im_kept_take(size_t n) {
   if (rest.p) (void)munmap(rest.p, rest.n);
   if (!got.p) return NULL;
 #  if defined(MADV_FREE_REUSE)
-  (void)madvise(got.p, n, MADV_FREE_REUSE); /* back in the footprint */
+  if (!got.warm) (void)madvise(got.p, n, MADV_FREE_REUSE); /* back in the footprint */
 #  endif
   return got.p;
 }
@@ -82,11 +91,17 @@ void
 im_kept_give(void *p, size_t n) {
   im_kept_t gone[IM_KEPT_COUNT];
   uint32_t  i, smallest, count = 0u;
-  bool      kept = false;
+  bool      kept = false, warm;
 
   if (n <= IM_KEPT_BYTES) {
+    /* warm while there's room for it (its bytes counted now, before
+       another thread can take it); else out of the footprint first */
+    pthread_mutex_lock(&im_kept_lock);
+    warm = n <= IM_KEPT_WARM - im_warm_bytes;
+    if (warm) im_warm_bytes += n;
+    pthread_mutex_unlock(&im_kept_lock);
 #  if defined(MADV_FREE_REUSABLE)
-    (void)madvise(p, n, MADV_FREE_REUSABLE); /* out of the footprint while kept */
+    if (!warm) (void)madvise(p, n, MADV_FREE_REUSABLE); /* out of the footprint while kept */
 #  endif
     pthread_mutex_lock(&im_kept_lock);
     /* smaller ones let go to make room */
@@ -97,12 +112,15 @@ im_kept_give(void *p, size_t n) {
       if (im_kept[smallest].n >= n) break;
       gone[count++]      = im_kept[smallest];
       im_kept_bytes     -= im_kept[smallest].n;
+      if (im_kept[smallest].warm) im_warm_bytes -= im_kept[smallest].n;
       im_kept[smallest]  = im_kept[--im_kept_count];
     }
     if (im_kept_count < IM_KEPT_COUNT && n <= IM_KEPT_BYTES - im_kept_bytes) {
-      im_kept[im_kept_count++] = (im_kept_t){p, n};
+      im_kept[im_kept_count++] = (im_kept_t){p, n, warm};
       im_kept_bytes           += n;
       kept                     = true;
+    } else if (warm) {
+      im_warm_bytes -= n;
     }
     pthread_mutex_unlock(&im_kept_lock);
   }
