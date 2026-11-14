@@ -494,8 +494,10 @@ seg_at(jac_t *e, uint32_t s) {
 
 IM_HIDE bool
 jpg_scan_arith(jpg_t *j) {
+  IM_ALIGN(16) int16_t blks[2][64];
   jac_t   *e;
-  uint32_t w, h, total, n, cur = 0u, next_rst = 0u, togo, i;
+  jcomp_t *held = NULL; /* a one-pass scan's block held back (huff.c's seq_range) */
+  uint32_t w, h, total, n, cur = 0u, next_rst = 0u, togo, i, hbx = 0u, hby = 0u, bcur = 0u;
   bool     refine_dc = j->process == J_PROGRESSIVE && j->ss == 0u && j->ah;
 
   if (!(e = calloc(1, sizeof(*e)))) return false;
@@ -538,7 +540,6 @@ jpg_scan_arith(jpg_t *j) {
 
       for (b = 0; b < nv; b++) {
         for (a = 0; a < nh; a++) {
-          IM_ALIGN(16) int16_t scratch[64];
           uint32_t bx = mx * nh + a, by = my * nv + b;
           int16_t *blk;
           bool     ok = true;
@@ -546,8 +547,8 @@ jpg_scan_arith(jpg_t *j) {
           if (j->multiscan) {
             blk = c->coefs + ((size_t)by * c->bw + bx) * 64u;
           } else {
-            blk = scratch;
-            memset(scratch, 0, sizeof(scratch));
+            blk = blks[bcur];
+            memset(blk, 0, sizeof(blks[0]));
           }
           if (refine_dc) {
             if (dec_even(&e->s, e->fixed)) blk[0] = (int16_t)(blk[0] | (1 << j->al));
@@ -558,11 +559,19 @@ jpg_scan_arith(jpg_t *j) {
             else ok = block_ac_refine(e, ci, blk);
           }
           if (!ok) e->s.dead = true; /* the rest of the MCU and those after: left */
-          if (!j->multiscan) jpg_put(j, c, blk, bx, by);
+          if (!j->multiscan) {
+            /* to its plane a block late */
+            if (held) jpg_put(j, held, blks[bcur ^ 1u], hbx, hby);
+            held = c;
+            hbx  = bx;
+            hby  = by;
+            bcur ^= 1u;
+          }
         }
       }
     }
   }
+  if (held) jpg_put(j, held, blks[bcur ^ 1u], hbx, hby);
   /* no data runs out here: each MCU counts (libjpeg's last good row) */
   j->last_good = j->nscomp == 1u ? (h - 1u) / j->comp[j->scomp[0]].v : h - 1u;
   free(e);

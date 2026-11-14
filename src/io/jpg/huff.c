@@ -1382,24 +1382,29 @@ seq_list(jctx_t *x, jsblk_t *list) {
 
 /* blocks b0 … b1 - 1 (MCUs × their blocks, `w` MCUs a row) from where the
    reader is: decoded (zeros once data ran out, as an MCU's end finds) and
-   put in their planes */
+   put in their planes. Each goes to its plane a block late: the IDCT's
+   vector loads of a block just written by 16-bit stores wait for every
+   one of them to reach the cache, a block later they have */
 static void
 seq_range(jctx_t *x, const jsblk_t *list, uint32_t nb, uint32_t w, uint32_t b0, uint32_t b1) {
-  IM_ALIGN(16) int16_t blk[64];
+  IM_ALIGN(16) int16_t blks[2][64];
   jpg_t   *j  = x->j;
   jbits_t  bs = x->r.b; /* here, so the compiler keeps it in registers */
-  uint32_t m = b0 / nb, slot = b0 % nb, mx = m % w, my = m / w, b;
+  uint32_t m = b0 / nb, slot = b0 % nb, mx = m % w, my = m / w, b, cur = 0u;
   uint32_t vdiv = j->nscomp == 1u ? j->comp[j->scomp[0]].v : 1u, row = my / vdiv;
   size_t   es = j->diff ? 4u : j->prec <= 8u ? 1u : 2u;
   bool     diff = j->diff;
   jcp_t   *rec = j->rec; /* an index made: each row's start kept */
+  jcomp_t *held = NULL;  /* the block held back: its component, where it goes */
+  uint8_t *held_at = NULL;
 
   for (b = b0; b < b1; b++) {
     const jsblk_t *s = &list[slot];
     jcomp_t       *c = s->c;
     uint32_t       bx = mx * s->nh + s->dx, by = my * s->nv + s->dy;
+    int16_t       *blk = blks[cur];
 
-    memset(blk, 0, sizeof(blk));
+    memset(blk, 0, sizeof(blks[0]));
     if (!x->lacking) {
       if (!slot) {
         x->last_good = row;
@@ -1418,9 +1423,13 @@ seq_range(jctx_t *x, const jsblk_t *list, uint32_t nb, uint32_t w, uint32_t b0, 
       if (diff) *s->pred = 0; /* a differential frame's DC: none predicted */
       block_seq(&bs, s->dc, s->ac, s->pred, blk);
     }
+    if (held) held->idct(blks[cur ^ 1u], held->q, held_at, held->stride);
+    held = NULL;
     if (bx >= c->rbx0 && bx < c->rbx1 && by >= c->rby0 && by < c->rby1) {
-      c->idct(blk, c->q, (uint8_t *)c->plane + ((size_t)by * c->stride + bx) * c->ss * es, c->stride);
+      held    = c;
+      held_at = (uint8_t *)c->plane + ((size_t)by * c->stride + bx) * c->ss * es;
     }
+    cur ^= 1u;
     if (++slot == nb) {
       slot = 0u;
       if (!x->lacking && x->r.tail) {
@@ -1433,6 +1442,7 @@ seq_range(jctx_t *x, const jsblk_t *list, uint32_t nb, uint32_t w, uint32_t b0, 
       }
     }
   }
+  if (held) held->idct(blks[cur ^ 1u], held->q, held_at, held->stride);
   x->r.b = bs;
 }
 
@@ -2134,13 +2144,15 @@ spec_pass3(void *arg, uint32_t worker, uint32_t item) {
   if (ch->kept) {
     /* the kept blocks to the cross: their DCs moved to the true ones, to
        the planes */
-    IM_ALIGN(16) int16_t blk[64];
+    IM_ALIGN(16) int16_t blks[2][64];
     jpg_t         *j  = sp->j;
-    uint32_t       b, k, upto = ch->xs.blk < end ? ch->xs.blk : end;
+    uint32_t       b, k, upto = ch->xs.blk < end ? ch->xs.blk : end, cur = 0u;
     uint32_t       slot = from.blk % nb, m = from.blk / nb, mx = m % sp->w, my = m / sp->w;
     size_t         es = j->prec <= 8u ? 1u : 2u;
     const int16_t *rec = ch->coef;
     uint16_t       off[J_COMPS];
+    jcomp_t       *held = NULL; /* a block late, as seq_range's */
+    uint8_t       *held_at = NULL;
 
     for (i = 0; i < J_COMPS; i++) off[i] = (uint16_t)((uint32_t)ch->s.dc[i] - (uint32_t)ch->m.dc[i]);
     for (k = 0; k < ch->m.blk; k++) rec += 2u + 2u * (uint16_t)rec[0]; /* to where the paths met */
@@ -2150,10 +2162,15 @@ spec_pass3(void *arg, uint32_t worker, uint32_t item) {
       uint32_t       bx = mx * e->nh + e->dx, by = my * e->nv + e->dy, n = (uint16_t)rec[0], q;
 
       if (bx >= c->rbx0 && bx < c->rbx1 && by >= c->rby0 && by < c->rby1) {
-        memset(blk, 0, sizeof(blk));
+        int16_t *blk = blks[cur];
+
+        memset(blk, 0, sizeof(blks[0]));
         blk[0] = (int16_t)(uint16_t)((uint16_t)rec[1] + off[sp->slot_ci[slot]]);
         for (q = 0; q < n; q++) blk[(uint16_t)rec[2u + 2u * q]] = rec[3u + 2u * q];
-        c->idct(blk, c->q, (uint8_t *)c->plane + ((size_t)by * c->stride + bx) * c->ss * es, c->stride);
+        if (held) held->idct(blks[cur ^ 1u], held->q, held_at, held->stride);
+        held    = c;
+        held_at = (uint8_t *)c->plane + ((size_t)by * c->stride + bx) * c->ss * es;
+        cur ^= 1u;
       }
       rec += 2u + 2u * n;
       if (++slot == nb) {
@@ -2164,6 +2181,7 @@ spec_pass3(void *arg, uint32_t worker, uint32_t item) {
         }
       }
     }
+    if (held) held->idct(blks[cur ^ 1u], held->q, held_at, held->stride);
     from = ch->xs;
     if (from.blk >= end) return true;
   }
