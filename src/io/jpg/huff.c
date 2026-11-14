@@ -2273,10 +2273,15 @@ spec_pass2(jspec_t *sp, jctx_t *x) {
 #  define J_KEEP 1
 #endif
 
-/* chunks a thread at most (each at least 64K) */
+/* chunks a thread at most (each at least J_SPEC_CHUNK bytes) */
 #ifndef J_CHUNKS
 #  define J_CHUNKS 1u
 #endif
+
+/* a one-pass scan's single segment goes on threads from J_SPEC_BYTES of
+   data: a few megapixels at a low rate are that, and their IDCT and
+   colour, not their bytes, are what the threads share */
+enum { J_SPEC_BYTES = 64u << 10, J_SPEC_CHUNK = 16u << 10 };
 
 /* the one-pass sequential scan's single segment on `pool`; false with
    nothing written: decode it in order */
@@ -2313,7 +2318,7 @@ scan_spec(jpg_t *j, im_pool_t *pool, uint32_t w, uint32_t h, size_t margin, bool
   sp.total = w * h * s;
   /* more chunks than threads, taken in turn: a slower core takes fewer */
   sp.n     = J_CHUNKS * nw;
-  if (len / sp.n < (64u << 10)) sp.n = (uint32_t)(len / (64u << 10));
+  if (len / sp.n < J_SPEC_CHUNK) sp.n = (uint32_t)(len / J_SPEC_CHUNK);
   if (sp.n < 3u) return false;
   part = len / sp.n;
   /* blocks kept where decoding them again would cost most: their data 4
@@ -3141,7 +3146,7 @@ jpg_scan_huff(jpg_t *j, im_pool_t *pool) {
 
   /* one segment, one pass, sequential: on threads, speculatively */
   if (pool && !j->restart && !j->multiscan && j->process == J_SEQUENTIAL && j->sd.nseg >= 1u
-      && j->sd.seg[0].end - j->sd.seg[0].start >= (256u << 10) && h * 2u > hfull) {
+      && j->sd.seg[0].end - j->sd.seg[0].start >= J_SPEC_BYTES && h * 2u > hfull) {
     bool done;
 
     /* the whole segment (a region's rows past it decoded too, their
