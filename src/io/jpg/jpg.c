@@ -477,21 +477,29 @@ index_kind(const jpg_t *j) {
          && j->nscomp <= 4u;
 }
 
+/* the places a row an index keeps: its start and every J_IXCOL MCUs */
+static uint32_t
+index_cols(uint32_t w) {
+  return (w + J_IXCOL - 1u) / J_IXCOL;
+}
+
 /* the index given is these bytes' and this scan's (`p` its data): their
-   length, the headers' hash, the scan's place and shape, each row's start
+   length, the headers' hash, the scan's place and shape, each place
    inside its data and after the one before */
 static bool
 index_fits(const jpg_t *j, const uint8_t *p) {
   const ImIndex *in = j->idx_in;
-  uint32_t       w, h, r;
+  uint32_t       w, h;
+  size_t         r, n;
 
   if (!in || !index_kind(j)) return false;
   scan_shape(j, &w, &h);
   if (in->len != (uint64_t)(j->end - j->data) || in->scan != (uint64_t)(p - j->data) || in->end > in->len
-      || in->end < in->scan || in->w != w || !in->rows || in->rows > h || in->nscomp != j->nscomp) {
+      || in->end < in->scan || in->w != w || !in->rows || in->rows > h || in->nscomp != j->nscomp
+      || in->cols != index_cols(w)) {
     return false;
   }
-  for (r = 0; r < in->rows; r++) {
+  for (r = 0, n = (size_t)in->rows * in->cols; r < n; r++) {
     uint64_t at = in->cp[r].at >> 3;
 
     if (at < in->scan || at >= in->end || (r && in->cp[r].at <= in->cp[r - 1u].at)) return false;
@@ -511,36 +519,42 @@ index_span(const jpg_t *j) {
   h = jpg_region_rows(j, w, h, &first);
   a = w && first / w < in->rows ? first / w : in->rows - 1u;
   b = h < in->rows ? h : in->rows;
-  return (b < in->rows ? in->cp[b].at >> 3 : in->end) - (in->cp[a].at >> 3) + (uint64_t)IM_POOL_MAX * (J_TAIL + 16u);
+  return (b < in->rows ? in->cp[(size_t)b * in->cols].at >> 3 : in->end) - (in->cp[(size_t)a * in->cols].at >> 3)
+         + (uint64_t)IM_POOL_MAX * (J_TAIL + 16u);
 }
 
-/* each row's start kept as the scan's decoding finds it (one whose data is
-   one segment) */
+/* each row's places kept as the scan's decoding finds them (one whose
+   data is one segment) */
 static bool
 index_start(jpg_t *j) {
-  uint32_t w, h, r;
+  uint32_t w, h;
+  size_t   r, n;
 
   if (!j->idx_out || !index_kind(j) || j->sd.nseg != 1u) return true;
   scan_shape(j, &w, &h);
-  if (!(j->rec = malloc((size_t)h * sizeof(*j->rec)))) return false;
-  for (r = 0; r < h; r++) j->rec[r].at = UINT64_MAX;
-  j->nrec = h;
+  n = (size_t)h * index_cols(w);
+  if (!(j->rec = malloc(n * sizeof(*j->rec)))) return false;
+  for (r = 0; r < n; r++) j->rec[r].at = UINT64_MAX;
+  j->nrec    = h;
+  j->reccols = index_cols(w);
   return true;
 }
 
-/* the index of the rows kept, from the first on: their starts as the
-   file's bytes (each unstuffed byte's place: a stuffed 0xFF's 0x00 and
-   fill bytes passed over as jpg_unstuff passes them) */
+/* the index of the rows kept whole, from the first on: their places as
+   the file's bytes (each unstuffed byte's place: a stuffed 0xFF's 0x00
+   and fill bytes passed over as jpg_unstuff passes them) */
 static ImIndex*
 index_make(const jpg_t *j) {
   const uint8_t *f = j->scan_at, *end = j->sd.next;
   ImIndex       *ix;
   uint64_t       u = 0u;
-  uint32_t       k = 0u, r, w, h;
+  size_t         k = 0u, r, all = (size_t)j->nrec * j->reccols;
+  uint32_t       w, h;
 
-  while (k < j->nrec && j->rec[k].at != UINT64_MAX) k++;
+  while (k < all && j->rec[k].at != UINT64_MAX) k++;
+  k -= k % j->reccols;
   if (!k || !(ix = calloc(1, sizeof(*ix)))) return NULL;
-  if (!(ix->cp = malloc((size_t)k * sizeof(*ix->cp)))) {
+  if (!(ix->cp = malloc(k * sizeof(*ix->cp)))) {
     free(ix);
     return NULL;
   }
@@ -570,14 +584,15 @@ index_make(const jpg_t *j) {
   ix->end    = (uint64_t)(j->sd.next - j->data);
   ix->hash   = fnv64(j->data, (size_t)ix->scan);
   ix->w      = w;
-  ix->rows   = k;
+  ix->rows   = (uint32_t)(k / j->reccols);
+  ix->cols   = j->reccols;
   ix->nscomp = j->nscomp;
   return ix;
 }
 
 IM_HIDE size_t
 jpg_index_size(const ImIndex *ix) {
-  return ix ? sizeof(*ix) + (size_t)ix->rows * sizeof(*ix->cp)
+  return ix ? sizeof(*ix) + (size_t)ix->rows * ix->cols * sizeof(*ix->cp)
               + (ix->offsets ? ((size_t)ix->intervals + 1u) * sizeof(*ix->offsets) : 0u) : 0u;
 }
 

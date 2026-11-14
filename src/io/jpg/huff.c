@@ -1394,7 +1394,7 @@ seq_range(jctx_t *x, const jsblk_t *list, uint32_t nb, uint32_t w, uint32_t b0, 
   uint32_t vdiv = j->nscomp == 1u ? j->comp[j->scomp[0]].v : 1u, row = my / vdiv;
   size_t   es = j->diff ? 4u : j->prec <= 8u ? 1u : 2u;
   bool     diff = j->diff;
-  jcp_t   *rec = j->rec; /* an index made: each row's start kept */
+  jcp_t   *rec = j->rec; /* an index made: each row's places kept */
   jcomp_t *held = NULL;  /* the block held back: its component, where it goes */
   uint8_t *held_at = NULL;
 
@@ -1408,11 +1408,12 @@ seq_range(jctx_t *x, const jsblk_t *list, uint32_t nb, uint32_t w, uint32_t b0, 
     if (!x->lacking) {
       if (!slot) {
         x->last_good = row;
-        if (rec && !mx && my < j->nrec) {
+        if (rec && !(mx & (J_IXCOL - 1u)) && my < j->nrec) {
+          jcp_t   *e = &rec[(size_t)my * j->reccols + mx / J_IXCOL];
           uint32_t i;
 
-          rec[my].at = ((uint64_t)(bs.p - x->r.org) + x->r.pre) * 8u - bs.n;
-          for (i = 0; i < j->nscomp; i++) rec[my].dc[i] = x->dc[j->scomp[i]];
+          e->at = ((uint64_t)(bs.p - x->r.org) + x->r.pre) * 8u - bs.n;
+          for (i = 0; i < j->nscomp; i++) e->dc[i] = x->dc[j->scomp[i]];
         }
       }
       if (!x->r.tail && bs.p >= x->r.lim) {
@@ -2871,32 +2872,29 @@ jpg_scan_lossless(jpg_t *j, im_pool_t *pool) {
 /* the rows wanted in parts, each from its row's start as the index has it:
    its bytes, to the next part's row and a little past (its last MCU's bits
    end there; the scan's end for the last), unstuffed on its own, its DCs
-   and bit set, its rows decoded (a region's blocks alone transformed) */
+   and bit set, its rows decoded (a region's blocks alone transformed). A
+   region much narrower than the image: each row a part of its own, from
+   the place before the region's first column to its last */
 typedef struct jix {
   jpg_t    *j;
   jctx_t   *ctx;              /* a worker's */
   jdata_t  *data;             /* a worker's bytes */
   uint32_t  w, items;
   uint32_t  row[IM_POOL_MAX * 4u + 1u];
+  uint32_t  first, k0, k1, c1; /* by rows: the first; the places from and
+                                  past; the MCU column past the region */
   uint32_t  last_good;        /* the last part's */
 } jix_t;
 
+/* a worker's reader on the bytes from `cp`'s to `to`, unstuffed, at its
+   bit with its DCs */
 static bool
-ix_item(void *arg, uint32_t worker, uint32_t item) {
-  jix_t         *ix = arg;
-  jpg_t         *j  = ix->j;
-  const ImIndex *in = j->idx_in;
-  jctx_t        *x  = &ix->ctx[worker];
-  jdata_t       *d  = &ix->data[worker];
-  jrd_t         *r  = &x->r;
-  uint32_t       r0 = ix->row[item], r1 = ix->row[item + 1u], i, nb;
-  const jcp_t   *cp = &in->cp[r0];
-  const uint8_t *from = j->data + (cp->at >> 3), *to = j->data + in->end;
-  jsblk_t        list[J_MCU_BLOCKS];
+ix_reader(jix_t *ix, jctx_t *x, jdata_t *d, const jcp_t *cp, const uint8_t *to) {
+  jpg_t   *j = ix->j;
+  jrd_t   *r = &x->r;
+  uint32_t i;
 
-  if (r1 < in->rows && (in->cp[r1].at >> 3) + 16u < in->end) to = j->data + (in->cp[r1].at >> 3) + 16u;
-  if (!jpg_unstuff(d, from, to)) return false;
-  nb = seq_list(x, list);
+  if (!jpg_unstuff(d, j->data + (cp->at >> 3), to)) return false;
   for (i = 0; i < J_COMPS; i++) x->dc[i] = 0;
   for (i = 0; i < j->nscomp; i++) x->dc[j->scomp[i]] = cp->dc[i];
   x->eobrun  = 0u;
@@ -2912,9 +2910,66 @@ ix_item(void *arg, uint32_t worker, uint32_t item) {
   if (r->b.p >= r->lim) rd_tail(x);
   refill(&r->b);
   DROP(&r->b, (uint32_t)(cp->at & 7u));
+  return true;
+}
+
+static bool
+ix_item(void *arg, uint32_t worker, uint32_t item) {
+  jix_t         *ix = arg;
+  jpg_t         *j  = ix->j;
+  const ImIndex *in = j->idx_in;
+  jctx_t        *x  = &ix->ctx[worker];
+  uint32_t       r0 = ix->row[item], r1 = ix->row[item + 1u], nb;
+  const jcp_t   *cp = &in->cp[(size_t)r0 * in->cols], *next = r1 < in->rows ? &in->cp[(size_t)r1 * in->cols] : NULL;
+  const uint8_t *to = j->data + in->end;
+  jsblk_t        list[J_MCU_BLOCKS];
+
+  if (next && (next->at >> 3) + 16u < in->end) to = j->data + (next->at >> 3) + 16u;
+  if (!ix_reader(ix, x, &ix->data[worker], cp, to)) return false;
+  nb = seq_list(x, list);
   seq_range(x, list, nb, ix->w, r0 * ix->w * nb, r1 * ix->w * nb);
   if (item + 1u == ix->items) ix->last_good = x->last_good;
   return true;
+}
+
+/* a narrow region's row: from the place before its first column to its
+   last, the bytes to the place past it and a little more */
+static bool
+ix_row(void *arg, uint32_t worker, uint32_t item) {
+  jix_t         *ix = arg;
+  jpg_t         *j  = ix->j;
+  const ImIndex *in = j->idx_in;
+  jctx_t        *x  = &ix->ctx[worker];
+  uint32_t       row = ix->first + item, nb;
+  const jcp_t   *cp = &in->cp[(size_t)row * in->cols + ix->k0], *next = NULL;
+  const uint8_t *to = j->data + in->end;
+  jsblk_t        list[J_MCU_BLOCKS];
+
+  if (ix->k1 < in->cols) next = &in->cp[(size_t)row * in->cols + ix->k1];
+  else if (row + 1u < in->rows) next = &in->cp[(size_t)(row + 1u) * in->cols];
+  if (next && (next->at >> 3) + 16u < in->end) to = j->data + (next->at >> 3) + 16u;
+  if (!ix_reader(ix, x, &ix->data[worker], cp, to)) return false;
+  nb = seq_list(x, list);
+  seq_range(x, list, nb, ix->w, (row * ix->w + ix->k0 * J_IXCOL) * nb, (row * ix->w + ix->c1) * nb);
+  if (item + 1u == ix->items) ix->last_good = x->last_good;
+  return true;
+}
+
+/* the MCU columns a region's blocks lie in, [c0, c1) */
+static void
+region_cols(const jpg_t *j, uint32_t w, uint32_t *c0, uint32_t *c1) {
+  uint32_t i, a = w, b = 0u;
+
+  for (i = 0; i < j->nscomp; i++) {
+    const jcomp_t *c  = &j->comp[j->scomp[i]];
+    uint32_t       nh = j->nscomp == 1u ? 1u : c->h;
+
+    if (c->rbx1 <= c->rbx0) continue;
+    if (c->rbx0 / nh < a) a = c->rbx0 / nh;
+    if ((c->rbx1 + nh - 1u) / nh > b) b = (c->rbx1 + nh - 1u) / nh;
+  }
+  *c0 = a;
+  *c1 = b < w ? b : w;
 }
 
 IM_HIDE bool
@@ -2925,6 +2980,7 @@ jpg_scan_index(jpg_t *j, im_pool_t *pool, uint32_t w, uint32_t h, uint32_t r0, s
   jdata_t        data[IM_POOL_MAX];
   uint32_t       nw = im_pool_size(pool), a, top, k, i;
   bool           ok = true;
+  im_job_fn      fn = ix_item;
 
   /* from the region's first row, or the index's last before it */
   a = r0 < in->rows ? r0 : in->rows - 1u;
@@ -2937,6 +2993,22 @@ jpg_scan_index(jpg_t *j, im_pool_t *pool, uint32_t w, uint32_t h, uint32_t r0, s
   if (ix.items > top - a) ix.items = top - a;
   for (k = 0; k < ix.items; k++) ix.row[k] = a + (uint32_t)((uint64_t)(top - a) * k / ix.items);
   ix.row[ix.items] = h;
+
+  /* a region a quarter of the rows' width or less, every row of it in the
+     index: each row from the place before it */
+  if (j->region && a == r0 && h <= in->rows) {
+    uint32_t c0, c1;
+
+    region_cols(j, w, &c0, &c1);
+    if (c0 < c1 && (c1 - c0 / J_IXCOL * J_IXCOL) * 4u <= w) {
+      ix.first = a;
+      ix.k0    = c0 / J_IXCOL;
+      ix.k1    = (c1 + J_IXCOL - 1u) / J_IXCOL;
+      ix.c1    = c1;
+      ix.items = h - a;
+      fn       = ix_row;
+    }
+  }
   memset(data, 0, sizeof(data));
   for (i = 0; i < nw; i++) {
     if (!ctx_init(&ctx[i], j, margin)) {
@@ -2946,7 +3018,7 @@ jpg_scan_index(jpg_t *j, im_pool_t *pool, uint32_t w, uint32_t h, uint32_t r0, s
   }
   ix.ctx  = ctx;
   ix.data = data;
-  ok      = im_pool_run(pool, ix_item, &ix, ix.items);
+  ok      = im_pool_run(pool, fn, &ix, ix.items);
   j->last_good = ix.last_good;
   for (i = 0; i < nw; i++) {
     free(ctx[i].tail);

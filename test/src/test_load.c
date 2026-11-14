@@ -1424,10 +1424,13 @@ TEST_IMPL(jpg_index) {
       W = (a->width + sc - 1u) / sc;
       H = (a->height + sc - 1u) / sc;
       {
-        const uint32_t reg[6][4] = { { 0, 0, 0, 0 }, { 0, H - 1u, W, 1 }, { W / 2u, H / 2u, W, H }, { W - 1u, 0, 1, H },
-                                     { 1u < W ? 1u : 0u, H / 3u, W / 3u + 1u, 2 }, { W / 4u, H > 2u ? H - 2u : 0u, 3, 7 } };
+        /* the last two narrow (threads.jpg's: each row from its index's
+           places, the second from the one at MCU 32) */
+        const uint32_t reg[8][4] = { { 0, 0, 0, 0 }, { 0, H - 1u, W, 1 }, { W / 2u, H / 2u, W, H }, { W - 1u, 0, 1, H },
+                                     { 1u < W ? 1u : 0u, H / 3u, W / 3u + 1u, 2 }, { W / 4u, H > 2u ? H - 2u : 0u, 3, 7 },
+                                     { 2u < W ? 2u : 0u, 1u < H ? 1u : 0u, W / 8u + 1u, H }, { W * 2u / 3u, H / 5u, 3, H / 2u + 1u } };
 
-        for (k = 0; k < 6u; k++) {
+        for (k = 0; k < 8u; k++) {
           for (th = 0; th < 2u; th++) {
             ImImage *x = ix_dec(d, len, th ? 0u : 1u, sc, reg[k][0], reg[k][1], reg[k][2], reg[k][3], NULL);
 
@@ -1455,6 +1458,11 @@ TEST_IMPL(jpg_index) {
       ImImage *x = ix_dec(d, len, 1u, 1u, 0, a->height - 1u, a->width, 1, NULL);
 
       ASSERT(x && same(x, b = ix_dec(d, len, 0u, 1u, 0, a->height - 1u, a->width, 1, &part)));
+      im_free(x);
+      im_free(b);
+      /* a narrow region within its rows */
+      x = ix_dec(d, len, 1u, 1u, a->width * 2u / 3u, 0, 3, a->height / 4u + 1u, NULL);
+      ASSERT(x && same(x, b = ix_dec(d, len, 0u, 1u, a->width * 2u / 3u, 0, 3, a->height / 4u + 1u, &part)));
       im_free(x);
       im_free(b);
     }

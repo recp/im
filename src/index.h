@@ -37,10 +37,11 @@ struct ImIndex {
   uint32_t kind;          /* IM_INDEX_JPEG, IM_INDEX_JP2 */
 
   /* a JPEG's: rows 0 … rows - 1 of the one-pass sequential Huffman scan of
-     the bytes it's for: `len` of them, `scan` the offset of the scan's
-     data (the headers before it hashed: FNV-1a 64), `end` its marker's */
+     the bytes it's for, `cols` places a row (its start and every J_IXCOL
+     MCUs along it): `len` bytes, `scan` the offset of the scan's data (the
+     headers before it hashed: FNV-1a 64), `end` its marker's */
   uint64_t     len, hash, scan, end;
-  uint32_t     w, rows, nscomp;
+  uint32_t     w, rows, cols, nscomp;
   struct jcp  *cp;
 
   uint64_t    *offsets;

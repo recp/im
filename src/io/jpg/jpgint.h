@@ -171,9 +171,13 @@ typedef struct jcomp {
   int8_t    prev[10];         /* bits[1–9] before the last scan of it */
 } jcomp_t;
 
-/* an MCU row's start, as an index keeps it: where its bits start (the
-   byte's offset in the data << 3 | the bits of it already taken), the DC
-   predictions of the scan's components */
+/* an index's place in a scan: each MCU row's start and every J_IXCOL
+   MCUs along it (a region's rows read from the one before its first
+   column), where its bits start (the byte's offset in the data << 3 | the
+   bits of it already taken) and the DC predictions of the scan's
+   components there */
+#define J_IXCOL 32u
+
 typedef struct jcp {
   uint64_t at;
   int32_t  dc[4];
@@ -263,13 +267,14 @@ typedef struct jpg {
 
   /* an index (IM_OPTION_INDEX): the one the scan starts from (its rows,
      not the data before them, read: via_index), or the one made: each
-     row's start as decoded (`at` in the unstuffed scan's bits; UINT64_MAX
-     none yet); `skim`: the scan read for it alone, nothing out */
+     row's places as decoded (`reccols` a row, `at` in the unstuffed
+     scan's bits; UINT64_MAX none yet); `skim`: the scan read for it
+     alone, nothing out */
   const ImIndex *idx_in;
   ImIndex      **idx_out;
   ImIndex       *made;
   jcp_t         *rec;
-  uint32_t       nrec;
+  uint32_t       nrec, reccols;
   const uint8_t *scan_at;       /* the first scan's data in `data` */
   bool           via_index, skim;
 

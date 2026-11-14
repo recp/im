@@ -305,9 +305,11 @@ im_load_mem(ImImage         ** __restrict dest,
             ImOpenIntent                  openIntent);
 
 /* A JPEG's entropy-coded data indexed: the state at each MCU row's start
-   (where its bits start, the DC predictions), some 24 bytes a row, so a
-   decode of the same bytes (IM_OPTION_INDEX) starts at the row a region
-   needs, not the first, and on threads each worker at its own rows. For
+   and every 32 MCUs along it (where its bits start, the DC predictions),
+   some 24 bytes each (20000 × 20000 at 4:2:0: 1.2 MB), so a decode of the
+   same bytes (IM_OPTION_INDEX) starts at the row a region needs, not the
+   first, a narrow region's rows each near its first column, and on
+   threads each worker at its own rows. For
    a one-pass sequential Huffman scan (baseline and extended JPEG) without
    restart markers. Ordinary sequential restart streams instead keep validated
    interval offsets (at most 64 MiB), without copying the scan; uncertain
