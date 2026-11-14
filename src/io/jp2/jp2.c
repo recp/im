@@ -4391,13 +4391,14 @@ tile_whole(jpx_t *j, xtile_t *t) {
    over the levels below, as cblk_wanted's) and cut to the level, each
    level below the one above's halved as the levels themselves are (its
    lows'); each window made from the one below and its bands' samples
-   there (the code-blocks under them decoded, their part inside copied
-   in). A window's cut edge is mirrored as the level's is: its samples
-   wrong within a few of it, the errors doubling a level, none of them
-   reaching the region. The windows kept in the tile's own shape, in a
-   stand-in tile-component whose levels are they, so the rows, columns
-   and placing are tile_whole's: a window into its plane, the region
-   there as the whole tile's */
+   there (the code-blocks under them that can reach the region decoded,
+   their part inside copied in; the rest zeros). A window's cut edge is
+   mirrored as the level's is: its samples wrong within a few of it, the
+   errors doubling a level, none of them reaching the region. The
+   windows kept in the tile's own shape, in a stand-in tile-component
+   whose levels are they, so the rows, columns and placing are
+   tile_whole's: a window into its plane, the region there as the whole
+   tile's */
 
 /* the window of component c at the tile's top level decoded: [*x0, *x1) ×
    [*y0, *y1) on its grid; false: the region not on this tile-component */
@@ -4480,6 +4481,7 @@ typedef struct xwjob {
   size_t         stride;
   int64_t        bx0, by0, bx1, by1;
   uint32_t       offx, offy;
+  bool           zero;   /* past the region's reach (cblk_wanted): zeros */
 } xwjob_t;
 
 static bool
@@ -4491,7 +4493,7 @@ win_job(jpx_t *j, xscratch_t *s, void *ctx, uint32_t item) {
   int64_t        y0 = b->y0 > jb->by0 ? b->y0 : jb->by0, y1 = b->y1 < jb->by1 ? b->y1 : jb->by1, y;
   uint32_t      *tmp;
 
-  if (!b->nsegs) { /* nothing coded: zeros (the window's not cleared) */
+  if (!b->nsegs || jb->zero) { /* nothing coded, or out of reach: zeros (the window's not cleared) */
     for (y = y0; y < y1; y++) {
       memset(jb->win + (size_t)(jb->offy + (uint64_t)(y - jb->by0)) * jb->stride + jb->offx + (size_t)(x0 - jb->bx0), 0, (size_t)(x1 - x0) * 4u);
     }
@@ -4606,8 +4608,12 @@ tile_window(jpx_t *j, xtile_t *t) {
             uint32_t at = (uint32_t)(v0 + m / (uint32_t)(u1 - u0)) * pb->cw + (uint32_t)(u0 + m % (uint32_t)(u1 - u0));
             xcblk_t *kb = &pb->blk[at];
             xwjob_t *jb;
+            /* under the window but past the filters' reach of the region
+               (the window's margin is the top level's, halved down: much
+               more than a fine level needs): left at zero */
+            bool     want = cblk_wanted(j, tc, c, r, kb);
 
-            if (t->ixt && !ix_block(t, pb->ix + at, kb)) goto done;
+            if (want && t->ixt && !ix_block(t, pb->ix + at, kb)) goto done;
             if (n == cap) {
               uint32_t g = cap ? cap * 2u : 256u;
               xwjob_t *q = realloc(jobs, (size_t)g * sizeof(*q));
@@ -4628,6 +4634,7 @@ tile_window(jpx_t *j, xtile_t *t) {
             jb->by1    = by1;
             jb->offx   = hx ? sw : 0u;
             jb->offy   = hy ? sh : 0u;
+            jb->zero   = !want;
           }
         }
       }
